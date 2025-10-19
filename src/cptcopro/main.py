@@ -34,6 +34,15 @@ logger = logger.bind(type_log="MAIN")
 DEFAULT_DB_PATH = Path(__file__).with_name("coproprietaires.sqlite")
 DB_PATH = os.getenv("CTPCOPRO_DB_PATH", str(DEFAULT_DB_PATH))
 
+"""
+## Charger le contenu du fichier HTML
+with open(
+    "src\\cptcopro\\Solde_copro3.htm",
+    "r",
+    encoding="utf-8",
+ ) as file:
+    html_content = file.read()
+"""
 
 def main() -> None:
     """

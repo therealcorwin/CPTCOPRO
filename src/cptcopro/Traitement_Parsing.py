@@ -12,14 +12,6 @@ logger = logger.bind(type_log="TRAITEMENT")
 logger.warning("Début du script de suivi des copropriétaires")
 logger.info("Chargement du fichier HTML")
 
-## Charger le contenu du fichier HTML
-# with open(
-#    "ctpcopro\\Extranet du cabinet CSJC _ Accès Copropriétaire.htm",
-#    "r",
-#    encoding="utf-8",
-# ) as file:
-#    html_content = file.read()
-
 
 def normalize_amount(s: str) -> float:
     """Normalise une chaîne représentant un montant en float.
