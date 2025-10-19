@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Bad Sample</title></head>
+<body>
+  <!-- Missing the lzA1 date cell -->
+  <table id="ctzA1">
+    <tr><td>Col1</td><td>Col2</td><td>Col3</td><td>Col4</td></tr>
+    <tr><td></td><td></td><td></td><td></td></tr>
+    <tr>
+      <!-- Row with missing debit/credit values -->
+      <td>CODEX</td>
+      <td>Personne Exemple</td>
+      <td></td>
+      <td></td>
+    </tr>
+    <tr>
+      <!-- Malformed numbers -->
+      <td>CODEY</td>
+      <td>Autre Test</td>
+      <td>1 234,56</td>
+      <td>‑200,00</td>
+    </tr>
+  </table>
+</body>
+</html>

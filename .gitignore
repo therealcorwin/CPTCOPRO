@@ -209,15 +209,19 @@ __marimo__/
 # LSP config files
 pyrightconfig.json
 
-src/cptcopro/Extranet*
+
 *.sqlite
-src/cptcopro/coproprietaires.sqlite
-cptcopro/Solde_*
+
 backup.txt
-src/backup/*
+
 
 # Local VSCode settings
 .vscode/
 
 # Local logs
 ctpcopro.log
+src/cptcopro/Solde_*
+src/cptcopro/Extranet*
+src/cptcopro/*.sqlite
+src/backup/*
+*.csv
