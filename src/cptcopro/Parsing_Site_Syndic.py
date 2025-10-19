@@ -3,6 +3,7 @@ import os
 from playwright.async_api import async_playwright
 from loguru import logger
 
+
 load_dotenv()
 
 login_site_copro = os.getenv("login_site_copro")
@@ -15,11 +16,17 @@ logger = logger.bind(type_log="PARSING")
 logger.info("Debut de la récupération du HTML via Playwright")
 
 
-async def recup_html_suivicopro() -> str:
+async def recup_html_suivicopro(headless: bool = True) -> str:
+    """
+    Récupère le HTML via Playwright.
+
+    Paramètres:
+    - headless (bool): Si False lance le navigateur en mode visible (utile pour debug).
+    """
     async with async_playwright() as p:
         try:
-            browser = await p.chromium.launch(headless=True)
-            logger.info("Navigateur lancé")
+            browser = await p.chromium.launch(headless=headless)
+            logger.info(f"Navigateur lancé (headless={headless})")
         except Exception as e:
             logger.error(f"Erreur lors du lancement du navigateur : {e}")
             return "KO_OPEN_BROWSER"
