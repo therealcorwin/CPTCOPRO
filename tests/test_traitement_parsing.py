@@ -6,7 +6,7 @@ from cptcopro import Traitement_Parsing as tp
 
 
 def load_fixture(name: str) -> str:
-    base = os.path.join(os.path.dirname(__file__), "..", "src", "cptcopro")
+    base = os.path.join(os.path.dirname(__file__), "fixtures")
     path = os.path.normpath(os.path.join(base, name))
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
@@ -27,7 +27,7 @@ def test_normalize_amount_various():
 
 
 def test_recuperer_date_situation_copro_from_fixture():
-    html = load_fixture("Solde_copro2.htm")
+    html = load_fixture("Solde_copro2_fixture.html")
     parser = HTMLParser(html)
     date_str, last_check = tp.recuperer_date_situation_copro(parser)
     # date_str should be ISO format YYYY-MM-DD (the parser converts from DD/MM/YYYY)
