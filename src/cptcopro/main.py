@@ -2,7 +2,6 @@ import asyncio
 import sys
 from selectolax.parser import HTMLParser
 from pathlib import Path
-import os
 import cptcopro.Parsing_Site_Syndic as pss
 import cptcopro.Traitement_Parsing as tp
 import cptcopro.Data_To_BDD as dtb
@@ -30,9 +29,7 @@ logger.add(
 
 logger = logger.bind(type_log="MAIN")
 
-# Default DB path (next to this module). Can be overridden by env var CTPCOPRO_DB_PATH
-DEFAULT_DB_PATH = Path(__file__).with_name("coproprietaires.sqlite")
-DB_PATH = os.getenv("CTPCOPRO_DB_PATH", str(DEFAULT_DB_PATH))
+DB_PATH = str(Path(__file__).with_name("coproprietaires.sqlite"))
 
 """
 ## Charger le contenu du fichier HTML
