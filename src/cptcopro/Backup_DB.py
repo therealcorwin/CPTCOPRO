@@ -17,7 +17,6 @@ def backup_db(db_path: str = "ctpcopro/coproprietaires.sqlite") -> None:
     Args:
         db_path (str): Chemin vers la base de données à sauvegarder.
     """
-
     now: datetime = datetime.now()
     backup_dir: str = os.path.join(os.getcwd(), "Backup")
     backup_filename: str = f"backup_bdd-{now.strftime('%d-%m-%y')}.sqlite"

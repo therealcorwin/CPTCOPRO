@@ -1,8 +1,8 @@
 import asyncio
 import sys
+import os
 from selectolax.parser import HTMLParser
-from pathlib import Path
-import cptcopro.Parsing_Site_Syndic as pss
+import cptcopro.Parsing_Charge_Copro as pss
 import cptcopro.Traitement_Parsing as tp
 import cptcopro.Data_To_BDD as dtb
 import cptcopro.Backup_DB as bdb
@@ -29,8 +29,7 @@ logger.add(
 
 logger = logger.bind(type_log="MAIN")
 
-DB_PATH = str(Path(__file__).with_name("coproprietaires.sqlite"))
-
+DB_PATH = str(os.path.join(os.getcwd(), "BDD", "copropriete.sqlite"))
 """
 ## Charger le contenu du fichier HTML
 with open(
@@ -40,6 +39,8 @@ with open(
  ) as file:
     html_content = file.read()
 """
+dtb.integrite_db(DB_PATH)
+
 
 def main() -> None:
     """
@@ -79,6 +80,7 @@ def main() -> None:
 
     try:
         # Ensure path type compatibility: modules expect a string path
+        dtb.verif_repertoire_db(DB_PATH)
         dtb.verif_presence_db(DB_PATH)
         bdb.backup_db(DB_PATH)
         dtb.enregistrer_donnees_sqlite(data, DB_PATH)

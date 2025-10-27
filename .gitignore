@@ -225,3 +225,4 @@ src/cptcopro/Extranet*
 src/cptcopro/*.sqlite
 src/backup/*
 *.csv
+src/cptcopro/Lots*

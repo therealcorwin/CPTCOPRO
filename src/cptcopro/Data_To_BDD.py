@@ -1,11 +1,31 @@
 import os
 import sqlite3
 from loguru import logger
-from typing import Any
+from typing import Any, Dict
 
 logger.remove()
 logger = logger.bind(type_log="BDD")
 
+def verif_repertoire_db(db_path: str) -> None:
+    """
+    Vérifie que le répertoire de la base de données SQLite existe.
+    Si ce n'est pas le cas, le crée et logue chaque étape.
+
+    Args:
+        db_path (str): Chemin vers la base de données SQLite.
+    """
+    dir_path = os.path.dirname(db_path)
+    if not os.path.exists(dir_path):
+        logger.warning(f"Le répertoire '{dir_path}' n'existe pas.")
+        logger.info(f"Création du répertoire '{dir_path}' pour la base de données...")
+        try:
+            os.makedirs(dir_path)
+            logger.success(f"Répertoire '{dir_path}' créé avec succès.")
+        except Exception as e:
+            logger.error(f"Erreur lors de la création du répertoire '{dir_path}' : {e}")
+            raise
+    else:
+        logger.info(f"Le répertoire '{dir_path}' existe déjà.")
 
 def verif_presence_db(db_path: str) -> None:
     """
@@ -24,10 +44,10 @@ def verif_presence_db(db_path: str) -> None:
             cur = conn.cursor()
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS coproprietaires (
+                CREATE TABLE IF NOT EXISTS Charges (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code TEXT,
-                    coproprietaire TEXT,
+                    proprietaire TEXT,
                     debit REAL,
                     credit REAL,
                     date DATE,
@@ -35,19 +55,19 @@ def verif_presence_db(db_path: str) -> None:
                 )
                 """
             )
-            logger.info("Table 'coproprietaires' vérifiée/créée.")
+            logger.info("Table 'Charges' vérifiée/créée.")
 
             # Création de la table 'alertes_debit_eleve'
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS alertes_debit_eleve (
                     alerte_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    copro_id INTEGER NOT NULL,
-                    copro_code TEXT,
-                    copro_nom TEXT,
-                    debit_detecte REAL NOT NULL,
+                    id_origin INTEGER NOT NULL,
+                    code_proprietaire TEXT,
+                    nom_proprietaire TEXT,
+                    debit REAL NOT NULL,
                     date_detection DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(copro_id) REFERENCES coproprietaires(id) ON DELETE CASCADE
+                    FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
                 );
                 """
             )
@@ -57,12 +77,12 @@ def verif_presence_db(db_path: str) -> None:
             cur.execute(
                 """
                 CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve
-                AFTER INSERT ON coproprietaires
+                AFTER INSERT ON charge
                 FOR EACH ROW
                 WHEN NEW.debit > 2000.0
                 BEGIN
-                    INSERT INTO alertes_debit_eleve (copro_id, copro_code, copro_nom, debit_detecte)
-                    VALUES (NEW.id, NEW.code, NEW.coproprietaire, NEW.debit);
+                    INSERT INTO alertes_debit_eleve (id_origin, code_proprietaire, nom_proprietaire, debit)
+                    VALUES (NEW.id, NEW.code, NEW.proprietaire, NEW.debit);
                 END;
                 """
             )
@@ -77,17 +97,123 @@ def verif_presence_db(db_path: str) -> None:
     else:
         logger.info(f"La base de données '{db_path}' existe déjà.")
 
+
+def integrite_db(db_path: str) -> Dict[str, Any]:
+    """
+    Vérifie l'existence des composants de la base et crée ceux qui manquent :
+    - table `charge`
+    - table `alertes_debit_eleve`
+    - trigger `alerte_debit_eleve`
+
+    Retourne un dict récapitulatif contenant l'état après vérification et la liste
+    des éléments créés.
+    """
+    verif_repertoire_db(db_path)
+    created = []
+    # Ensure the DB file exists by opening a connection
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    try:
+        # charge
+        logger.info("Vérification de la présense de la table 'charge'.")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='charge';")
+        if cur.fetchone():
+            has_copro = True
+            logger.info("Table 'charge' existe.")
+        else:
+            logger.error("Table 'charge' manquante, création en cours.")
+            has_copro = False
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS charge (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT,
+                    proprietaire TEXT,
+                    debit REAL,
+                    credit REAL,
+                    date DATE,
+                    last_check DATE
+                )
+                """
+            )
+            created.append('charge')
+            logger.info("Table 'charge' créée.")
+
+        # alertes_debit_eleve
+        logger.info("Vérification de la présense de la table 'alertes_debit_eleve'.")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='alertes_debit_eleve';")
+        if cur.fetchone():
+            has_alertes = True
+            logger.info("Table 'alertes_debit_eleve' existe.")
+        else:
+            logger.error("Table 'alertes_debit_eleve' manquante, création en cours.")
+            has_alertes = False
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS alertes_debit_eleve (
+                    alerte_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id_origin INTEGER NOT NULL,
+                    code_proprietaire TEXT,
+                    nom_proprietaire TEXT,
+                    debit REAL NOT NULL,
+                    date_detection DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
+                );
+                """
+            )
+            created.append('alertes_debit_eleve')
+            logger.info("Table 'alertes_debit_eleve' créée.")
+
+        # trigger alerte_debit_eleve
+        logger.info("Vérification de la présense du trigger 'alerte_debit_eleve'.")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name='alerte_debit_eleve';")
+        if cur.fetchone():
+            has_trigger = True
+            logger.info("Trigger 'alerte_debit_eleve' existe.")
+        else:
+            logger.error("Trigger 'alerte_debit_eleve' manquant, création en cours.")
+            has_trigger = False
+            cur.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve
+                AFTER INSERT ON charge
+                FOR EACH ROW
+                WHEN NEW.debit > 2000.0
+                BEGIN
+                    INSERT INTO alertes_debit_eleve (id_origin, code_proprietaire, nom_proprietaire, debit)
+                    VALUES (NEW.id, NEW.code, NEW.proprietaire, NEW.debit);
+                END;
+                """
+            )
+            created.append('alerte_debit_eleve')
+            logger.info("Trigger 'alerte_debit_eleve' créé.")
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erreur lors de la vérification/création des composants DB : {e}")
+        raise
+    finally:
+        conn.close()
+
+    return {
+        'charge': has_copro,
+        'alertes_debit_eleve': has_alertes,
+        'alerte_debit_eleve': has_trigger,
+        'created': created,
+    }
+
 def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     """
     Enregistre les données extraites dans une base de données SQLite.
 
     La fonction se connecte à la base de données SQLite spécifiée par `db_path`,
-    crée une table "coproprietaires" si elle n'existe pas, et insère les données
+    crée une table "charge" si elle n'existe pas, et insère les données
     fournies dans la table.
 
     Parameters:
     - data (list[Any]): Une liste de tuples contenant les données à enregistrer.
-      Chaque tuple doit avoir le format suivant : (code, coproprietaire, debit, credit, date).
+      Chaque tuple doit avoir le format suivant : (code, proprietaire, debit, credit, date).
     - db_path (str): Le chemin vers la base de données SQLite.
 
     Returns:
@@ -103,7 +229,7 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     try:
         # Insertion des données
         cur.executemany(
-            "INSERT INTO coproprietaires (code, coproprietaire, debit, credit, date, last_check) VALUES (?, ?, ?, ?, ?,?)",
+            "INSERT INTO charge (code, proprietaire, debit, credit, date, last_check) VALUES (?, ?, ?, ?, ?,?)",
             data[3:],
         )
         conn.commit()
