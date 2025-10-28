@@ -5,13 +5,16 @@ from loguru import logger
 
 
 load_dotenv()
+logger.remove()
+logger = logger.bind(type_log="PARSING")
 
 login_site_copro = os.getenv("login_site_copro")
 password_site_copro = os.getenv("password_site_copro")
 url_site_copro = os.getenv("url_site_copro")
 
-logger.remove()
-logger = logger.bind(type_log="PARSING")
+if not all([login_site_copro, password_site_copro, url_site_copro]):
+    raise ValueError("Missing required environment variables: login_site_copro, password_site_copro, url_site_copro")
+
 
 logger.info("Debut de la récupération du HTML via Playwright")
 
@@ -39,7 +42,7 @@ async def recup_html_suivicopro(headless: bool = True) -> str:
             await browser.close()
             return "KO_NEW_PAGE"
         try:
-            await page.goto(url_site_copro)
+            await page.goto(url_site_copro, timeout=30000)
             logger.info(f"Accès à l'URL : {url_site_copro}")
         except Exception as e:
             logger.error(f"Erreur lors de l'accès à l'URL : {e}")
@@ -62,9 +65,10 @@ async def recup_html_suivicopro(headless: bool = True) -> str:
             logger.info("Bouton Se connecter cliqué")
         except Exception as e:
             logger.error(f"Erreur lors du clic sur le bouton Se connecter : {e}")
+            await browser.close()
             return "KO_CLICK_LOGIN"
         try:
-            await page.wait_for_load_state("networkidle")
+            await page.wait_for_load_state("networkidle", timeout=30000)
             logger.info("Attente de la fin du chargement après connexion")
         except Exception as e:
             logger.error(f"Erreur lors de l'attente du chargement : {e}")

@@ -44,7 +44,7 @@ def verif_presence_db(db_path: str) -> None:
             cur = conn.cursor()
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS Charges (
+                CREATE TABLE IF NOT EXISTS charge (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     code TEXT,
                     proprietaire TEXT,
@@ -55,7 +55,7 @@ def verif_presence_db(db_path: str) -> None:
                 )
                 """
             )
-            logger.info("Table 'Charges' vérifiée/créée.")
+            logger.info("Table 'charge' vérifiée/créée.")
 
             # Création de la table 'alertes_debit_eleve'
             cur.execute(
@@ -115,14 +115,14 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
     cur = conn.cursor()
     try:
         # charge
-        logger.info("Vérification de la présense de la table 'charge'.")
+        logger.info("Vérification de la présence de la table 'charge'.")        
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='charge';")
         if cur.fetchone():
-            has_copro = True
+            has_charge = True
             logger.info("Table 'charge' existe.")
         else:
-            logger.error("Table 'charge' manquante, création en cours.")
-            has_copro = False
+            logger.warning("Table 'charge' manquante, création en cours.")
+            has_charge = False
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS charge (
@@ -138,15 +138,14 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             )
             created.append('charge')
             logger.info("Table 'charge' créée.")
-
         # alertes_debit_eleve
-        logger.info("Vérification de la présense de la table 'alertes_debit_eleve'.")
+        logger.info("Vérification de la présence de la table 'alertes_debit_eleve'.")
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='alertes_debit_eleve';")
         if cur.fetchone():
             has_alertes = True
             logger.info("Table 'alertes_debit_eleve' existe.")
         else:
-            logger.error("Table 'alertes_debit_eleve' manquante, création en cours.")
+            logger.warning("Table 'alertes_debit_eleve' manquante, création en cours.")
             has_alertes = False
             cur.execute(
                 """
@@ -165,13 +164,13 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             logger.info("Table 'alertes_debit_eleve' créée.")
 
         # trigger alerte_debit_eleve
-        logger.info("Vérification de la présense du trigger 'alerte_debit_eleve'.")
+        logger.info("Vérification de la présence du trigger 'alerte_debit_eleve'.")
         cur.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name='alerte_debit_eleve';")
         if cur.fetchone():
             has_trigger = True
             logger.info("Trigger 'alerte_debit_eleve' existe.")
         else:
-            logger.error("Trigger 'alerte_debit_eleve' manquant, création en cours.")
+            logger.warning("Trigger 'alerte_debit_eleve' manquant, création en cours.")
             has_trigger = False
             cur.execute(
                 """
@@ -197,7 +196,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         conn.close()
 
     return {
-        'charge': has_copro,
+        'charge': has_charge,
         'alertes_debit_eleve': has_alertes,
         'alerte_debit_eleve': has_trigger,
         'created': created,
@@ -228,6 +227,7 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     cur = conn.cursor()
     try:
         # Insertion des données
+        # Ignorer les deux premiers éléments de data (en-têtes)
         cur.executemany(
             "INSERT INTO charge (code, proprietaire, debit, credit, date, last_check) VALUES (?, ?, ?, ?, ?,?)",
             data[3:],
