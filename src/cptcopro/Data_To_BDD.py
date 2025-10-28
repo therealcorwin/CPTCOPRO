@@ -88,9 +88,24 @@ def verif_presence_db(db_path: str) -> None:
             )
             logger.info("Trigger 'alerte_debit_eleve' vérifié/créé.")
 
+            # Creation Table coproprietaires
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS coproprietaires (
+                    nom_proprietaire TEXT,
+                    code_proprietaire TEXT PRIMARY KEY,
+                    num_apt TEXT,
+                    type_apt TEXT,
+                    last_check DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            logger.info("Table 'coproprietaires' vérifiée/créée.")
+
             conn.commit()
             conn.close()
-            logger.success(f"Base de données '{db_path}' et trigger 'alerte_debit_eleve' créés avec succès.")
+            logger.success("Tables Alerte_debit_eleve, charge et coproprietaires et trigger 'alerte_debit_eleve' créés.")
+            logger.success(f"Base de données '{db_path}' et trigger créés avec succès.")
         except Exception as e:
             logger.error(f"Erreur lors de la création de la base de données : {e}")
             raise
@@ -104,6 +119,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
     - table `charge`
     - table `alertes_debit_eleve`
     - trigger `alerte_debit_eleve`
+    - table `coproprietaires`
 
     Retourne un dict récapitulatif contenant l'état après vérification et la liste
     des éléments créés.
@@ -187,6 +203,28 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             created.append('alerte_debit_eleve')
             logger.info("Trigger 'alerte_debit_eleve' créé.")
 
+        # coproprietaires
+        logger.info("Vérification de la présence de la table 'coproprietaires'.")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coproprietaires';")
+        if cur.fetchone():
+            has_coproprietaires = True
+            logger.info("Table 'coproprietaires' existe.")
+        else:
+            logger.warning("Table 'coproprietaires' manquante, création en cours.")
+            has_coproprietaires = False
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS coproprietaires (
+                    nom_proprietaire TEXT,
+                    code_proprietaire TEXT PRIMARY KEY,
+                    num_apt TEXT,
+                    type_apt TEXT,
+                    last_update DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            created.append('coproprietaires')
+            logger.info("Table 'coproprietaires' créée.")
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -199,6 +237,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         'charge': has_charge,
         'alertes_debit_eleve': has_alertes,
         'alerte_debit_eleve': has_trigger,
+        'coproprietaires': has_coproprietaires,
         'created': created,
     }
 
@@ -239,3 +278,59 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     finally:
         conn.close()
     logger.info(f"{len(data)-2} enregistrements insérés dans la base de données.")
+
+
+def enregistrer_coproprietaires(rows: list[tuple], db_path: str) -> int:
+    """
+    Insère des informations de copropriétaires dans la table `coproprietaire`.
+
+    rows: liste de tuples (nom_proprietaire, code_proprietaire, num_apt, type_apt)
+    db_path: chemin vers la base SQLite
+
+    Retourne le nombre de lignes insérées.
+    """
+    if not rows:
+        logger.info("Aucune donnée coproprietaires à insérer.")
+        return 0
+
+    # S'assurer que le répertoire de la DB existe
+    verif_repertoire_db(db_path)
+
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    try:
+        # La vérification/création de la table `coproprietaires` doit être
+        # effectuée en amont (par ex. via integrite_db). Ici, on suppose que
+        # la table existe et on remplace simplement son contenu pour ne
+        # conserver que les dernières données.
+        cur.execute("DELETE FROM coproprietaires")
+
+        if rows:
+            cur.executemany(
+                "INSERT INTO coproprietaires (nom_proprietaire, code_proprietaire, num_apt, type_apt) VALUES (?, ?, ?, ?)",
+                rows,
+            )
+
+        conn.commit()
+        inserted = len(rows)
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erreur lors de l'insertion des coproprietaires : {e}")
+        raise
+    finally:
+        conn.close()
+
+    logger.info(f"{inserted} copropriétaires insérés (table remplacée).")
+    return inserted
+
+def lots_to_bdd(data):
+    """
+    Placeholder pour l'importation des lots en base de données.
+
+    Implémentation future : convertir les données de lots et les insérer
+    dans la base (ex: table 'lots' ou relation avec 'coproprietaire').
+
+    Pour l'instant, l'appel lève une erreur explicite indiquant que la
+    fonctionnalité n'est pas encore implémentée.
+    """
+    raise NotImplementedError("lots_to_bdd n'est pas encore implémentée")

@@ -39,7 +39,10 @@ with open(
  ) as file:
     html_content = file.read()
 """
+dtb.verif_repertoire_db(DB_PATH)
+dtb.verif_presence_db(DB_PATH)
 dtb.integrite_db(DB_PATH)
+exit()
 
 
 def main() -> None:
