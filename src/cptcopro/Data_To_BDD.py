@@ -227,7 +227,7 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     cur = conn.cursor()
     try:
         # Insertion des données
-        # Ignorer les deux premiers éléments de data (en-têtes)
+        # Ignorer les trois premiers éléments de data (en-têtes) avec data[3:]
         cur.executemany(
             "INSERT INTO charge (code, proprietaire, debit, credit, date, last_check) VALUES (?, ?, ?, ?, ?,?)",
             data[3:],
