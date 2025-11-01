@@ -72,8 +72,7 @@ def main() -> None:
     if not html_charge:
         logger.error("Aucun HTML récupéré. Arrêt du traitement.")
         return
-    else:
-        logger.success("HTML des charges des copropriétaires récupéré.")
+    logger.success("HTML des charges des copropriétaires récupéré.")
     
     logger.info("Parsing des charges des copropriétaires en cours...")
     parser_charges = HTMLParser(html_charge)
@@ -84,8 +83,8 @@ def main() -> None:
     if not date_suivi_copro:
         logger.error("Date de situation introuvable, arrêt du traitement.")
         return
-    else:
-        logger.success(f"Date de situation des copropriétaires récupérée : {date_suivi_copro}")
+    
+    logger.success(f"Date de situation des copropriétaires récupérée : {date_suivi_copro}")
 
     logger.info("Récupération des données des charges des copropriétaires en cours...")
     data_charges = tp.recuperer_situation_copro(parser_charges, date_suivi_copro)
@@ -93,8 +92,10 @@ def main() -> None:
     
     logger.info("Récupération du HTML contenant les lots des copropriétaires en cours...")
     html_copro = asyncio.run(pcl.recup_html_lotscopro(headless=not args.no_headless))
-    logger.success("HTML des lots des copropriétaires récupéré.")
-    
+    if not html_copro:
+        logger.error("Aucun HTML des lots récupéré. Arrêt du traitement.")
+        return
+    logger.success("HTML des lots des copropriétaires récupéré.")    
     logger.info("Parsing des lots des copropriétaires en cours...")
     lots_coproprietaires = tlc.extraire_lignes_brutes(html_copro)
     logger.success(f"{len(lots_coproprietaires)} lots de copropriétaires extraits.")
@@ -104,11 +105,11 @@ def main() -> None:
     logger.success(f"{len(data_coproprietaires)} copropriétaires/groupes consolidés.")
 
     if not data_charges and not data_coproprietaires:
-        logger.warning("Aucune donnée extraite pour les charges et ou lots. Arrêt du traitement")
+        logger.warning("Aucune donnée extraite pour les charges et/ou les lots. Arrêt du traitement.")
         return
     else:
         tp.afficher_etat_coproprietaire(data_charges, date_suivi_copro)
-        tlc.afficher_avec_rich(data_coproprietaires)
+        tlc.afficher_avec_rich(data_coproprietaires)    
     try:
         # Ensure path type compatibility: modules expect a string path
         dtb.verif_repertoire_db(DB_PATH)
