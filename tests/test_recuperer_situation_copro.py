@@ -1,7 +1,7 @@
 from selectolax.parser import HTMLParser
 import os
 
-from cptcopro import Traitement_Parsing as tp
+from cptcopro import Traitement_Charge_Copro as tp
 
 
 def load_fixture(name: str) -> str:

@@ -2,7 +2,7 @@ from selectolax.parser import HTMLParser
 import os
 import pytest
 
-from cptcopro import Traitement_Parsing as tp
+from cptcopro import Traitement_Charge_Copro as tp
 
 
 def load_fixture(name: str) -> str:
@@ -23,7 +23,7 @@ def test_normalize_amount_various():
         None: 0.0,
     }
     for inp, expected in cases.items():
-        assert tp.normalize_amount(inp) == pytest.approx(expected, rel=1e-6)
+        assert tp.normalise_somme(inp) == pytest.approx(expected, rel=1e-6)
 
 
 def test_recuperer_date_situation_copro_from_fixture():

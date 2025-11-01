@@ -1,7 +1,8 @@
 import sqlite3
+import os
+DB_PATH = os.path.join(os.path.dirname(__file__), "BDD", "copropriete.sqlite")
 
-
-def analyser_evolution_soldes(db_path="ctpcopro/coproprietaires.sqlite"):
+def analyser_evolution_soldes(db_path=DB_PATH):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     # Récupérer les soldes les plus récents et les dates antérieures pour chaque copropriétaire

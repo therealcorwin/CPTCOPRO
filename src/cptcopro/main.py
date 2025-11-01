@@ -2,10 +2,11 @@ import asyncio
 import sys
 import os
 from selectolax.parser import HTMLParser
-import cptcopro.Parsing_Charge_Copro as pss
-import cptcopro.Traitement_Parsing as tp
+import cptcopro.Parsing_Charge_Copro as pcc
+import cptcopro.Traitement_Charge_Copro as tp
 import cptcopro.Data_To_BDD as dtb
 import cptcopro.Backup_DB as bdb
+import cptcopro.Traitement_Lots_Copro as ppl
 from loguru import logger
 
 
@@ -29,7 +30,9 @@ logger.add(
 
 logger = logger.bind(type_log="MAIN")
 
-DB_PATH = str(os.path.join(os.getcwd(), "BDD", "copropriete.sqlite"))
+DB_PATH = os.path.join(os.path.dirname(__file__), "BDD", "copropriete.sqlite")
+print(f"DB_PATH: {DB_PATH}")
+
 """
 ## Charger le contenu du fichier HTML
 with open(
@@ -39,10 +42,10 @@ with open(
  ) as file:
     html_content = file.read()
 """
-dtb.verif_repertoire_db(DB_PATH)
-dtb.verif_presence_db(DB_PATH)
-dtb.integrite_db(DB_PATH)
-exit()
+#dtb.verif_repertoire_db(DB_PATH)
+#dtb.verif_presence_db(DB_PATH)
+#dtb.integrite_db(DB_PATH)
+#exit()
 
 
 def main() -> None:
@@ -64,29 +67,30 @@ def main() -> None:
         DB_PATH = args.db_path
 
     logger.info("Démarrage du script principal")
-    html_content = asyncio.run(pss.recup_html_suivicopro(headless=not args.no_headless))
+    html_content = asyncio.run(pcc.recup_html_suivicopro(headless=not args.no_headless))
     if not html_content:
         logger.error("Aucun HTML récupéré. Arrêt du traitement.")
         return
 
     parser = HTMLParser(html_content)
-    date_suivi_copro, last_check = tp.recuperer_date_situation_copro(parser)
+    date_suivi_copro = tp.recuperer_date_situation_copro(parser)
     if not date_suivi_copro:
         logger.error("Date de situation introuvable, arrêt du traitement.")
         return
 
-    data = tp.recuperer_situation_copro(parser, date_suivi_copro, last_check)
-    if not data:
+    data_charges = tp.recuperer_situation_copro(parser, date_suivi_copro)
+    if not data_charges:
         logger.warning("Aucune donnée extraite du tableau.")
     else:
-        tp.afficher_etat_coproprietaire(data, date_suivi_copro)
+        tp.afficher_etat_coproprietaire(data_charges, date_suivi_copro)
 
     try:
         # Ensure path type compatibility: modules expect a string path
         dtb.verif_repertoire_db(DB_PATH)
         dtb.verif_presence_db(DB_PATH)
         bdb.backup_db(DB_PATH)
-        dtb.enregistrer_donnees_sqlite(data, DB_PATH)
+        dtb.enregistrer_donnees_sqlite(data_charges, DB_PATH)
+        #dtb.enregistrer_coproprietaires(data_coproprietaires, DB_PATH)
         logger.info("Traitement terminé et données sauvegardées.")
     except Exception as exc:
         logger.error(f"Erreur lors des opérations BDD/backup : {exc}")

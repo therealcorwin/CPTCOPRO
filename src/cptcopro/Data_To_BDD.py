@@ -51,7 +51,7 @@ def verif_presence_db(db_path: str) -> None:
                     debit REAL,
                     credit REAL,
                     date DATE,
-                    last_check DATE
+                    last_check DATETIME DEFAULT CURRENT_DATE
                 )
                 """
             )
@@ -96,7 +96,7 @@ def verif_presence_db(db_path: str) -> None:
                     code_proprietaire TEXT PRIMARY KEY,
                     num_apt TEXT,
                     type_apt TEXT,
-                    last_check DATETIME DEFAULT CURRENT_TIMESTAMP
+                    last_check DATETIME DEFAULT CURRENT_DATE
                 )
                 """
             )
@@ -148,7 +148,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     debit REAL,
                     credit REAL,
                     date DATE,
-                    last_check DATE
+                    last_check DATETIME DEFAULT CURRENT_DATE
                 )
                 """
             )
@@ -171,7 +171,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     code_proprietaire TEXT,
                     nom_proprietaire TEXT,
                     debit REAL NOT NULL,
-                    date_detection DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    date_detection DATETIME DEFAULT CURRENT_DATE,
                     FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
                 );
                 """
@@ -219,7 +219,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     code_proprietaire TEXT PRIMARY KEY,
                     num_apt TEXT,
                     type_apt TEXT,
-                    last_update DATETIME DEFAULT CURRENT_TIMESTAMP
+                    last_check DATETIME DEFAULT CURRENT_DATE
                 )
                 """
             )
@@ -267,8 +267,9 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     try:
         # Insertion des données
         # Ignorer les trois premiers éléments de data (en-têtes) avec data[3:]
+        # data[3:] contient des tuples (code, proprietaire, debit, credit, date, last_check)
         cur.executemany(
-            "INSERT INTO charge (code, proprietaire, debit, credit, date, last_check) VALUES (?, ?, ?, ?, ?,?)",
+            "INSERT INTO charge (code, proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
             data[3:],
         )
         conn.commit()
@@ -277,42 +278,45 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
         raise
     finally:
         conn.close()
-    logger.info(f"{len(data)-2} enregistrements insérés dans la base de données.")
+    # Log le nombre de lignes insérées (on ignore les 3 premiers éléments d'en-tête)
+    try:
+        inserted_count = len(data[3:])
+    except Exception:
+        inserted_count = 0
+    logger.info(f"{inserted_count} enregistrements insérés dans la base de données.")
 
 
-def enregistrer_coproprietaires(rows: list[tuple], db_path: str) -> int:
+def enregistrer_coproprietaires(data_coproprietaires: list[Any], db_path: str) -> None:
     """
-    Insère des informations de copropriétaires dans la table `coproprietaire`.
-
+    Insère des informations de copropriétaires dans la table `coproprietaires`.
     rows: liste de tuples (nom_proprietaire, code_proprietaire, num_apt, type_apt)
     db_path: chemin vers la base SQLite
 
-    Retourne le nombre de lignes insérées.
     """
-    if not rows:
+    logger.info("Insertion des copropriétaires dans la base de données...")
+    data = []
+    for copro in data_coproprietaires:
+        data.append((copro.get("proprietaire") or "", copro.get("code") or "", copro.get("num_apt") or "", copro.get("type_apt") or ""))
+
+    if not data:
         logger.info("Aucune donnée coproprietaires à insérer.")
-        return 0
-
-    # S'assurer que le répertoire de la DB existe
-    verif_repertoire_db(db_path)
-
+        return 
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
-        # La vérification/création de la table `coproprietaires` doit être
-        # effectuée en amont (par ex. via integrite_db). Ici, on suppose que
-        # la table existe et on remplace simplement son contenu pour ne
-        # conserver que les dernières données.
+        # Pour éviter les doublons, on remplace la table existante
         cur.execute("DELETE FROM coproprietaires")
 
-        if rows:
+        if data:
+            # La colonne last_check a une valeur par défaut ; on n'insère que les 4 colonnes attendues
             cur.executemany(
                 "INSERT INTO coproprietaires (nom_proprietaire, code_proprietaire, num_apt, type_apt) VALUES (?, ?, ?, ?)",
-                rows,
+                data,
             )
 
         conn.commit()
-        inserted = len(rows)
+        nb_copro = len(data)
+        logger.info(f"{nb_copro} coproprietaires insérés dans la base de données.")
     except Exception as e:
         conn.rollback()
         logger.error(f"Erreur lors de l'insertion des coproprietaires : {e}")
@@ -320,17 +324,6 @@ def enregistrer_coproprietaires(rows: list[tuple], db_path: str) -> int:
     finally:
         conn.close()
 
-    logger.info(f"{inserted} copropriétaires insérés (table remplacée).")
-    return inserted
+    logger.info(f"{nb_copro} copropriétaires insérés (table remplacée).")
+    return
 
-def lots_to_bdd(data):
-    """
-    Placeholder pour l'importation des lots en base de données.
-
-    Implémentation future : convertir les données de lots et les insérer
-    dans la base (ex: table 'lots' ou relation avec 'coproprietaire').
-
-    Pour l'instant, l'appel lève une erreur explicite indiquant que la
-    fonctionnalité n'est pas encore implémentée.
-    """
-    raise NotImplementedError("lots_to_bdd n'est pas encore implémentée")

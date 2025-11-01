@@ -1,5 +1,5 @@
 import re
-from pathlib import Path
+import os
 from selectolax.parser import HTMLParser
 from rich.table import Table
 from rich.console import Console
@@ -34,13 +34,12 @@ def normaliser_prefixes_proprietaire(texte: str) -> str:
 # motif pour détecter "Nom (CODE)"
 _PATRON_CODE_RE = re.compile(r"^(?P<nom>.+?)\s*\((?P<code>\d+[A-Za-z]?)\)\s*$")
 
-def extraire_lignes_brutes(chemin_html: Path):
+def extraire_lignes_brutes(Html_lot_copro: HTMLParser):
     """
     Retourne la liste ordonnée des (id, texte_normalise) présents dans le HTML,
     en excluant explicitement les éléments contenant les mots à exclure.
     """
-    contenu = chemin_html.read_text(encoding="utf-8", errors="replace")
-    arbre = HTMLParser(contenu)
+    arbre = HTMLParser(Html_lot_copro)
     lignes = []
     for noeud in arbre.css("[id]"):
         idv = noeud.attributes.get("id")
@@ -78,27 +77,65 @@ def est_ligne_lot(ligne: str):
         return True
     return False
 
-def consolider_proprietaires_lots(elements):
+def consolider_proprietaires_lots(elements) -> list[dict]:
     """
     elements : liste ordonnée de (id, texte)
-    retourne : liste ordonnée de dict { 'proprietaire': nom, 'code': code, 'lots': [desc,...] }
+    retourne : liste ordonnée de dict { 'proprietaire': nom, 'code': code, 'num_apt': num, 'type_apt': type }
     logique : associer les lots qui suivent un propriétaire au propriétaire courant.
+    Comportement : on retourne une entrée par lot. Si un propriétaire n'a pas de lot, on
+    retourne une entrée avec les champs num_apt/type_apt vides.
     """
     consolide = []
-    courant = None
+    current_owner = None
+    current_owner_had_lot = False
+
     for _id, texte in elements:
         proprietaire = detecter_proprietaire(texte)
         if proprietaire:
+            # si le propriétaire précédent n'avait pas de lot, on ajoute une entrée vide
+            if current_owner is not None and not current_owner_had_lot:
+                consolide.append({
+                    "proprietaire": current_owner["nom"],
+                    "code": current_owner["code"],
+                    "num_apt": "",
+                    "type_apt": "",
+                })
             nom, code = proprietaire
-            courant = {"proprietaire": nom, "code": code, "lots": []}
-            consolide.append(courant)
+            current_owner = {"nom": nom, "code": code}
+            current_owner_had_lot = False
             continue
+
         if est_ligne_lot(texte):
-            if courant is None:
-                courant = {"proprietaire": None, "code": None, "lots": []}
-                consolide.append(courant)
-            courant["lots"].append(texte)
+            # extraire numéro et type depuis la ligne de lot
+            num, typ = extraire_info_lot(texte)
+            num = num or ""
+            typ = (typ or "").lower()
+            if current_owner is None:
+                consolide.append({
+                    "proprietaire": None,
+                    "code": None,
+                    "num_apt": num,
+                    "type_apt": typ,
+                })
+            else:
+                consolide.append({
+                    "proprietaire": current_owner["nom"],
+                    "code": current_owner["code"],
+                    "num_apt": num,
+                    "type_apt": typ,
+                })
+                current_owner_had_lot = True
             continue
+
+    # fin de boucle : si le dernier propriétaire n'a pas eu de lot, ajouter une entrée vide
+    if current_owner is not None and not current_owner_had_lot:
+        consolide.append({
+            "proprietaire": current_owner["nom"],
+            "code": current_owner["code"],
+            "num_apt": "",
+            "type_apt": "",
+        })
+
     return consolide
 
 def extraire_info_lot(texte_lot: str):
@@ -141,42 +178,38 @@ def afficher_avec_rich(consolide):
     tableau.add_column("Num Lot", justify="center")
     tableau.add_column("Type Apt", justify="center")
 
+    # Le format attendu de "consolide" est une liste d'entrées où chaque entrée
+    # a: proprietaire, code, num_apt, type_apt
     for entree in consolide:
         proprietaire = entree.get("proprietaire")
         code = entree.get("code") or ""
+        num = entree.get("num_apt") or ""
+        typ = entree.get("type_apt") or ""
+
+        # normaliser type en minuscules (ex: '3P' -> '3p')
+        typ = typ.lower() if isinstance(typ, str) else typ
+
         if proprietaire and est_scic(proprietaire):
             tableau.add_row(proprietaire, code, "NA", "NA")
             continue
-        if entree["lots"]:
-            for lot in entree["lots"]:
-                num, typ = extraire_info_lot(lot)
-                num = num or ""
-                typ = typ or ""
-                if proprietaire:
-                    tableau.add_row(proprietaire, code, num, typ)
-                else:
-                    tableau.add_row("INCONNU", "", num, typ)
+
+        if proprietaire:
+            tableau.add_row(proprietaire, code, num, typ)
         else:
-            if proprietaire:
-                tableau.add_row(proprietaire, code, "", "")
-            else:
-                tableau.add_row("INCONNU", "", "", "")
+            tableau.add_row("INCONNU", "", num, typ)
 
     consoleur.print(tableau)
     total = len(consolide)
     consoleur.print(f"[bold]{total}[/bold] propriétaires/groupes trouvés.")
 
 def principale():
-    # Le script est exécuté sans arguments. Fichier HTML attendu à côté du script.
-    chemin = Path(__file__).with_name("Lots.html")
-    if not chemin.exists():
-        raise SystemExit(f"Fichier introuvable: {chemin}")
-
+ 
+    chemin = asyncio.run(recup_html_lotscopro(headless=True))
     lignes = extraire_lignes_brutes(chemin)
     donnees = consolider_proprietaires_lots(lignes)
-
+  
     afficher_avec_rich(donnees)
-    return
+    db_path = str(os.path.join(os.getcwd(), "BDD", "copropriete.sqlite"))
+    ec(donnees,db_path)
 
-if __name__ == "__main__":
-    principale()
+

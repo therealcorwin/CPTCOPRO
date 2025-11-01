@@ -8,7 +8,7 @@ logger.remove()
 logger = logger.bind(type_log="BACKUP")
 
 
-def backup_db(db_path: str = "ctpcopro/coproprietaires.sqlite") -> None:
+def backup_db(db_path) -> None:
     """
     Sauvegarde la base de données SQLite dans un dossier 'backup' du répertoire courant.
     Le fichier de sauvegarde est nommé au format 'backup_bd-JJ-MM-AA'.
@@ -18,8 +18,8 @@ def backup_db(db_path: str = "ctpcopro/coproprietaires.sqlite") -> None:
         db_path (str): Chemin vers la base de données à sauvegarder.
     """
     now: datetime = datetime.now()
-    backup_dir: str = os.path.join(os.getcwd(), "Backup")
-    backup_filename: str = f"backup_bdd-{now.strftime('%d-%m-%y')}.sqlite"
+    backup_dir: str = os.path.join(os.path.dirname(__file__), "Backup")
+    backup_filename: str = f"backup_bdd-{now.strftime('%d-%m-%y-%H-%M-%S')}.sqlite"
     backup_path: str = os.path.join(backup_dir, backup_filename)
 
     logger.info("Démarrage de la sauvegarde de la base de données.")

@@ -13,7 +13,7 @@ logger.warning("Début du script de suivi des copropriétaires")
 logger.info("Chargement du fichier HTML")
 
 
-def normalize_amount(s: str) -> float:
+def normalise_somme(s: str) -> float:
     """Normalise une chaîne représentant un montant en float.
 
     Supporte espaces insécables, séparateurs de milliers '.', virgule décimale,
@@ -42,7 +42,7 @@ def normalize_amount(s: str) -> float:
         return 0.0
 
 
-def recuperer_date_situation_copro(htmlparser: HTMLParser) -> tuple[str, str]:
+def recuperer_date_situation_copro(htmlparser: HTMLParser) -> str:
     """
     Extrait la date de la situation des copropriétaires à partir d'un noeud HTML spécifié.
 
@@ -82,13 +82,11 @@ def recuperer_date_situation_copro(htmlparser: HTMLParser) -> tuple[str, str]:
     logger.info(f"Date trouvée : {date_str}")
 
     date_situation_copro = datetime.strptime(date_str, "%d/%m/%Y").strftime("%Y-%m-%d")
-    last_check_situation_copro = datetime.now().strftime("%Y-%m-%d")
-    return date_situation_copro, last_check_situation_copro
+    return date_situation_copro
 
 
 def recuperer_situation_copro(
-    htmlparser: HTMLParser, date_suivi_copro: str, last_check_suivi_copro: str
-) -> list[Any]:
+    htmlparser: HTMLParser, date_suivi_copro: str) -> list[Any]:
     """
     Extrait les informations de situation des copropriétaires à partir d'un document HTML.
 
@@ -98,7 +96,6 @@ def recuperer_situation_copro(
     Parameters:
     - HTMLParser (HTMLParser): Un objet HTMLParser contenant le document HTML à analyser.
     - date_suivi_copro (str): Une chaîne de caractères représentant la date au format JJ/MM/AAAA.
-    - last_check_suivi_copro (str): Une chaîne de caractères représentant la date de dernière vérification au format JJ/MM/AAAA.
 
     Returns:
     - list[Any]: Une liste de tuples contenant les données des copropriétaires.
@@ -170,8 +167,8 @@ def recuperer_situation_copro(
                         else ""
                     )
 
-                    debit = normalize_amount(debit_cell)
-                    credit = normalize_amount(credit_cell)
+                    debit = normalise_somme(debit_cell)
+                    credit = normalise_somme(credit_cell)
 
                     # Ajouter les données nettoyées et converties à la liste
                     data.append(
@@ -181,7 +178,6 @@ def recuperer_situation_copro(
                             debit,
                             credit,
                             date_suivi_copro,
-                            last_check_suivi_copro,
                         )
                     )
                 except (IndexError, ValueError) as e:
@@ -229,7 +225,6 @@ def afficher_etat_coproprietaire(data: list[Any], date_suivi_copro: str) -> None
         debit,
         credit,
         date_suivi_copro,
-        last_check_suivi_copro,
     ) in data[3:]:
         table_copro.add_row(
             str(code),
