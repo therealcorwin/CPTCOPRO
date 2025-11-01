@@ -52,12 +52,14 @@ async def recup_html_lotscopro(headless: bool = False) -> str:
             logger.info("Champ login rempli")
         except Exception as e:
             logger.error(f"Erreur lors du remplissage du champ login : {e}")
+            await browser.close()
             return "KO_FILL_LOGIN"
         try:
             await page.fill('input[name="A17"]', password_site_copro)
             logger.info("Champ mot de passe rempli")
         except Exception as e:
             logger.error(f"Erreur lors du remplissage du champ mot de passe : {e}")
+            await browser.close()
             return "KO_FILL_PASSWORD"
         try:
             await page.click("span#z_A7_IMG")
@@ -93,9 +95,9 @@ async def recup_html_lotscopro(headless: bool = False) -> str:
         except Exception as e:
             logger.error(f"Erreur lors du clic sur le lien Afficher la liste des copropriétaires depliée: {e}")
             await browser.close()
-            return "KO_CLICK_LISTE_COPRO"
+            return "KO_CLICK_LISTE_COPRO_EXPANDED"        
         try:
-            await page.wait_for_load_state("networkidle")
+            await page.wait_for_load_state("networkidle", timeout=30000)
             logger.info("Attente de la fin du chargement après affichage de la liste")
         except Exception as e:
             logger.error(f"Erreur lors de l'attente du chargement final : {e}")

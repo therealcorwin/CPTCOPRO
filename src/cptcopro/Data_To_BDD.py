@@ -66,7 +66,7 @@ def verif_presence_db(db_path: str) -> None:
                     code_proprietaire TEXT,
                     nom_proprietaire TEXT,
                     debit REAL NOT NULL,
-                    date_detection DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    date_detection DATETIME DEFAULT CURRENT_DATE,
                     FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
                 );
                 """
@@ -267,11 +267,11 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     try:
         # Insertion des données
         # Ignorer les trois premiers éléments de data (en-têtes) avec data[3:]
-        # data[3:] contient des tuples (code, proprietaire, debit, credit, date, last_check)
+        # data[3:] contient des tuples (code, proprietaire, debit, credit, date)
         cur.executemany(
             "INSERT INTO charge (code, proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
             data[3:],
-        )
+        )        
         conn.commit()
     except Exception as e:
         logger.error(f"Erreur lors de l'insertion des données : {e}")
@@ -289,10 +289,18 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
 def enregistrer_coproprietaires(data_coproprietaires: list[Any], db_path: str) -> None:
     """
     Insère des informations de copropriétaires dans la table `coproprietaires`.
-    rows: liste de tuples (nom_proprietaire, code_proprietaire, num_apt, type_apt)
-    db_path: chemin vers la base SQLite
+    
+    Args:
+        data_coproprietaires: Liste de dictionnaires contenant les clés:
+            - proprietaire: nom du propriétaire
+            - code: code du propriétaire
+            - num_apt: numéro d'appartement
+            - type_apt: type d'appartement
+        db_path: Chemin vers la base de données SQLite
 
-    """
+    Returns:
+        None
+    """    
     logger.info("Insertion des copropriétaires dans la base de données...")
     data = []
     for copro in data_coproprietaires:
@@ -313,10 +321,8 @@ def enregistrer_coproprietaires(data_coproprietaires: list[Any], db_path: str) -
                 "INSERT INTO coproprietaires (nom_proprietaire, code_proprietaire, num_apt, type_apt) VALUES (?, ?, ?, ?)",
                 data,
             )
-
         conn.commit()
         nb_copro = len(data)
-        logger.info(f"{nb_copro} coproprietaires insérés dans la base de données.")
     except Exception as e:
         conn.rollback()
         logger.error(f"Erreur lors de l'insertion des coproprietaires : {e}")
