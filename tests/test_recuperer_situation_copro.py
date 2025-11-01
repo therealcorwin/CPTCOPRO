@@ -17,7 +17,7 @@ def test_table_with_classes():
     # recuperer_date_situation_copro peut renvoyer soit une chaîne soit un tuple
     res = tp.recuperer_date_situation_copro(parser)
     if isinstance(res, tuple):
-        date_str= res
+        date_str, _ = res
     else:
         date_str = res
     # recuperer_situation_copro peut accepter 2 ou 3 arguments selon la version
@@ -36,7 +36,7 @@ def test_table_without_classes_fallback():
     parser = HTMLParser(html)
     res = tp.recuperer_date_situation_copro(parser)
     if isinstance(res, tuple):
-        date_str= res
+        date_str, _ = res
     else:
         date_str = res
     try:
@@ -52,7 +52,7 @@ def test_no_table_returns_empty():
     parser = HTMLParser(html)
     res = tp.recuperer_date_situation_copro(parser)
     if isinstance(res, tuple):
-        date_str= res
+        date_str, _ = res
     else:
         date_str = res
     try:
