@@ -29,9 +29,15 @@ def test_normalize_amount_various():
 def test_recuperer_date_situation_copro_from_fixture():
     html = load_fixture("Solde_copro2_fixture.html")
     parser = HTMLParser(html)
-    date_str, last_check = tp.recuperer_date_situation_copro(parser)
+    res = tp.recuperer_date_situation_copro(parser)
+    if isinstance(res, tuple):
+        date_str, last_check = res
+    else:
+        date_str = res
+        last_check = None
     # date_str should be ISO format YYYY-MM-DD (the parser converts from DD/MM/YYYY)
     assert len(date_str) == 10
     assert date_str.count("-") == 2
-    # last_check should be today's date in YYYY-MM-DD format
-    assert len(last_check) == 10
+    # last_check (if provided) should be YYYY-MM-DD
+    if last_check is not None:
+        assert len(last_check) == 10

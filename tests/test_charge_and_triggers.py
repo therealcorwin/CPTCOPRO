@@ -22,9 +22,10 @@ def test_enregistrer_donnees_sqlite_happy_path(tmp_path: Path):
 
     # Prepare data: function expects data[3:] to be the rows, so include 3 headers
     headers = ["h1", "h2", "h3"]
+    # enregistrer_donnees_sqlite s'attend à des tuples (code, proprietaire, debit, credit, date)
     rows = [
-        ("C001", "Jean", 100.0, 0.0, "2025-10-28", "2025-10-28"),
-        ("C002", "Marie", 50.0, 0.0, "2025-10-28", "2025-10-28"),
+        ("C001", "Jean", 100.0, 0.0, "2025-10-28"),
+        ("C002", "Marie", 50.0, 0.0, "2025-10-28"),
     ]
     data = headers + rows
 
