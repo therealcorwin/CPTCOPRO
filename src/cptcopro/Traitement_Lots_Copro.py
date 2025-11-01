@@ -202,14 +202,5 @@ def afficher_avec_rich(consolide):
     total = len(consolide)
     consoleur.print(f"[bold]{total}[/bold] propriétaires/groupes trouvés.")
 
-def principale():
- 
-    chemin = asyncio.run(recup_html_lotscopro(headless=True))
-    lignes = extraire_lignes_brutes(chemin)
-    donnees = consolider_proprietaires_lots(lignes)
-  
-    afficher_avec_rich(donnees)
-    db_path = str(os.path.join(os.getcwd(), "BDD", "copropriete.sqlite"))
-    ec(donnees,db_path)
 
 

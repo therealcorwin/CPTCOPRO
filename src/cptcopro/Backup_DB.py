@@ -10,9 +10,8 @@ logger = logger.bind(type_log="BACKUP")
 
 def backup_db(db_path) -> None:
     """
-    Sauvegarde la base de données SQLite dans un dossier 'backup' du répertoire courant.
-    Le fichier de sauvegarde est nommé au format 'backup_bdd-DD-MM-YY-HH-MM-SS'.    Toutes les étapes et événements sont enregistrés dans le fichier 'backup.txt' via loguru.
-
+    Sauvegarde la base de données SQLite dans un dossier 'BACKUP' du répertoire courant.
+    Le fichier de sauvegarde est nommé au format 'backup_bdd-DD-MM-YY-HH-MM-SS'. Toutes les étapes et événements sont enregistrés dans le fichier 'backup.txt' via loguru.
     Args:
         db_path (str): Chemin vers la base de données à sauvegarder.
     """
