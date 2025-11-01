@@ -17,13 +17,12 @@ def test_table_with_classes():
     # recuperer_date_situation_copro peut renvoyer soit une chaîne soit un tuple
     res = tp.recuperer_date_situation_copro(parser)
     if isinstance(res, tuple):
-        date_str, last_check = res
+        date_str= res
     else:
         date_str = res
-        last_check = None
     # recuperer_situation_copro peut accepter 2 ou 3 arguments selon la version
     try:
-        data = tp.recuperer_situation_copro(parser, date_str, last_check)
+        data = tp.recuperer_situation_copro(parser, date_str)
     except TypeError:
         data = tp.recuperer_situation_copro(parser, date_str)
     # should find two rows (we added two copropriétaires)
@@ -37,12 +36,11 @@ def test_table_without_classes_fallback():
     parser = HTMLParser(html)
     res = tp.recuperer_date_situation_copro(parser)
     if isinstance(res, tuple):
-        date_str, last_check = res
+        date_str= res
     else:
         date_str = res
-        last_check = None
     try:
-        data = tp.recuperer_situation_copro(parser, date_str, last_check)
+        data = tp.recuperer_situation_copro(parser, date_str)
     except TypeError:
         data = tp.recuperer_situation_copro(parser, date_str)
     assert len(data) >= 1
@@ -54,12 +52,11 @@ def test_no_table_returns_empty():
     parser = HTMLParser(html)
     res = tp.recuperer_date_situation_copro(parser)
     if isinstance(res, tuple):
-        date_str, last_check = res
+        date_str= res
     else:
         date_str = res
-        last_check = None
     try:
-        data = tp.recuperer_situation_copro(parser, date_str, last_check)
+        data = tp.recuperer_situation_copro(parser, date_str)
     except TypeError:
         data = tp.recuperer_situation_copro(parser, date_str)
     assert data == []

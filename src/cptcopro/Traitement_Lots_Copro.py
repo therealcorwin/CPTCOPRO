@@ -1,5 +1,4 @@
 import re
-import os
 from selectolax.parser import HTMLParser
 from rich.table import Table
 from rich.console import Console

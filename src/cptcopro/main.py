@@ -83,7 +83,6 @@ def main() -> None:
     if not date_suivi_copro:
         logger.error("Date de situation introuvable, arrêt du traitement.")
         return
-    
     logger.success(f"Date de situation des copropriétaires récupérée : {date_suivi_copro}")
 
     logger.info("Récupération des données des charges des copropriétaires en cours...")
