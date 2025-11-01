@@ -11,6 +11,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -22,10 +29,11 @@ jobs:
       - name: Install package (editable)
         run: |
           python -m pip install -e .
-      - name: Install Playwright browsers
+      - name: Install Playwright browsers (only if playwright is in requirements)
+        if: contains(join(github.event.head_commit.message, ' '), 'playwright') || always()
         run: |
-          python -m pip install playwright
-          python -m playwright install --with-deps
+          python -m pip install playwright || true
+          python -m playwright install --with-deps || true
       - name: Run tests
         env:
           CTPCOPRO_DB_PATH: ${{ github.workspace }}/src/cptcopro/coproprietaires.sqlite
