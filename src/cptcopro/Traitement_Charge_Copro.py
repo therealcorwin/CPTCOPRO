@@ -97,9 +97,9 @@ def recuperer_situation_copro(
     - HTMLParser (HTMLParser): Un objet HTMLParser contenant le document HTML à analyser.
     - date_suivi_copro (str): Une chaîne de caractères représentant la date au format JJ/MM/AAAA.
 
-    Returns:
-    - list[Any]: Une liste de tuples contenant les données des copropriétaires.
-      Chaque tuple a le format suivant : (code, coproprietaire, debit, credit, date).
+        Returns:
+        - list[Any]: Une liste de tuples contenant les données des copropriétaires.
+            Chaque tuple a le format suivant : (code_proprietaire, nom_proprietaire, debit, credit, date).
     """
     # Trouver la table dans le document HTML
     table = htmlparser.css_first("table#ctzA1")
@@ -154,8 +154,8 @@ def recuperer_situation_copro(
             ):  # Vérifier que la ligne contient suffisamment de colonnes
                 try:
                     # Vérifier que toutes les colonnes nécessaires sont présentes
-                    code = cells[header_indices["Code"]]
-                    coproprietaire = cells[header_indices["Copropriétaire"]]
+                    code_proprietaire = cells[header_indices["Code"]]
+                    nom_proprietaire = cells[header_indices["Copropriétaire"]]
                     debit_cell = (
                         cells[header_indices["Débit"]]
                         if header_indices.get("Débit") is not None
@@ -173,8 +173,8 @@ def recuperer_situation_copro(
                     # Ajouter les données nettoyées et converties à la liste
                     data.append(
                         (
-                            code,
-                            coproprietaire,
+                            code_proprietaire,
+                            nom_proprietaire,
                             debit,
                             credit,
                             date_suivi_copro,
@@ -203,8 +203,8 @@ def afficher_etat_coproprietaire(data: list[Any], date_suivi_copro: str) -> None
     puis affiche le tableau dans la console.
 
     Parameters:
-    - data (list[Any]): Une liste de tuples contenant les données des copropriétaires.
-      Chaque tuple doit avoir le format suivant : (code, coproprietaire, debit, credit, date).
+        - data (list[Any]): Une liste de tuples contenant les données des copropriétaires.
+            Chaque tuple doit avoir le format suivant : (code_proprietaire, nom_proprietaire, debit, credit, date).
     - date_suivi_copro (str): Une chaîne de caractères représentant la date au format JJ/MM/AAAA.
 
     Returns:
@@ -213,22 +213,22 @@ def afficher_etat_coproprietaire(data: list[Any], date_suivi_copro: str) -> None
     console = Console()
     # Création du tableau avec les en-têtes
     table_copro = Table(title=f"Suivi des Copropriétaires au : {date_suivi_copro}")
-    table_copro.add_column("Code", style="cyan", justify="center")
-    table_copro.add_column("Copropriétaire", style="magenta", justify="center")
+    table_copro.add_column("Code propriétaire", style="cyan", justify="center")
+    table_copro.add_column("Nom propriétaire", style="magenta", justify="center")
     table_copro.add_column("Débit", style="red", justify="right")
     table_copro.add_column("Crédit", style="green", justify="right")
 
     # Ajout des lignes de données au tableau
     for (
-        code,
-        coproprietaire,
+        code_proprietaire,
+        nom_proprietaire,
         debit,
         credit,
         date_suivi_copro,
     ) in data[3:]:
         table_copro.add_row(
-            str(code),
-            str(coproprietaire),
+            str(code_proprietaire),
+            str(nom_proprietaire),
             str(debit),
             str(credit),
         )

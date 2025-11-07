@@ -17,7 +17,7 @@ def backup_db(db_path) -> None:
     """
     now: datetime = datetime.now()
     backup_dir: str = os.path.join(os.path.dirname(__file__), "BACKUP")
-    backup_filename: str = f"backup_bdd-{now.strftime('%d-%m-%y-%H-%M-%S')}.sqlite"
+    backup_filename: str = f"backup_{os.path.basename(db_path)}-{now.strftime('%d-%m-%y-%H-%M-%S')}.sqlite"
     backup_path: str = os.path.join(backup_dir, backup_filename)
 
     logger.info("Démarrage de la sauvegarde de la base de données.")

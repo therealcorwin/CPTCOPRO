@@ -9,30 +9,30 @@ def analyser_evolution_soldes(db_path=DB_PATH):
     query = """
     WITH recent_soldes AS (
         SELECT 
-            code,
-            coproprietaire,
+            code_proprietaire AS code_proprietaire,
+            nom_proprietaire AS nom_proprietaire,
             debit,
             credit,
             date,
-            MAX(date) OVER (PARTITION BY code) AS date_plus_recente
+            MAX(date) OVER (PARTITION BY code_proprietaire) AS date_plus_recente
         FROM coproprietaires
     ),
     comparaison AS (
         SELECT 
-            r1.code,
-            r1.coproprietaire,
+        r1.code_proprietaire,
+        r1.nom_proprietaire,
             r1.debit AS debit_recent,
             r1.credit AS credit_recent,
             r2.debit AS debit_precedent,
             r2.credit AS credit_precedent
         FROM recent_soldes r1
         LEFT JOIN coproprietaires r2
-        ON r1.code = r2.code AND r2.date < r1.date_plus_recente
+        ON r1.code_proprietaire = r2.code_proprietaire AND r2.date < r1.date_plus_recente
         WHERE r1.date = r1.date_plus_recente
     )
     SELECT 
-        code,
-        coproprietaire,
+        code_proprietaire,
+        nom_proprietaire,
         debit_recent,
         credit_recent,
         debit_precedent,
@@ -46,8 +46,8 @@ def analyser_evolution_soldes(db_path=DB_PATH):
     evolution = []
     for row in result:
         (
-            code,
-            coproprietaire,
+            code_proprietaire,
+            nom_proprietaire,
             debit_recent,
             credit_recent,
             debit_precedent,
@@ -64,13 +64,13 @@ def analyser_evolution_soldes(db_path=DB_PATH):
                 tag = "INFERIEUR"
             else:
                 tag = "EGAL"
-        evolution.append((code, coproprietaire, tag))
+    evolution.append((code_proprietaire, nom_proprietaire, tag))
 
     conn.close()
 
     # Afficher les résultats
-    for code, coproprietaire, tag in evolution:
-        print(f"Code: {code}, Copropriétaire: {coproprietaire}, Évolution: {tag}")
+    for code_proprietaire, nom_proprietaire, tag in evolution:
+        print(f"Code: {code_proprietaire}, Copropriétaire: {nom_proprietaire}, Évolution: {tag}")
 
     return evolution
 

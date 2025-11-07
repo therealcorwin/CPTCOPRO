@@ -49,7 +49,7 @@ def test_trigger_alerte_debit_eleve(tmp_path: Path):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO charge (code, proprietaire, debit, credit, date, last_check) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date, last_check) VALUES (?, ?, ?, ?, ?, ?)",
         ("T001", "Danger", 2500.0, 0.0, "2025-10-28", "2025-10-28"),
     )
     conn.commit()

@@ -30,26 +30,14 @@ def dedoublonner_base_de_donnees(db_path: Union[str, Path]) -> None:
             cursor = conn.cursor()
 
             # La requête identifie les lignes à supprimer.
-            # Pour chaque groupe de (code, coproprietaire, date), elle trouve l'id de la ligne
-            # avec le last_check maximal. Ensuite, elle supprime toutes les autres lignes
-            # du même groupe qui n'ont pas cet id.
+            # Pour chaque groupe (code_proprietaire, nom_proprietaire, date),
+            # on conserve la ligne ayant le MAX(rowid) et on supprime les autres.
             query = """
             DELETE FROM coproprietaires
-            WHERE id NOT IN (
-                SELECT id
-                FROM (
-                    SELECT id, ROW_NUMBER() OVER(
-                        PARTITION BY code, coproprietaire, date
-                        ORDER BY last_check DESC
-                    ) as rn
-                    FROM coproprietaires
-                )
-                WHERE rn = 1
-            DELETE FROM coproprietaires WHERE id NOT IN (
-                SELECT MAX(id)
+            WHERE rowid NOT IN (
+                SELECT MAX(rowid)
                 FROM coproprietaires
-                GROUP BY code, coproprietaire, date
-                ORDER BY last_check DESC
+                GROUP BY code_proprietaire, nom_proprietaire, date
             );
             """
             cursor.execute(query)

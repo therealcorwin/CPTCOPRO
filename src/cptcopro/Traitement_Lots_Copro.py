@@ -1,4 +1,5 @@
 import re
+from typing import Union
 from selectolax.parser import HTMLParser
 from rich.table import Table
 from rich.console import Console
@@ -33,12 +34,16 @@ def normaliser_prefixes_proprietaire(texte: str) -> str:
 # motif pour détecter "Nom (CODE)"
 _PATRON_CODE_RE = re.compile(r"^(?P<nom>.+?)\s*\((?P<code>\d+[A-Za-z]?)\)\s*$")
 
-def extraire_lignes_brutes(Html_lot_copro: HTMLParser):
+def extraire_lignes_brutes(Html_lot_copro: Union[HTMLParser, str]):
     """
     Retourne la liste ordonnée des (id, texte_normalise) présents dans le HTML,
     en excluant explicitement les éléments contenant les mots à exclure.
     """
-    arbre = HTMLParser(Html_lot_copro)
+    # Accepte soit une chaîne HTML soit un objet HTMLParser déjà construit.
+    if isinstance(Html_lot_copro, HTMLParser):
+        arbre = Html_lot_copro
+    else:
+        arbre = HTMLParser(Html_lot_copro)
     lignes = []
     for noeud in arbre.css("[id]"):
         idv = noeud.attributes.get("id")
@@ -79,7 +84,7 @@ def est_ligne_lot(ligne: str):
 def consolider_proprietaires_lots(elements) -> list[dict]:
     """
     elements : liste ordonnée de (id, texte)
-    retourne : liste ordonnée de dict { 'proprietaire': nom, 'code': code, 'num_apt': num, 'type_apt': type }
+    retourne : liste ordonnée de dict { 'nom_proprietaire': nom, 'code_proprietaire': code, 'num_apt': num, 'type_apt': type }
     logique : associer les lots qui suivent un propriétaire au propriétaire courant.
     Comportement : on retourne une entrée par lot. Si un propriétaire n'a pas de lot, on
     retourne une entrée avec les champs num_apt/type_apt vides.
@@ -93,17 +98,21 @@ def consolider_proprietaires_lots(elements) -> list[dict]:
         if proprietaire:
             # si le propriétaire précédent n'avait pas de lot, on ajoute une entrée vide
             if current_owner is not None and not current_owner_had_lot:
+                # Pour les propriétaires sans lot: mettre 'NA' si c'est une SCIC/AB HABITAT
+                if est_scic(current_owner.get("nom") or ""):
+                    na_num, na_type = "NA", "NA"
+                else:
+                    na_num, na_type = "", ""
                 consolide.append({
-                    "proprietaire": current_owner["nom"],
-                    "code": current_owner["code"],
-                    "num_apt": "",
-                    "type_apt": "",
+                    "nom_proprietaire": current_owner["nom"],
+                    "code_proprietaire": current_owner["code"],
+                    "num_apt": na_num,
+                    "type_apt": na_type,
                 })
             nom, code = proprietaire
             current_owner = {"nom": nom, "code": code}
             current_owner_had_lot = False
             continue
-
         if est_ligne_lot(texte):
             # extraire numéro et type depuis la ligne de lot
             num, typ = extraire_info_lot(texte)
@@ -111,28 +120,38 @@ def consolider_proprietaires_lots(elements) -> list[dict]:
             typ = (typ or "").lower()
             if current_owner is None:
                 consolide.append({
-                    "proprietaire": None,
-                    "code": None,
+                    "nom_proprietaire": None,
+                    "code_proprietaire": None,
                     "num_apt": num,
                     "type_apt": typ,
                 })
             else:
+                # Si le propriétaire est une SCIC / AB HABITAT, forcer 'NA' même si un lot est trouvé
+                if est_scic(current_owner.get("nom") or ""):
+                    entry_num, entry_type = "NA", "NA"
+                else:
+                    entry_num, entry_type = num, typ
                 consolide.append({
-                    "proprietaire": current_owner["nom"],
-                    "code": current_owner["code"],
-                    "num_apt": num,
-                    "type_apt": typ,
+                    "nom_proprietaire": current_owner["nom"],
+                    "code_proprietaire": current_owner["code"],
+                    "num_apt": entry_num,
+                    "type_apt": entry_type,
                 })
                 current_owner_had_lot = True
             continue
 
     # fin de boucle : si le dernier propriétaire n'a pas eu de lot, ajouter une entrée vide
     if current_owner is not None and not current_owner_had_lot:
+        # Pour les propriétaires sans lot: mettre 'NA' si c'est une SCIC/AB HABITAT
+        if est_scic(current_owner.get("nom") or ""):
+            na_num, na_type = "NA", "NA"
+        else:
+            na_num, na_type = "", ""
         consolide.append({
-            "proprietaire": current_owner["nom"],
-            "code": current_owner["code"],
-            "num_apt": "",
-            "type_apt": "",
+            "nom_proprietaire": current_owner["nom"],
+            "code_proprietaire": current_owner["code"],
+            "num_apt": na_num,
+            "type_apt": na_type,
         })
 
     return consolide
@@ -180,8 +199,8 @@ def afficher_avec_rich(consolide):
     # Le format attendu de "consolide" est une liste d'entrées où chaque entrée
     # a: proprietaire, code, num_apt, type_apt
     for entree in consolide:
-        proprietaire = entree.get("proprietaire")
-        code = entree.get("code") or ""
+        proprietaire = entree.get("nom_proprietaire") or entree.get("proprietaire")
+        code = entree.get("code_proprietaire") or entree.get("code") or ""
         num = entree.get("num_apt") or ""
         typ = entree.get("type_apt") or ""
 

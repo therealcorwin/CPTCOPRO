@@ -34,7 +34,7 @@ def charger_donnees(db_path: Path) -> pd.DataFrame:
 
     try:
         with sqlite3.connect(db_path) as conn:
-            query = "SELECT code, coproprietaire, debit, credit, date FROM coproprietaires ORDER BY date ASC"
+            query = "SELECT code_proprietaire, nom_proprietaire, debit, credit, date FROM coproprietaires ORDER BY date ASC"
             df = pd.read_sql_query(query, conn)
     except sqlite3.Error as e:
         st.error(f"Erreur lors de la connexion à la base de données : {e}")
@@ -88,19 +88,19 @@ def main() -> None:
     # --- Section des graphiques par copropriétaire ---
     st.header("Analyse par Copropriétaire")
 
-    liste_coproprietaires = sorted(df["coproprietaire"].unique())
+    liste_coproprietaires = sorted(df["nom_proprietaire"].unique())
     selection_copros = st.multiselect(
         "Sélectionnez un ou plusieurs copropriétaires :",
         options=liste_coproprietaires,
     )
 
     if selection_copros:
-        df_filtre = df[df["coproprietaire"].isin(selection_copros)]
+        df_filtre = df[df["nom_proprietaire"].isin(selection_copros)]
         fig_individuel = px.line(
             df_filtre,
             x="date",
             y=["debit", "credit"],
-            color="coproprietaire",
+            color="nom_proprietaire",
             title="Évolution des Débits et Crédits par Copropriétaire",
             labels={
                 "value": "Montant (€)",

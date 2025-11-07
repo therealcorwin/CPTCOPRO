@@ -46,8 +46,8 @@ def verif_presence_db(db_path: str) -> None:
                 """
                 CREATE TABLE IF NOT EXISTS charge (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code TEXT,
-                    proprietaire TEXT,
+                    code_proprietaire TEXT,
+                    nom_proprietaire TEXT,
                     debit REAL,
                     credit REAL,
                     date DATE,
@@ -82,7 +82,7 @@ def verif_presence_db(db_path: str) -> None:
                 WHEN NEW.debit > 2000.0
                 BEGIN
                     INSERT INTO alertes_debit_eleve (id_origin, code_proprietaire, nom_proprietaire, debit)
-                    VALUES (NEW.id, NEW.code, NEW.proprietaire, NEW.debit);
+                    VALUES (NEW.id, NEW.code_proprietaire, NEW.nom_proprietaire, NEW.debit);
                 END;
                 """
             )
@@ -94,14 +94,30 @@ def verif_presence_db(db_path: str) -> None:
                 CREATE TABLE IF NOT EXISTS coproprietaires (
                     nom_proprietaire TEXT,
                     code_proprietaire TEXT PRIMARY KEY,
-                    num_apt TEXT,
-                    type_apt TEXT,
+                    num_apt TEXT DEFAULT 'NA',
+                    type_apt TEXT DEFAULT 'NA',
                     last_check DATETIME DEFAULT CURRENT_DATE
                 )
                 """
             )
-            logger.info("Table 'coproprietaires' vérifiée/créée.")
+            logger.success("Table 'coproprietaires' vérifiée/créée.")
 
+            logger.info("Création de la vue 'vw_charge_coproprietaires'...")
+            cur.executescript("""
+            CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
+            SELECT
+                c.code_proprietaire AS code_proprietaire,
+                c.nom_proprietaire AS nom_proprietaire,
+                c.debit AS debit,
+                c.credit AS credit,
+                COALESCE(cp.num_apt, 'NA') AS num_apt,
+                COALESCE(cp.type_apt, 'NA') AS type_apt,
+                c.date AS date
+            FROM charge c
+            LEFT JOIN coproprietaires cp ON c.code_proprietaire = cp.code_proprietaire;
+            """)
+            logger.success("View 'vw_charge_coproprietaires' créée/assurée.")
+            
             conn.commit()
             conn.close()
             logger.success("Tables Alerte_debit_eleve, charge et coproprietaires et trigger 'alerte_debit_eleve' créés.")
@@ -143,8 +159,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 """
                 CREATE TABLE IF NOT EXISTS charge (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code TEXT,
-                    proprietaire TEXT,
+                    code_proprietaire TEXT,
+                    nom_proprietaire TEXT,
                     debit REAL,
                     credit REAL,
                     date DATE,
@@ -196,7 +212,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 WHEN NEW.debit > 2000.0
                 BEGIN
                     INSERT INTO alertes_debit_eleve (id_origin, code_proprietaire, nom_proprietaire, debit)
-                    VALUES (NEW.id, NEW.code, NEW.proprietaire, NEW.debit);
+                    VALUES (NEW.id, NEW.code_proprietaire, NEW.nom_proprietaire, NEW.debit);
                 END;
                 """
             )
@@ -217,8 +233,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 CREATE TABLE IF NOT EXISTS coproprietaires (
                     nom_proprietaire TEXT,
                     code_proprietaire TEXT PRIMARY KEY,
-                    num_apt TEXT,
-                    type_apt TEXT,
+                    num_apt TEXT DEFAULT 'NA',
+                    type_apt TEXT DEFAULT 'NA',
                     last_check DATETIME DEFAULT CURRENT_DATE
                 )
                 """
@@ -226,6 +242,25 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             created.append('coproprietaires')
             logger.info("Table 'coproprietaires' créée.")
         conn.commit()
+        # Vue vw_charge_coproprietaires
+        logger.info("Vérification de la présence de la vue 'vw_charge_coproprietaires'.")
+        try:
+            cur.executescript("""
+            CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
+            SELECT
+                c.code_proprietaire AS code_proprietaire,
+                c.nom_proprietaire AS nom_proprietaire,
+                c.debit AS debit,
+                c.credit AS credit,
+                COALESCE(cp.num_apt, 'NA') AS num_apt,
+                COALESCE(cp.type_apt, 'NA') AS type_apt,
+                c.date AS date
+            FROM charge c
+            LEFT JOIN coproprietaires cp ON c.code_proprietaire = cp.code_proprietaire;
+            """)
+            logger.success("View 'vw_charge_coproprietaires' créée/assurée.")
+        except Exception as e:
+            logger.error(f"Impossible de créer la vue vw_charge_coproprietaires : {e}")
     except Exception as e:
         conn.rollback()
         logger.error(f"Erreur lors de la vérification/création des composants DB : {e}")
@@ -245,13 +280,12 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     """
     Enregistre les données extraites dans une base de données SQLite.
 
-    La fonction se connecte à la base de données SQLite spécifiée par `db_path`,
-    crée une table "charge" si elle n'existe pas, et insère les données
-    fournies dans la table.
+    La fonction se connecte à la base de données SQLite spécifiée par `db_path`
+    et insère les données fournies dans la table `charge`.
 
     Parameters:
     - data (list[Any]): Une liste de tuples contenant les données à enregistrer.
-      Chaque tuple doit avoir le format suivant : (code, proprietaire, debit, credit, date).
+      Chaque tuple doit avoir le format suivant : (code_proprietaire, nom_proprietaire, debit, credit, date).
     - db_path (str): Le chemin vers la base de données SQLite.
 
     Returns:
@@ -267,11 +301,11 @@ def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     try:
         # Insertion des données
         # Ignorer les trois premiers éléments de data (en-têtes) avec data[3:]
-        # data[3:] contient des tuples (code, proprietaire, debit, credit, date)
+        # data[3:] contient des tuples (code_proprietaire, nom_proprietaire, debit, credit, date)
         cur.executemany(
-            "INSERT INTO charge (code, proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
             data[3:],
-        )        
+        )
         conn.commit()
     except Exception as e:
         logger.error(f"Erreur lors de l'insertion des données : {e}")
@@ -292,8 +326,8 @@ def enregistrer_coproprietaires(data_coproprietaires: list[Any], db_path: str) -
     
     Args:
         data_coproprietaires: Liste de dictionnaires contenant les clés:
-            - proprietaire: nom du propriétaire
-            - code: code du propriétaire
+            - nom_proprietaire: nom du propriétaire
+            - code_proprietaire: code du propriétaire
             - num_apt: numéro d'appartement
             - type_apt: type d'appartement
         db_path: Chemin vers la base de données SQLite
@@ -304,7 +338,10 @@ def enregistrer_coproprietaires(data_coproprietaires: list[Any], db_path: str) -
     logger.info("Insertion des copropriétaires dans la base de données...")
     data = []
     for copro in data_coproprietaires:
-        data.append((copro.get("proprietaire") or "", copro.get("code") or "", copro.get("num_apt") or "", copro.get("type_apt") or ""))
+        # Accept both old keys ('proprietaire','code') and new keys ('nom_proprietaire','code_proprietaire')
+        nom = copro.get("nom_proprietaire") if copro.get("nom_proprietaire") is not None else copro.get("proprietaire")
+        code = copro.get("code_proprietaire") if copro.get("code_proprietaire") is not None else copro.get("code")
+        data.append((nom or "", code or "", copro.get("num_apt") or "", copro.get("type_apt") or ""))
 
     if not data:
         logger.info("Aucune donnée coproprietaires à insérer.")
