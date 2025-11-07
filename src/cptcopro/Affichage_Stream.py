@@ -48,4 +48,9 @@ with sqlite3.connect(DB_PATH) as conn:
 if __name__ == "__main__":
     loguru.logger.info("Starting Streamlit app for coproprietaires display")
     #affiche_copro(DB_PATH)
-    st.dataframe(df)
+    df_filtre = df.query("proprietaire in @proprietaires and code in @code and type_apt in @type_apt")
+    st.dataframe(df_filtre)
+
+    st.markdown("### Données brutes")
+    dd = df_filtre["debit"].sum()
+    st.subheader(round(dd,2))

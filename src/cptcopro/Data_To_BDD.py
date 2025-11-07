@@ -46,8 +46,8 @@ def verif_presence_db(db_path: str) -> None:
                 """
                 CREATE TABLE IF NOT EXISTS charge (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code_proprietaire TEXT,
                     nom_proprietaire TEXT,
+                    code_proprietaire TEXT,
                     debit REAL,
                     credit REAL,
                     date DATE,
@@ -63,15 +63,15 @@ def verif_presence_db(db_path: str) -> None:
                 CREATE TABLE IF NOT EXISTS alertes_debit_eleve (
                     alerte_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     id_origin INTEGER NOT NULL,
-                    code_proprietaire TEXT,
                     nom_proprietaire TEXT,
+                    code_proprietaire TEXT,
                     debit REAL NOT NULL,
                     date_detection DATETIME DEFAULT CURRENT_DATE,
                     FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
                 );
                 """
             )
-            logger.info("Table 'alertes_debit_eleve' vérifiée/créée.")
+            logger.success("Table 'alertes_debit_eleve' vérifiée/créée.")
 
             # Création du trigger pour les insertions
             cur.execute(
@@ -81,8 +81,8 @@ def verif_presence_db(db_path: str) -> None:
                 FOR EACH ROW
                 WHEN NEW.debit > 2000.0
                 BEGIN
-                    INSERT INTO alertes_debit_eleve (id_origin, code_proprietaire, nom_proprietaire, debit)
-                    VALUES (NEW.id, NEW.code_proprietaire, NEW.nom_proprietaire, NEW.debit);
+                    INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit)
+                    VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit);
                 END;
                 """
             )
@@ -106,8 +106,8 @@ def verif_presence_db(db_path: str) -> None:
             cur.executescript("""
             CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
             SELECT
-                c.code_proprietaire AS code_proprietaire,
                 c.nom_proprietaire AS nom_proprietaire,
+                c.code_proprietaire AS code_proprietaire,
                 c.debit AS debit,
                 c.credit AS credit,
                 COALESCE(cp.num_apt, 'NA') AS num_apt,
@@ -159,8 +159,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 """
                 CREATE TABLE IF NOT EXISTS charge (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    code_proprietaire TEXT,
                     nom_proprietaire TEXT,
+                    code_proprietaire TEXT,
                     debit REAL,
                     credit REAL,
                     date DATE,
@@ -184,8 +184,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 CREATE TABLE IF NOT EXISTS alertes_debit_eleve (
                     alerte_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     id_origin INTEGER NOT NULL,
-                    code_proprietaire TEXT,
                     nom_proprietaire TEXT,
+                    code_proprietaire TEXT,
                     debit REAL NOT NULL,
                     date_detection DATETIME DEFAULT CURRENT_DATE,
                     FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
@@ -211,8 +211,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 FOR EACH ROW
                 WHEN NEW.debit > 2000.0
                 BEGIN
-                    INSERT INTO alertes_debit_eleve (id_origin, code_proprietaire, nom_proprietaire, debit)
-                    VALUES (NEW.id, NEW.code_proprietaire, NEW.nom_proprietaire, NEW.debit);
+                    INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit)
+                    VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit);
                 END;
                 """
             )
@@ -248,8 +248,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             cur.executescript("""
             CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
             SELECT
-                c.code_proprietaire AS code_proprietaire,
                 c.nom_proprietaire AS nom_proprietaire,
+                c.code_proprietaire AS code_proprietaire,
                 c.debit AS debit,
                 c.credit AS credit,
                 COALESCE(cp.num_apt, 'NA') AS num_apt,
