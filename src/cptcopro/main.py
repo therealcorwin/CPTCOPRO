@@ -8,6 +8,7 @@ import cptcopro.Data_To_BDD as dtb
 import cptcopro.Backup_DB as bdb
 import cptcopro.Parsing_Lots_Copro as pcl
 import cptcopro.Traitement_Lots_Copro as tlc
+import cptcopro.Dedoublonnage as doublon
 from loguru import logger
 
 
@@ -31,7 +32,7 @@ logger.add(
 
 logger = logger.bind(type_log="MAIN")
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "BDD", "test.sqlite")
+DB_PATH = os.path.join(os.path.dirname(__file__), "BDD", "copropriete.sqlite")
 """
 ## Charger le contenu du fichier HTML
 with open(
@@ -44,8 +45,8 @@ with open(
 #dtb.verif_repertoire_db(DB_PATH)
 #dtb.verif_presence_db(DB_PATH)
 #dtb.integrite_db(DB_PATH)
-#bdb.backup_db(DB_PATH)
-#exit()
+bdb.backup_db(DB_PATH)
+exit()
 
 
 def main() -> None:
@@ -121,7 +122,15 @@ def main() -> None:
         logger.info("Traitement terminé et données sauvegardées.")
     except Exception as exc:
         logger.error(f"Erreur lors des opérations BDD/backup : {exc}")
-
+    
+    logger.info("Vérification des doublons dans la table 'charge'...")
+    analyse = doublon.analyse_doublons(DB_PATH)
+    if not analyse:
+        logger.info("Aucun doublon détecté.")
+    else:
+        logger.info(f"Doublons détectés (ids à supprimer) : {len(analyse)}")
+        doublon.rapport_doublon(str(DB_PATH), analyse)
+        doublon.suppression_doublons(DB_PATH, analyse)
 
 if __name__ == "__main__":
     main()

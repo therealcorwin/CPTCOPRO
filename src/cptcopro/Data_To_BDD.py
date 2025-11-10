@@ -51,7 +51,7 @@ def verif_presence_db(db_path: str) -> None:
                     debit REAL,
                     credit REAL,
                     date DATE,
-                    last_check DATETIME DEFAULT CURRENT_DATE
+                    last_check DATE DEFAULT CURRENT_DATE
                 )
                 """
             )
@@ -66,7 +66,7 @@ def verif_presence_db(db_path: str) -> None:
                     nom_proprietaire TEXT,
                     code_proprietaire TEXT,
                     debit REAL NOT NULL,
-                    date_detection DATETIME DEFAULT CURRENT_DATE,
+                    date_detection DATE DEFAULT CURRENT_DATE,
                     FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
                 );
                 """
@@ -89,6 +89,8 @@ def verif_presence_db(db_path: str) -> None:
             logger.info("Trigger 'alerte_debit_eleve' vérifié/créé.")
 
             # Creation Table coproprietaires
+            # Note: code_proprietaire is used as PRIMARY KEY; we do not add a separate
+            # autoincrement id column to avoid conflicting primary keys.
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS coproprietaires (
@@ -96,7 +98,7 @@ def verif_presence_db(db_path: str) -> None:
                     code_proprietaire TEXT PRIMARY KEY,
                     num_apt TEXT DEFAULT 'NA',
                     type_apt TEXT DEFAULT 'NA',
-                    last_check DATETIME DEFAULT CURRENT_DATE
+                    last_check DATE DEFAULT CURRENT_DATE
                 )
                 """
             )
@@ -106,6 +108,7 @@ def verif_presence_db(db_path: str) -> None:
             cur.executescript("""
             CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
             SELECT
+                (SELECT COUNT(*) FROM charge c2 WHERE c2.id <= c.id) AS id,
                 c.nom_proprietaire AS nom_proprietaire,
                 c.code_proprietaire AS code_proprietaire,
                 c.debit AS debit,
@@ -164,7 +167,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     debit REAL,
                     credit REAL,
                     date DATE,
-                    last_check DATETIME DEFAULT CURRENT_DATE
+                    last_check DATE DEFAULT CURRENT_DATE
                 )
                 """
             )
@@ -187,7 +190,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     nom_proprietaire TEXT,
                     code_proprietaire TEXT,
                     debit REAL NOT NULL,
-                    date_detection DATETIME DEFAULT CURRENT_DATE,
+                    date_detection DATE DEFAULT CURRENT_DATE,
                     FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
                 );
                 """
@@ -235,7 +238,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     code_proprietaire TEXT PRIMARY KEY,
                     num_apt TEXT DEFAULT 'NA',
                     type_apt TEXT DEFAULT 'NA',
-                    last_check DATETIME DEFAULT CURRENT_DATE
+                    last_check DATE DEFAULT CURRENT_DATE
                 )
                 """
             )
@@ -248,6 +251,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             cur.executescript("""
             CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
             SELECT
+                (SELECT COUNT(*) FROM charge c2 WHERE c2.id <= c.id) AS id,
                 c.nom_proprietaire AS nom_proprietaire,
                 c.code_proprietaire AS code_proprietaire,
                 c.debit AS debit,
