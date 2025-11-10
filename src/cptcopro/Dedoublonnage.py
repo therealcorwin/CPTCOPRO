@@ -5,7 +5,6 @@ import csv
 import os
 import sqlite3
 from loguru import logger
-import sys
 from datetime import datetime
 
 logger.remove()
@@ -19,8 +18,6 @@ rapport_complet = f"rapport_complet-{now.strftime('%d-%m-%y-%H-%M-%S')}.csv"
 rapport_resume_dir = os.path.join(rapport_dir, rapport_resume)
 rapport_complet_dir = os.path.join(rapport_dir, rapport_complet)
 
-# Chemin par défaut vers la base de données SQLite
-DB_PATH = os.path.join(os.path.dirname(__file__), "BDD", "test.sqlite")
 
 
 def analyse_doublons(DB_PATH: str) -> list[int]:
