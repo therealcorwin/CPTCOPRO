@@ -123,14 +123,17 @@ def main() -> None:
     except Exception as exc:
         logger.error(f"Erreur lors des opérations BDD/backup : {exc}")
     
-    logger.info("Vérification des doublons dans la table 'charge'...")
-    analyse = doublon.analyse_doublons(DB_PATH)
-    if not analyse:
-        logger.info("Aucun doublon détecté.")
-    else:
-        logger.info(f"Doublons détectés (ids à supprimer) : {len(analyse)}")
-        doublon.rapport_doublon(str(DB_PATH), analyse)
-        doublon.suppression_doublons(DB_PATH, analyse)
+    try:
+        logger.info("Vérification des doublons dans la table 'charge'...")
+        analyse = doublon.analyse_doublons(DB_PATH)
+        if not analyse:
+            logger.info("Aucun doublon détecté.")
+        else:
+            logger.info(f"Doublons détectés (ids à supprimer) : {len(analyse)}")
+            doublon.rapport_doublon(DB_PATH, analyse)
+            doublon.suppression_doublons(DB_PATH, analyse)
+    except Exception as exc:
+        logger.error(f"Erreur lors de la déduplication : {exc}")
 
 if __name__ == "__main__":
     main()

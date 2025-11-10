@@ -114,7 +114,7 @@ def suppression_doublons(DB_PATH: str, liste_ids: list[int]):
 def rapport_doublon(DB_PATH: str, liste_ids: list[int] , rapport_resume_dir: str = rapport_resume_dir, rapport_complet_dir: str = rapport_complet_dir) -> None:
     logger.info("Génération des rapports de doublons.")
 
-     # Connexion à la base de données
+    # Connexion à la base de données    
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"DB file not found: {DB_PATH}")
     conn = sqlite3.connect(DB_PATH)
@@ -191,18 +191,3 @@ def rapport_doublon(DB_PATH: str, liste_ids: list[int] , rapport_resume_dir: str
     for r in liste_doublons:
         toto = f"{r['nom_proprietaire']!r}: Nbre lignes doublons={r['Nbre lignes doublons']}, Nbre groupes doublons={r['Nbre groupes doublons']}, Nbre enregistrements={r['Nbre enregistrements']}"
         logger.info(toto)
-
-if __name__ == "__main__":
-    # Exemple d'utilisation
-    
-    if DB_PATH:
-       analyse = analyse_doublons(str(DB_PATH))
-    else:
-        logger.warning(f"La base de données '{DB_PATH}' n'a pas été trouvée.")
-    if not analyse:
-        logger.info("Aucun doublon détecté. Rien à faire.")
-        exit()
-    else:
-        logger.info(f"Doublons détectés (ids à supprimer) : {len(analyse)}")
-        rapport_doublon(str(DB_PATH), analyse)
-        suppression_doublons(str(DB_PATH), analyse)

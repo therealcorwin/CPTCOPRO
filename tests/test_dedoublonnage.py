@@ -57,8 +57,16 @@ def test_dedoublonnage_basic(tmp_path: Path):
     suppression_doublons(str(db), ids_to_delete)
 
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM charge")
-    remaining = cur.fetchone()[0]
-    assert remaining == 2  # one for Owner A, one for Owner B
+    cur.execute("SELECT nom_proprietaire, last_check FROM charge")
+    remaining_rows = cur.fetchall()
+
+    # Expected remaining rows: Owner A with the most recent last_check, Owner B original
+    expected = {("Owner A", "2025-01-03"), ("Owner B", "2025-02-01")}
+    assert set(remaining_rows) == expected
+
+    # Ensure older Owner A timestamps are absent by asserting Owner A has the newest timestamp
+    for owner, last_check in remaining_rows:
+        if owner == "Owner A":
+            assert last_check == "2025-01-03"
 
     conn.close()
