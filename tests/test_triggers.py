@@ -28,10 +28,18 @@ def test_insert_creates_and_upserts(tmp_path):
                     ("C100", "Owner A", 2600.0, 0.0))
         id2 = cur.lastrowid
         conn.commit()
-        cur.execute("SELECT COUNT(*), id_origin FROM alertes_debit_eleve WHERE code_proprietaire = ?", ("C100",))
-        cnt, id_origin = cur.fetchone()
+        # ensure exactly one alert exists for this proprietor
+        cur.execute("SELECT COUNT(*) FROM alertes_debit_eleve WHERE code_proprietaire = ?", ("C100",))
+        cnt = cur.fetchone()[0]
         assert cnt == 1
-        assert id_origin == id2
+
+        # fetch the alert's origin id (most recent) and compare to id2
+        cur.execute(
+            "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = ? ORDER BY alerte_id DESC LIMIT 1",
+            ("C100",),
+        )
+        id_origin_row = cur.fetchone()
+        assert id_origin_row is not None and id_origin_row[0] == id2
     finally:
         conn.close()
 

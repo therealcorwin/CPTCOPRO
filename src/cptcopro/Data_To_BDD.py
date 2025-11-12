@@ -1,5 +1,4 @@
-import os
-import sqlite3
+import os            logger.info("Triggers 'alerte_debit_eleve' créés (insert/insert_clear/delete).")import sqlite3
 from loguru import logger
 from typing import Any, Dict
 
@@ -105,26 +104,24 @@ def verif_presence_db(db_path: str) -> None:
 
             -- Update triggers removed: inserts/deletes handle alert lifecycle
 
-                        -- Delete: if the deleted row was the latest, rebuild alert from the new latest (or remove)
-                                    CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_delete
-                                    AFTER DELETE ON charge
-                                    FOR EACH ROW
-                                    WHEN OLD.id > COALESCE((SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = OLD.code_proprietaire), 0)
-                                    BEGIN
-                                            -- remove existing alert (we will recreate only if new latest > threshold)
-                                            DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
-
-                                            -- insert new alert if the current latest charge (if any) is > threshold
-                                            INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, date_detection)
-                                            SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit, CURRENT_DATE
-                                            FROM charge c
-                                            WHERE c.code_proprietaire = OLD.code_proprietaire
-                                              AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
-                                              AND c.debit > 2000.0;
-                                    END;
+            -- Delete: if the deleted row was the latest, rebuild alert from the new latest (or remove)
+            CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_delete
+            AFTER DELETE ON charge
+            FOR EACH ROW
+            WHEN OLD.id > COALESCE((SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = OLD.code_proprietaire), 0)
+            BEGIN
+                -- remove existing alert (we will recreate only if new latest > threshold)
+                DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
+                -- insert new alert if the current latest charge (if any) is > threshold
+                INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, date_detection)
+                SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit, CURRENT_DATE
+                FROM charge c
+                WHERE c.code_proprietaire = OLD.code_proprietaire
+                AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
+                AND c.debit > 2000.0;
+            END;
             """)
-            logger.info("Triggers 'alerte_debit_eleve' vérifiés/créés (insert/update/delete).")
-
+            logger.info("Triggers 'alerte_debit_eleve' vérifiés/créés (insert/insert_clear/delete).")
             # Creation Table coproprietaires
             # Note: code_proprietaire is used as PRIMARY KEY; we do not add a separate
             # autoincrement id column to avoid conflicting primary keys.
@@ -274,22 +271,22 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
 
             -- Update triggers removed: inserts/deletes handle alert lifecycle (no UPDATE events expected)
 
-                        -- Delete: always rebuild alert from the current latest (or remove)
-                        CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_delete
-                        AFTER DELETE ON charge
-                        FOR EACH ROW
-                        BEGIN
-                                -- remove existing alert (we will recreate only if new latest > threshold)
-                                DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
+            -- Delete: always rebuild alert from the current latest (or remove)
+            CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_delete
+            AFTER DELETE ON charge
+            FOR EACH ROW
+            BEGIN
+                -- remove existing alert (we will recreate only if new latest > threshold)
+                DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
 
-                                -- insert new alert if the current latest charge (if any) is > threshold
-                                INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, date_detection)
-                                SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit, CURRENT_DATE
-                                FROM charge c
-                                WHERE c.code_proprietaire = OLD.code_proprietaire
-                                    AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
-                                    AND c.debit > 2000.0;
-                        END;
+                -- insert new alert if the current latest charge (if any) is > threshold
+                INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, date_detection)
+                SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit, CURRENT_DATE
+                FROM charge c
+                WHERE c.code_proprietaire = OLD.code_proprietaire
+                  AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
+                  AND c.debit > 2000.0;
+            END;
             """)
             created.append('alerte_debit_eleve')
             logger.info("Triggers 'alerte_debit_eleve' créés (insert/update/delete).")
