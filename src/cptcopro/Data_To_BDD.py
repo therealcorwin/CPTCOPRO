@@ -1,4 +1,5 @@
-import os            logger.info("Triggers 'alerte_debit_eleve' créés (insert/insert_clear/delete).")import sqlite3
+import os
+import sqlite3
 from loguru import logger
 from typing import Any, Dict
 
@@ -122,6 +123,8 @@ def verif_presence_db(db_path: str) -> None:
             END;
             """)
             logger.info("Triggers 'alerte_debit_eleve' vérifiés/créés (insert/insert_clear/delete).")
+            # duplicate log moved here to ensure no logging before logger configuration
+            logger.info("Triggers 'alerte_debit_eleve' créés (insert/insert_clear/delete).")
             # Creation Table coproprietaires
             # Note: code_proprietaire is used as PRIMARY KEY; we do not add a separate
             # autoincrement id column to avoid conflicting primary keys.
@@ -275,6 +278,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_delete
             AFTER DELETE ON charge
             FOR EACH ROW
+            WHEN OLD.id >= COALESCE((SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire), 0)
             BEGIN
                 -- remove existing alert (we will recreate only if new latest > threshold)
                 DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
@@ -289,7 +293,6 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             END;
             """)
             created.append('alerte_debit_eleve')
-            logger.info("Triggers 'alerte_debit_eleve' créés (insert/update/delete).")
 
         # coproprietaires
         logger.info("Vérification de la présence de la table 'coproprietaires'.")
