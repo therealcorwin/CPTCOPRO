@@ -73,20 +73,57 @@ def verif_presence_db(db_path: str) -> None:
             )
             logger.success("Table 'alertes_debit_eleve' vérifiée/créée.")
 
-            # Création du trigger pour les insertions
-            cur.execute(
-                """
-                CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve
-                AFTER INSERT ON charge
-                FOR EACH ROW
-                WHEN NEW.debit > 2000.0
-                BEGIN
-                    INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit)
-                    VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit);
-                END;
-                """
-            )
-            logger.info("Trigger 'alerte_debit_eleve' vérifié/créé.")
+            # Créer un index unique sur code_proprietaire pour permettre l'UPSERT
+            cur.executescript("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_alertes_code_proprietaire ON alertes_debit_eleve(code_proprietaire);
+
+            -- Trigger: insertion -> upsert (une alerte par propriétaire)
+            -- Only act if the inserted row is the latest for this proprietor
+            CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert
+            AFTER INSERT ON charge
+            FOR EACH ROW
+            WHEN NEW.debit > 2000.0 AND NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+            BEGIN
+                INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, date_detection)
+                VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit, CURRENT_DATE)
+                ON CONFLICT(code_proprietaire) DO UPDATE SET
+                    id_origin=excluded.id_origin,
+                    nom_proprietaire=excluded.nom_proprietaire,
+                    debit=excluded.debit,
+                    date_detection=CURRENT_DATE;
+            END;
+
+            -- If the inserted row is latest and is below (or equal) threshold, clear the alert
+            CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert_clear
+            AFTER INSERT ON charge
+            FOR EACH ROW
+            WHEN NEW.debit <= 2000.0 AND NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+            BEGIN
+                DELETE FROM alertes_debit_eleve
+                WHERE code_proprietaire = NEW.code_proprietaire;
+            END;
+
+            -- Update triggers removed: inserts/deletes handle alert lifecycle
+
+                        -- Delete: if the deleted row was the latest, rebuild alert from the new latest (or remove)
+                                    CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_delete
+                                    AFTER DELETE ON charge
+                                    FOR EACH ROW
+                                    WHEN OLD.id > COALESCE((SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = OLD.code_proprietaire), 0)
+                                    BEGIN
+                                            -- remove existing alert (we will recreate only if new latest > threshold)
+                                            DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
+
+                                            -- insert new alert if the current latest charge (if any) is > threshold
+                                            INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, date_detection)
+                                            SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit, CURRENT_DATE
+                                            FROM charge c
+                                            WHERE c.code_proprietaire = OLD.code_proprietaire
+                                              AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
+                                              AND c.debit > 2000.0;
+                                    END;
+            """)
+            logger.info("Triggers 'alerte_debit_eleve' vérifiés/créés (insert/update/delete).")
 
             # Creation Table coproprietaires
             # Note: code_proprietaire is used as PRIMARY KEY; we do not add a separate
@@ -207,20 +244,55 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         else:
             logger.warning("Trigger 'alerte_debit_eleve' manquant, création en cours.")
             has_trigger = False
-            cur.execute(
-                """
-                CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve
-                AFTER INSERT ON charge
-                FOR EACH ROW
-                WHEN NEW.debit > 2000.0
-                BEGIN
-                    INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit)
-                    VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit);
-                END;
-                """
-            )
+            cur.executescript("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_alertes_code_proprietaire ON alertes_debit_eleve(code_proprietaire);
+
+            -- Only act if the inserted row is the latest for this proprietor
+            CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert
+            AFTER INSERT ON charge
+            FOR EACH ROW
+            WHEN NEW.debit > 2000.0 AND NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+            BEGIN
+                INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, date_detection)
+                VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit, CURRENT_DATE)
+                ON CONFLICT(code_proprietaire) DO UPDATE SET
+                    id_origin=excluded.id_origin,
+                    nom_proprietaire=excluded.nom_proprietaire,
+                    debit=excluded.debit,
+                    date_detection=CURRENT_DATE;
+            END;
+
+            -- If the inserted row is latest and is below (or equal) threshold, clear the alert
+            CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert_clear
+            AFTER INSERT ON charge
+            FOR EACH ROW
+            WHEN NEW.debit <= 2000.0 AND NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+            BEGIN
+                DELETE FROM alertes_debit_eleve
+                WHERE code_proprietaire = NEW.code_proprietaire;
+            END;
+
+            -- Update triggers removed: inserts/deletes handle alert lifecycle (no UPDATE events expected)
+
+                        -- Delete: always rebuild alert from the current latest (or remove)
+                        CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_delete
+                        AFTER DELETE ON charge
+                        FOR EACH ROW
+                        BEGIN
+                                -- remove existing alert (we will recreate only if new latest > threshold)
+                                DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
+
+                                -- insert new alert if the current latest charge (if any) is > threshold
+                                INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, date_detection)
+                                SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit, CURRENT_DATE
+                                FROM charge c
+                                WHERE c.code_proprietaire = OLD.code_proprietaire
+                                    AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
+                                    AND c.debit > 2000.0;
+                        END;
+            """)
             created.append('alerte_debit_eleve')
-            logger.info("Trigger 'alerte_debit_eleve' créé.")
+            logger.info("Triggers 'alerte_debit_eleve' créés (insert/update/delete).")
 
         # coproprietaires
         logger.info("Vérification de la présence de la table 'coproprietaires'.")

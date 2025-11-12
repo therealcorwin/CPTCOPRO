@@ -32,7 +32,7 @@ logger.add(
 
 logger = logger.bind(type_log="MAIN")
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "BDD", "copropriete.sqlite")
+DB_PATH = os.path.join(os.path.dirname(__file__), "BDD", "test.sqlite")
 """
 ## Charger le contenu du fichier HTML
 with open(
@@ -45,8 +45,8 @@ with open(
 #dtb.verif_repertoire_db(DB_PATH)
 #dtb.verif_presence_db(DB_PATH)
 #dtb.integrite_db(DB_PATH)
-bdb.backup_db(DB_PATH)
-exit()
+#bdb.backup_db(DB_PATH)
+#exit()
 
 
 def main() -> None:
