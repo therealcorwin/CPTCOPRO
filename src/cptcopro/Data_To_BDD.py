@@ -123,9 +123,7 @@ def verif_presence_db(db_path: str) -> None:
             END;
             """)
             logger.info("Triggers 'alerte_debit_eleve' vérifiés/créés (insert/insert_clear/delete).")
-            # duplicate log moved here to ensure no logging before logger configuration
-            logger.info("Triggers 'alerte_debit_eleve' créés (insert/insert_clear/delete).")
-            # Creation Table coproprietaires
+            # Creation Table coproprietaires            # Creation Table coproprietaires
             # Note: code_proprietaire is used as PRIMARY KEY; we do not add a separate
             # autoincrement id column to avoid conflicting primary keys.
             cur.execute(
