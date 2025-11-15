@@ -1,56 +1,60 @@
 import streamlit as st
-import loguru
-import sqlite3
-import os
-import pandas as pd
+from pathlib import Path
 
-
-DB_PATH = os.path.join(os.path.dirname(__file__), "BDD", "test.sqlite")
-
-with sqlite3.connect(DB_PATH) as conn:
-    df = pd.read_sql_query("SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires", conn)
-
-st.set_page_config(page_title="Copropriété Branchard", layout="wide") 
-st.title("Tableau de bord de la copropriété")
-
-st.divider()
-st.sidebar.title("Paramètres de l'application")
-proprietaires = st.sidebar.multiselect(
-    "Filtrer par copropriétaire",
-    options=df["proprietaire"].unique(),
-    default=df["proprietaire"].unique(),
-)
-code= st.sidebar.multiselect(
-    "Filtrer par code",
-    options=df["code"].unique(),
-    default=df["code"].unique(),
-)
-type_apt= st.sidebar.multiselect(
-    "Filtrer par type d'appartement",
-    options=df["type_apt"].unique(),
-    default=df["type_apt"].unique(),
+# --- Configuration de la page ---
+st.set_page_config(
+    page_title="Suivi Charges Copropriétaires",
+    layout="wide"
 )
 
-def affiche_copro(DB_PATH):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires")
-    rows = cur.fetchall()
-    st.subheader("Liste des copropriétaires")
-    for row in rows:
-        st.write(row)
-    conn.close()
+# --- COnfiguration de la navigation ---
+Dashboard_page = st.Page(
+    "Pages/Dashboard.py",
+    title="Dashboard Suivi Charges",
+    icon=":material/account_circle:",
+    default=True,
+)
+Liste_Charge_page = st.Page(
+    "Pages/Liste_Charge.py",
+    title="Suivi détaillé des charges",
+    icon=":material/bar_chart:",
+)
+Liste_Copro_page = st.Page(
+    "Pages/Liste_Copro.py",
+    title="Liste des copropriétaires",
+    icon=":material/smart_toy:",
+)
+Courbe_Charge_Corpo_page = st.Page(
+    "Pages/Courbe_Charge_Copro.py",
+    title="Analyse des débits",
+    icon=":material/trending_up:",
+)
 
-with sqlite3.connect(DB_PATH) as conn:
-    df = pd.read_sql_query("SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires", conn)
+Alerte_page = st.Page(
+    "Pages/Alerte.py",
+    title="Alertes",
+    icon=":material/warning:",
+)
+
+# --- NAVIGATION SETUP [WITHOUT SECTIONS] ---
+# pg = st.navigation(pages=[about_page, project_1_page, project_2_page])
+
+# --- NAVIGATION SETUP [WITH SECTIONS]---
+menus = st.navigation(
+    {
+        "Dashboard Général": [Dashboard_page],
+        "Suivi des Charges": [Liste_Charge_page, Courbe_Charge_Corpo_page, Alerte_page],
+        "Liste des Copropriétaires": [Liste_Copro_page],
+    }
+)
+
+# --- SHARED ON ALL PAGES ---
+# Construire un chemin absolu vers l'image du logo
+# pour éviter les problèmes de chemin relatif.
+LOGO_PATH = Path(__file__).parent / "Pages" / "Assets" / "gb2.png"
+st.logo(str(LOGO_PATH), size="large")
+st.sidebar.markdown("Made with ❤️ by [Therealcorwin]")
 
 
-if __name__ == "__main__":
-    loguru.logger.info("Starting Streamlit app for coproprietaires display")
-    #affiche_copro(DB_PATH)
-    df_filtre = df.query("proprietaire in @proprietaires and code in @code and type_apt in @type_apt")
-    st.dataframe(df_filtre)
-
-    st.markdown("### Données brutes")
-    dd = df_filtre["debit"].sum()
-    st.subheader(round(dd,2))
+# --- RUN NAVIGATION ---
+menus.run()

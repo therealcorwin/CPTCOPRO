@@ -220,11 +220,10 @@ backup.txt
 
 # Local logs
 ctpcopro.log
-src/cptcopro/Solde_*
-src/cptcopro/Extranet*
-src/cptcopro/*.sqlite*
 src/BACKUP/*
 *.csv
 src/cptcopro/Lots*
 src/cptcopro/BDD/*
 _data*
+trigger parametrable*
+
