@@ -79,12 +79,29 @@ if proprietaire_input:
         multiselect_key = f"multiselect_{proprietaire_input}"
         if len(options) > 1:
             if len(options) > 20:
-                st.info(f"Plus de 20 copropriétaires trouvés ({len(options)}). Veuillez affiner votre recherche ou utiliser la case 'Sélectionner tout' pour tout tracer.")
-            select_all = st.checkbox(f"Sélectionner tout ({len(options)})", value=True, key=select_all_key)
+                st.info(
+                    f"Plus de 20 copropriétaires trouvés ({len(options)}). Par défaut rien n'est sélectionné; "
+                    "cochez la case 'Sélectionner tout' pour tout tracer, ou affinez votre recherche pour réduire les résultats."
+                )
+            # Par défaut rien n'est sélectionné pour éviter de surcharger le graphique.
+            # L'utilisateur peut cocher "Sélectionner tout" pour remplir le multiselect.
+            select_all = st.checkbox(f"Sélectionner tout ({len(options)})", value=False, key=select_all_key)
+
+            # Initialiser la clé de session pour le multiselect si nécessaire.
+            if multiselect_key not in st.session_state:
+                st.session_state[multiselect_key] = options if select_all else []
+
+            # Synchroniser le multiselect avec la case "Sélectionner tout" si l'utilisateur
+            # la coche/décoche. Cela force la valeur dans session_state et évite de
+            # dépendre du paramètre `default` du widget.
+            if select_all and set(st.session_state.get(multiselect_key, [])) != set(options):
+                st.session_state[multiselect_key] = options
+            if not select_all and st.session_state.get(multiselect_key):
+                st.session_state[multiselect_key] = []
+
             proprietaires_selection = st.multiselect(
                 "Sélectionnez un ou plusieurs copropriétaires à tracer",
                 options=options,
-                default=options if select_all else [],
                 key=multiselect_key,
             )
         else:
