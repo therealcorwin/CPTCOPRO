@@ -31,13 +31,14 @@ def recup_nbre_alertes(DB_PATH: Path) -> int:
         nbre_alertes_df = pd.read_sql_query(query, conn)
     finally:
         conn.close()
+    if nbre_alertes_df.empty:
+        return 0
     nbre_alertes = int(nbre_alertes_df["nombre d alertes"].item())
     return nbre_alertes
 
 
 
 loguru.logger.info("Starting Streamlit app for coproprietaires display")
-#affiche_copro(DB_PATH)
 Charge_globale = chargement_somme_debit_global(DB_PATH)
 nbre_alertes = recup_nbre_alertes(DB_PATH)
 

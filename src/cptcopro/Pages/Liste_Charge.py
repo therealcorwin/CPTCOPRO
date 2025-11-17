@@ -9,7 +9,7 @@ DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 
 
 @st.cache_data
-def load_charges(db_path: str) -> pd.DataFrame:
+def load_charges(db_path: Path) -> pd.DataFrame:
     """Charger la vue `vw_charge_coproprietaires` depuis SQLite et normaliser la colonne date."""
     with sqlite3.connect(db_path) as conn:
         df = pd.read_sql_query(
@@ -19,7 +19,6 @@ def load_charges(db_path: str) -> pd.DataFrame:
     # Normaliser la date et convertir en date (sans heure)
     df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
     return df
-
 
 
 st.set_page_config(page_title="Suivi de charge détaillé", layout="wide")
@@ -57,14 +56,9 @@ def _to_date(val):
     # Dé-nest si list/tuple
     if isinstance(val, (list, tuple)) and len(val) > 0:
         return _to_date(val[0])
-    # pandas Timestamp -> date
-    try:
-        import pandas as _pd
-
-        if isinstance(val, _pd.Timestamp):
-            return val.date()
-    except Exception:
-        pass
+    # pandas Timestamp -> date (use the already-imported `pd` and avoid broad excepts)
+    if hasattr(pd, "Timestamp") and isinstance(val, pd.Timestamp):
+        return val.date()
     if isinstance(val, dt.datetime):
         return val.date()
     if isinstance(val, dt.date):

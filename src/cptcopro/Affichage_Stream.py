@@ -36,11 +36,10 @@ Alerte_page = st.Page(
     icon=":material/warning:",
 )
 Recherche_Copro_page = st.Page(
-    "Pages/Rechecher_Copro.py",
+    "Pages/Rechercher_Copro.py",
     title="Recherche Info Copropriétaires",
     icon=":material/search:",
-)
-# --- NAVIGATION SETUP [WITHOUT SECTIONS] ---
+)# --- NAVIGATION SETUP [WITHOUT SECTIONS] ---
 # pg = st.navigation(pages=[about_page, project_1_page, project_2_page])
 
 # --- NAVIGATION SETUP [WITH SECTIONS]---

@@ -48,7 +48,6 @@ with open(
 #bdb.backup_db(DB_PATH)
 #exit()
 
-
 def main() -> None:
     """
     Point d'entrée principal : récupère le HTML, effectue le parsing,
@@ -67,7 +66,6 @@ def main() -> None:
     if args.db_path:
         DB_PATH = args.db_path
 
-    # (Streamlit must be launched separately via cptcopro.utils.streamlit_launcher)
 
     logger.info("Démarrage du script principal")
     logger.info("Récupération du HTML contenant les charges des copropriétaires en cours...")

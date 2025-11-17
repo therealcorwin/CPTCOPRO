@@ -19,21 +19,24 @@ import signal
 import subprocess
 import webbrowser
 from typing import Optional
+from typing import Dict
+
+# map pid -> creation flags used when launching the process. Stored here
+# instead of attaching attributes to the Popen object (typing/privilege issues).
+_PROC_CREATION_FLAGS: Dict[int, int | None] = {}
 
 
 def start_streamlit(
     app_path: str = "src/cptcopro/Affichage_Stream.py",
-    port: int = 8501,
-    host: str = "127.0.0.1",
-    python_executable: Optional[str] = None,
-    open_browser: bool = True,
-    show_console: bool = True,
-    cols: int = 120,
-    lines: int = 40,
     stdout: Optional[int] = subprocess.DEVNULL,
     stderr: Optional[int] = subprocess.DEVNULL,
 ) -> subprocess.Popen:
     """Start Streamlit and return the Popen object.
+
+    By default `show_console=True` opens a visible Windows console. When
+    `show_console` is True on Windows, a new console window is created.    
+    
+    Start Streamlit and return the Popen object.
 
     By default `show_console=True` opens a visible Windows console. When
     `show_console` is True on Windows, the console size (columns x lines)
@@ -47,11 +50,21 @@ def start_streamlit(
     # Verify that `streamlit` is importable in the selected Python executable.
     # We run a small Python snippet that exits 0 if streamlit is available, 1 otherwise.
     try:
-        check = subprocess.run(
-            [python_exe, "-c", "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('streamlit') else 1)"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        try:
+            check = subprocess.run(
+                [
+                    python_exe,
+                    "-c",
+                    "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('streamlit') else 1)",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"Vérification du module 'streamlit' dans '{python_exe}' échouée : timeout dépassé."
+            )
     except FileNotFoundError:
         raise RuntimeError(
             f"L'exécutable Python spécifié n'a pas été trouvé : {python_exe}. "
@@ -91,11 +104,20 @@ def start_streamlit(
                 stdout=use_stdout,
                 stderr=use_stderr,
             )
+            # record creation flags so stop_streamlit can choose the correct shutdown
+            try:
+                _PROC_CREATION_FLAGS[proc.pid] = subprocess.CREATE_NEW_CONSOLE
+            except Exception:
+                pass
         else:
             # Non-Windows: fallback to previous visible-start behaviour
             proc = subprocess.Popen(
                 cmd, start_new_session=True, stdout=use_stdout, stderr=use_stderr
             )
+            try:
+                _PROC_CREATION_FLAGS[proc.pid] = None
+            except Exception:
+                pass
     else:
         if os.name == "nt":
             proc = subprocess.Popen(
@@ -104,10 +126,18 @@ def start_streamlit(
                 stdout=stdout,
                 stderr=stderr,
             )
+            try:
+                _PROC_CREATION_FLAGS[proc.pid] = subprocess.CREATE_NEW_PROCESS_GROUP
+            except Exception:
+                pass
         else:
             proc = subprocess.Popen(
                 cmd, start_new_session=True, stdout=stdout, stderr=stderr
             )
+            try:
+                _PROC_CREATION_FLAGS[proc.pid] = None
+            except Exception:
+                pass
 
     if open_browser:
         try:
@@ -129,8 +159,32 @@ def stop_streamlit(proc: subprocess.Popen, force: bool = True, timeout: int = 5)
 
     try:
         if os.name == "nt":
-            # send CTRL_BREAK_EVENT to the process group started with CREATE_NEW_PROCESS_GROUP
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
+            # Choose shutdown method based on how the process was started.
+            # We recorded the creation flags in `_PROC_CREATION_FLAGS` keyed by pid.
+            creation_flags = _PROC_CREATION_FLAGS.pop(proc.pid, None)
+            if creation_flags == subprocess.CREATE_NEW_PROCESS_GROUP:
+                # send CTRL_BREAK_EVENT to the process group for graceful shutdown
+                try:
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                except Exception:
+                    # fallback to terminate
+                    proc.terminate()
+            elif creation_flags == subprocess.CREATE_NEW_CONSOLE:
+                # process has its own console - CTRL events won't reach it from here
+                # use terminate() for graceful shutdown
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            else:
+                # unknown creation flags: try graceful signals first, then terminate
+                try:
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)
+                except Exception:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
         else:
             proc.terminate()
         proc.wait(timeout=timeout)

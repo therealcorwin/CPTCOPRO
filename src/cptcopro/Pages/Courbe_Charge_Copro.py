@@ -37,8 +37,7 @@ date_range = st.sidebar.date_input(
     min_value=df["date"].min(),
     max_value=df["date"].max(),
 )
-# Si start_date = end_date) Streamlit retourne un single date au lieu d'un tuple
-# Pour eviter une erreur on verifie le type
+# Si start_date = end_date, Streamlit retourne un single date au lieu d'un tuple# Pour eviter une erreur on verifie le type
 if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
     start_date, end_date = date_range
 # --- Filtrage du DataFrame ---
@@ -48,14 +47,13 @@ if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
     ]
 else:
     start_date = end_date = date_range
-        # --- Filtrage du DataFrame ---
+    # --- Filtrage du DataFrame ---
     filtered_df = df[
-    df["proprietaire"].isin(selected_proprietaires) &
-    (df["date"] == start_date) & (df["date"] == end_date)
-]
-# --- Création et affichage du graphique ---
-fig = px.line(filtered_df, x="date", y="debit", color="proprietaire", title="Évolution des débits par propriétaire", markers=False)
-st.plotly_chart(fig, use_container_width=True)
+        df["proprietaire"].isin(selected_proprietaires) &
+        (df["date"] == start_date) & (df["date"] == end_date)
+    ]
+    fig = px.line(filtered_df, x="date", y="debit", color="proprietaire", title="Évolution des débits par propriétaire", markers=False)
+    st.plotly_chart(fig, use_container_width=True)
 # --- Affichage des données brutes ---
 with st.expander("Afficher les données filtrées"):
     st.dataframe(filtered_df.sort_values(by=['date', 'proprietaire'], ascending=[False, True]))

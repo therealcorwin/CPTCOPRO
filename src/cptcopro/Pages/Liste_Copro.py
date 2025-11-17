@@ -4,10 +4,15 @@ import loguru
 from pathlib import Path
 import pandas as pd
 
-pd.set_option('display.max_rows', None)
+# By default we don't change Pandas global display options because Streamlit
+# renders tables with `st.table` / `st.dataframe` and isn't affected by
+# `pd.set_option('display.max_rows', ...)`. Enable only for local console
+# debugging by setting `CONSOLE_OUTPUT = True`.
+CONSOLE_OUTPUT = False
+if CONSOLE_OUTPUT:
+    pd.set_option('display.max_rows', None)
 DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
-@st.cache_data
-
+@st.cache_data(ttl=300)  # Cache expires after 5 minutes
 def affiche_copro(db_path) -> pd.DataFrame:
     try:
         with sqlite3.connect(db_path) as conn:

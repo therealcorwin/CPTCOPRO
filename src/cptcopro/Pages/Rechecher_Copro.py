@@ -12,8 +12,26 @@ DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 def load_all_charges_data(db_path: Path) -> pd.DataFrame:
     """Charge toutes les données de charges depuis la vue vw_charge_coproprietaires."""
     sql = "SELECT nom_proprietaire, code_proprietaire, num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires"
-    with sqlite3.connect(db_path) as conn:
-        df = pd.read_sql_query(sql, conn)
+    expected_cols = ["proprietaire", "code", "num_apt", "type_apt", "debit", "credit", "date"]
+    try:
+        with sqlite3.connect(db_path) as conn:
+            df = pd.read_sql_query(sql, conn)
+    except sqlite3.Error as e:
+        logger.error("Erreur SQLite lors de la lecture des charges: {}", e)
+        try:
+            st.error(f"Impossible de lire les données de la base: {e}")
+        except Exception:
+            # st may not be available in some contexts; ignore
+            pass
+        return pd.DataFrame(columns=expected_cols)
+    except Exception as e:  # generic fallback
+        logger.error("Erreur inattendue lors de la lecture des charges: {}", e)
+        try:
+            st.error(f"Erreur inattendue lors de la lecture des données: {e}")
+        except Exception:
+            pass
+        return pd.DataFrame(columns=expected_cols)
+
     # Renommer pour la cohérence avec le reste du code
     df = df.rename(columns={"nom_proprietaire": "proprietaire", "code_proprietaire": "code"})
     # Convertir la date une seule fois
@@ -58,15 +76,17 @@ st.divider()
 st.subheader("Suivi des charges pour le(s) copropriétaire(s) sélectionné(s)")
 if proprietaires_selection:
     # Filtrer le DataFrame principal au lieu de faire un appel BDD
-    charges_df = charges_df[charges_df["proprietaire"].isin(proprietaires_selection)]
+    filtered_charges_df = charges_df[charges_df["proprietaire"].isin(proprietaires_selection)]
 
-    if charges_df.empty:
+    if filtered_charges_df.empty:
         st.warning("Aucune charge trouvée pour le(s) copropriétaire(s) sélectionné(s).")
     else:
         # Agréger par date et par propriétaire (somme des debits)
-        charges_df_sorted = charges_df.sort_values(["proprietaire", "date"], ascending=[True, False])
+        # Trier par propriétaire puis date ASC pour que les séries temporelles
+        # progressent de gauche (ancienne) vers droite (récentes)
+        charges_df_sorted = filtered_charges_df.sort_values(["proprietaire", "date"], ascending=[True, True])
         agg = charges_df_sorted.groupby([charges_df_sorted["date"].dt.date, "proprietaire"]).agg({"debit": "sum"}).reset_index()
-        logger.info(agg)
+
         # Tracer l'évolution du débit par date (une courbe par propriétaire)
         fig = px.line(agg, x="date", y="debit", color="proprietaire", markers=True)
         fig.update_layout(title="Évolution du débit par date", xaxis_title="Date", yaxis_title="Débit")
