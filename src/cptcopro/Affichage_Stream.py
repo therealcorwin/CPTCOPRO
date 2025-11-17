@@ -35,7 +35,11 @@ Alerte_page = st.Page(
     title="Alertes",
     icon=":material/warning:",
 )
-
+Recherche_Copro_page = st.Page(
+    "Pages/Rechecher_Copro.py",
+    title="Recherche Info Copropriétaires",
+    icon=":material/search:",
+)
 # --- NAVIGATION SETUP [WITHOUT SECTIONS] ---
 # pg = st.navigation(pages=[about_page, project_1_page, project_2_page])
 
@@ -45,6 +49,7 @@ menus = st.navigation(
         "Dashboard Général": [Dashboard_page],
         "Suivi des Charges": [Liste_Charge_page, Courbe_Charge_Corpo_page, Alerte_page],
         "Liste des Copropriétaires": [Liste_Copro_page],
+        "Recherche Info Copropriétaires": [Recherche_Copro_page],
     }
 )
 
@@ -53,8 +58,7 @@ menus = st.navigation(
 # pour éviter les problèmes de chemin relatif.
 LOGO_PATH = Path(__file__).parent / "Pages" / "Assets" / "gb2.png"
 st.logo(str(LOGO_PATH), size="large")
-st.sidebar.markdown("Made with ❤️ by [Therealcorwin]")
-
+st.sidebar.markdown("Made with ❤️ by [Therealcorwin](https://github.com/Therealcorwin)")
 
 # --- RUN NAVIGATION ---
 menus.run()

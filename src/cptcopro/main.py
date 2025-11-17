@@ -9,8 +9,8 @@ import cptcopro.Backup_DB as bdb
 import cptcopro.Parsing_Lots_Copro as pcl
 import cptcopro.Traitement_Lots_Copro as tlc
 import cptcopro.Dedoublonnage as doublon
+import cptcopro.utils.streamlit_launcher as usl
 from loguru import logger
-
 
 logger.remove()
 logger.add(
@@ -66,6 +66,8 @@ def main() -> None:
     global DB_PATH
     if args.db_path:
         DB_PATH = args.db_path
+
+    # (Streamlit must be launched separately via cptcopro.utils.streamlit_launcher)
 
     logger.info("Démarrage du script principal")
     logger.info("Récupération du HTML contenant les charges des copropriétaires en cours...")
@@ -134,6 +136,8 @@ def main() -> None:
             doublon.suppression_doublons(DB_PATH, analyse)
     except Exception as exc:
         logger.error(f"Erreur lors de la déduplication : {exc}")
+
+
 
 if __name__ == "__main__":
     main()

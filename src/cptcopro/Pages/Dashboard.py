@@ -35,11 +35,17 @@ def recup_nbre_alertes(DB_PATH: Path) -> int:
     return nbre_alertes
 
 
-if __name__ == "__main__":
-    loguru.logger.info("Starting Streamlit app for coproprietaires display")
-    #affiche_copro(DB_PATH)
-    Charge_globale = chargement_somme_debit_global(DB_PATH)
-    nbre_alertes = recup_nbre_alertes(DB_PATH)
+
+loguru.logger.info("Starting Streamlit app for coproprietaires display")
+#affiche_copro(DB_PATH)
+Charge_globale = chargement_somme_debit_global(DB_PATH)
+nbre_alertes = recup_nbre_alertes(DB_PATH)
+
+
+if Charge_globale.empty:
+    st.error("Aucune donnée disponible à afficher.")
+    st.stop()
+
 gauche,centre, droite = st.columns(3)
 
 with st.container():

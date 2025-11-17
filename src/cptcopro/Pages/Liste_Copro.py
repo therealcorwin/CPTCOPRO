@@ -6,13 +6,20 @@ import pandas as pd
 
 pd.set_option('display.max_rows', None)
 DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
+@st.cache_data
 
-def affiche_copro(DB_PATH) -> pd.DataFrame:
-    conn = sqlite3.connect(DB_PATH)
-    requete = "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, type_apt AS Type, num_apt AS Numero,last_check AS Date FROM coproprietaires"
-    liste_coproprietaires = pd.read_sql_query(requete, conn)
-    conn.close()
-    return liste_coproprietaires
+def affiche_copro(db_path) -> pd.DataFrame:
+    try:
+        with sqlite3.connect(db_path) as conn:
+            requete = "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, type_apt AS Type, num_apt AS Numero,last_check AS Date FROM coproprietaires"
+            liste_coproprietaires = pd.read_sql_query(requete, conn)
+        return liste_coproprietaires
+    except sqlite3.Error as e:
+        loguru.logger.error(f"Database error: {e}")
+        raise
+    except Exception as e:
+        loguru.logger.error(f"Unexpected error loading data: {e}")
+        raise
 
 
 if __name__ == "__main__":
