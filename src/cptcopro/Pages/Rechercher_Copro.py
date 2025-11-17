@@ -103,8 +103,8 @@ if proprietaires_selection:
         st.plotly_chart(fig, use_container_width=True)
 
         # Afficher le tableau agrégé
-        st.markdown("**Tableau agrégé par date et propriétaire**")
-        st.dataframe(agg.sort_values(by=["date", "proprietaire"], ascending=[True, False]))
+        with st.expander("Tableau agrégé par date et propriétaire", expanded=False):
+            st.dataframe(agg.sort_values(by=["date", "proprietaire"], ascending=[True, False]))
 
 else:
     st.info("Aucun propriétaire sélectionné pour le tracé.")
