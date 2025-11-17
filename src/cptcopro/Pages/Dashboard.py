@@ -34,6 +34,8 @@ def recup_nbre_alertes(DB_PATH: Path) -> int:
     if nbre_alertes_df.empty:
         return 0
     nbre_alertes = int(nbre_alertes_df["nombre d alertes"].item())
+    if nbre_alertes == 0:
+        return 0
     return nbre_alertes
 
 

@@ -18,24 +18,34 @@ def load_all_charges_data(db_path: Path) -> pd.DataFrame:
             df = pd.read_sql_query(sql, conn)
     except sqlite3.Error as e:
         logger.error("Erreur SQLite lors de la lecture des charges: {}", e)
-        try:
-            st.error(f"Impossible de lire les données de la base: {e}")
-        except Exception:
-            # st may not be available in some contexts; ignore
-            pass
+        # Afficher l'erreur dans Streamlit (fonction décorée par @st.cache_data,
+        # donc exécutée dans le contexte Streamlit). Ne pas capturer cette
+        # erreur localement : laisser l'appel échouer visible pour l'utilisateur.
+        st.error(f"Impossible de lire les données de la base: {e}")
         return pd.DataFrame(columns=expected_cols)
     except Exception as e:  # generic fallback
         logger.error("Erreur inattendue lors de la lecture des charges: {}", e)
-        try:
-            st.error(f"Erreur inattendue lors de la lecture des données: {e}")
-        except Exception:
-            pass
+        st.error(f"Erreur inattendue lors de la lecture des données: {e}")
         return pd.DataFrame(columns=expected_cols)
 
     # Renommer pour la cohérence avec le reste du code
     df = df.rename(columns={"nom_proprietaire": "proprietaire", "code_proprietaire": "code"})
     # Convertir la date une seule fois
+    # Conserver les valeurs originales pour journalisation des valeurs invalides
+    orig_dates = df["date"].copy()
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+    # Comptabiliser les dates invalides (coercées en NaT) et journaliser
+    invalid_mask = df["date"].isna()
+    n_invalid = int(invalid_mask.sum())
+    if n_invalid > 0:
+        sample_invalid = orig_dates[invalid_mask].head(3).tolist()
+        logger.warning(
+            "load_all_charges_data: {} ligne(s) avec 'date' invalide seront supprimées; exemples: {}",
+            n_invalid,
+            sample_invalid,
+        )
+
     return df.dropna(subset=["date"])
 
 

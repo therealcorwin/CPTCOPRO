@@ -52,7 +52,6 @@ else:
         df["proprietaire"].isin(selected_proprietaires) &
         (df["date"] == start_date) & (df["date"] == end_date)
     ]
-    fig = px.line(filtered_df, x="date", y="debit", color="proprietaire", title="Évolution des débits par propriétaire", markers=False)
 
 fig = px.line(filtered_df, x="date", y="debit", color="proprietaire", title="Évolution des débits par propriétaire", markers=False)
 st.plotly_chart(fig, use_container_width=True)
