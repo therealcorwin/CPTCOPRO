@@ -72,11 +72,23 @@ if proprietaire_input:
         st.dataframe(info_df)
 
         # Permettre de sélectionner un ou plusieurs propriétaires parmi les résultats
-        proprietaires_selection = st.multiselect(
-            "Sélectionnez un ou plusieurs copropriétaires à tracer",
-            options=options,
-            default=options,
-        )
+        # Par défaut rien n'est sélectionné pour éviter de surcharger le graphique
+        # Fournir une case à cocher pour "Sélectionner tout" si l'utilisateur
+        # souhaite volontairement tout tracer.
+        select_all_key = f"select_all_{proprietaire_input}"
+        multiselect_key = f"multiselect_{proprietaire_input}"
+        if len(options) > 1:
+            if len(options) > 20:
+                st.info(f"Plus de 20 copropriétaires trouvés ({len(options)}). Veuillez affiner votre recherche ou utiliser la case 'Sélectionner tout' pour tout tracer.")
+            select_all = st.checkbox(f"Sélectionner tout ({len(options)})", value=True, key=select_all_key)
+            proprietaires_selection = st.multiselect(
+                "Sélectionnez un ou plusieurs copropriétaires à tracer",
+                options=options,
+                default=options if select_all else [],
+                key=multiselect_key,
+            )
+        else:
+            proprietaires_selection = options
     else:
         st.warning(f"Aucun copropriétaire trouvé avec le nom '{proprietaire_input}'.")
 else:
