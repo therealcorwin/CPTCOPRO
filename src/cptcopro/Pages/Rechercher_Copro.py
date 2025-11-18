@@ -85,25 +85,51 @@ if proprietaire_input:
                 )
             # Par défaut rien n'est sélectionné pour éviter de surcharger le graphique.
             # L'utilisateur peut cocher "Sélectionner tout" pour remplir le multiselect.
-            select_all = st.checkbox(f"Sélectionner tout ({len(options)})", value=False, key=select_all_key)
 
-            # Initialiser la clé de session pour le multiselect si nécessaire.
+            # Initialiser la clé de session pour la checkbox et pour le multiselect si nécessaire.
+            if select_all_key not in st.session_state:
+                st.session_state[select_all_key] = False
             if multiselect_key not in st.session_state:
-                st.session_state[multiselect_key] = options if select_all else []
+                st.session_state[multiselect_key] = options if st.session_state[select_all_key] else []
 
-            # Synchroniser le multiselect avec la case "Sélectionner tout" si l'utilisateur
-            # la coche/décoche. Cela force la valeur dans session_state et évite de
-            # dépendre du paramètre `default` du widget.
-            if select_all and set(st.session_state.get(multiselect_key, [])) != set(options):
-                st.session_state[multiselect_key] = options
-            if not select_all and st.session_state.get(multiselect_key):
-                st.session_state[multiselect_key] = []
+            # Définir un callback qui sera appelé uniquement quand l'utilisateur
+            # change explicitement la case "Sélectionner tout". Ainsi on ne
+            # modifie le multiselect que sur action explicite et on préserve les
+            # sélections manuelles lors des reruns.
+            def _on_select_all_change(multi_key: str, opts: list, sel_key: str):
+                # lire l'état actuel de la checkbox et appliquer la synchronisation
+                if st.session_state.get(sel_key):
+                    st.session_state[multi_key] = opts
+                else:
+                    st.session_state[multi_key] = []
+
+            # Créer la checkbox UNE seule fois avec on_change pour déclencher le callback.
+            select_all = st.checkbox(
+                f"Sélectionner tout ({len(options)})",
+                value=st.session_state[select_all_key],
+                key=select_all_key,
+                on_change=_on_select_all_change,
+                args=(multiselect_key, options, select_all_key),
+            )
 
             proprietaires_selection = st.multiselect(
                 "Sélectionnez un ou plusieurs copropriétaires à tracer",
                 options=options,
                 key=multiselect_key,
             )
+
+            # Si la case "Sélectionner tout" est cochée mais que l'utilisateur
+            # modifie manuellement la sélection du multiselect (par ex. désélection
+            # d'éléments), alors décocher automatiquement la case au lieu de forcer
+            # la sélection complète. Cela permet aux utilisateurs de désélectionner
+            # des éléments sans que la case les réactive.
+            try:
+                current_sel = st.session_state.get(multiselect_key, [])
+                if st.session_state.get(select_all_key, False) and set(current_sel) != set(options):
+                    st.session_state[select_all_key] = False
+            except Exception:
+                # Ne pas faire échouer l'UI si session_state change unexpectedly
+                pass
         else:
             proprietaires_selection = options
     else:
