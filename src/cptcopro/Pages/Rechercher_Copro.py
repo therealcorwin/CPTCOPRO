@@ -8,6 +8,20 @@ from typing import List
 
 DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 
+
+def _on_select_all_change(multi_key: str, opts: list, sel_key: str):
+    """Callback réutilisable pour la checkbox 'Sélectionner tout'.
+    Met à jour la session_state du multiselect quand la checkbox change.
+    Défini au niveau module pour éviter une redéfinition à chaque rerun.
+    """
+    try:
+        if st.session_state.get(sel_key):
+            st.session_state[multi_key] = opts
+        else:
+            st.session_state[multi_key] = []
+    except Exception as e:
+        logger.error("_on_select_all_change erreur: {}", e)
+
 @st.cache_data
 def load_all_charges_data(db_path: Path) -> pd.DataFrame:
     """Charge toutes les données de charges depuis la vue vw_charge_coproprietaires."""
@@ -90,18 +104,11 @@ if proprietaire_input:
             if select_all_key not in st.session_state:
                 st.session_state[select_all_key] = False
             if multiselect_key not in st.session_state:
-                st.session_state[multiselect_key] = options if st.session_state[select_all_key] else []
+                st.session_state[multiselect_key] = []
 
-            # Définir un callback qui sera appelé uniquement quand l'utilisateur
-            # change explicitement la case "Sélectionner tout". Ainsi on ne
-            # modifie le multiselect que sur action explicite et on préserve les
-            # sélections manuelles lors des reruns.
-            def _on_select_all_change(multi_key: str, opts: list, sel_key: str):
-                # lire l'état actuel de la checkbox et appliquer la synchronisation
-                if st.session_state.get(sel_key):
-                    st.session_state[multi_key] = opts
-                else:
-                    st.session_state[multi_key] = []
+            # La callback `_on_select_all_change` est définie au niveau module
+            # (évite sa redéfinition à chaque rerun) et sera passée à la checkbox
+            # via `on_change`.
 
             # Créer la checkbox UNE seule fois avec on_change pour déclencher le callback.
             select_all = st.checkbox(
@@ -112,24 +119,25 @@ if proprietaire_input:
                 args=(multiselect_key, options, select_all_key),
             )
 
+            # Callback: décocher automatiquement la case "Sélectionner tout"
+            # uniquement si l'utilisateur modifie manuellement la sélection.
+            def _on_multiselect_change(multi_key: str, opts: list, sel_key: str):
+                try:
+                    current_sel = st.session_state.get(multi_key, [])
+                    # Si la case 'select_all' est active mais la sélection actuelle
+                    # diffère de l'ensemble complet, décocher la case.
+                    if st.session_state.get(sel_key, False) and set(current_sel) != set(opts):
+                        st.session_state[sel_key] = False
+                except Exception as e:
+                    logger.error("_on_multiselect_change erreur: {}", e)
+
             proprietaires_selection = st.multiselect(
                 "Sélectionnez un ou plusieurs copropriétaires à tracer",
                 options=options,
                 key=multiselect_key,
+                on_change=_on_multiselect_change,
+                args=(multiselect_key, options, select_all_key),
             )
-
-            # Si la case "Sélectionner tout" est cochée mais que l'utilisateur
-            # modifie manuellement la sélection du multiselect (par ex. désélection
-            # d'éléments), alors décocher automatiquement la case au lieu de forcer
-            # la sélection complète. Cela permet aux utilisateurs de désélectionner
-            # des éléments sans que la case les réactive.
-            try:
-                current_sel = st.session_state.get(multiselect_key, [])
-                if st.session_state.get(select_all_key, False) and set(current_sel) != set(options):
-                    st.session_state[select_all_key] = False
-            except Exception:
-                # Ne pas faire échouer l'UI si session_state change unexpectedly
-                pass
         else:
             proprietaires_selection = options
     else:
