@@ -62,6 +62,18 @@ def load_all_charges_data(db_path: Path) -> pd.DataFrame:
 
     return df.dropna(subset=["date"])
 
+# Callback: décocher automatiquement la case "Sélectionner tout"
+# uniquement si l'utilisateur modifie manuellement la sélection.
+def _on_multiselect_change(multi_key: str, opts: list, sel_key: str):
+    try:
+        current_sel = st.session_state.get(multi_key, [])
+        # Si la case 'select_all' est active mais la sélection actuelle
+        # diffère de l'ensemble complet, décocher la case.
+        if st.session_state.get(sel_key, False) and set(current_sel) != set(opts):
+            st.session_state[sel_key] = False
+    except Exception as e:
+        logger.error("_on_multiselect_change erreur: {}", e)
+
 
 st.set_page_config(page_title="Recherche Info Copropriétaires", layout="wide")
 st.title("Recherche Info Copropriétaires")
@@ -118,19 +130,6 @@ if proprietaire_input:
                 on_change=_on_select_all_change,
                 args=(multiselect_key, options, select_all_key),
             )
-
-            # Callback: décocher automatiquement la case "Sélectionner tout"
-            # uniquement si l'utilisateur modifie manuellement la sélection.
-            def _on_multiselect_change(multi_key: str, opts: list, sel_key: str):
-                try:
-                    current_sel = st.session_state.get(multi_key, [])
-                    # Si la case 'select_all' est active mais la sélection actuelle
-                    # diffère de l'ensemble complet, décocher la case.
-                    if st.session_state.get(sel_key, False) and set(current_sel) != set(opts):
-                        st.session_state[sel_key] = False
-                except Exception as e:
-                    logger.error("_on_multiselect_change erreur: {}", e)
-
             proprietaires_selection = st.multiselect(
                 "Sélectionnez un ou plusieurs copropriétaires à tracer",
                 options=options,
