@@ -62,9 +62,13 @@ def load_all_charges_data(db_path: Path) -> pd.DataFrame:
 
     return df.dropna(subset=["date"])
 
-# Callback: décocher automatiquement la case "Sélectionner tout"
-# uniquement si l'utilisateur modifie manuellement la sélection.
+
 def _on_multiselect_change(multi_key: str, opts: list, sel_key: str):
+    '''
+    Callback réutilisable pour décocher 'Sélectionner tout'.
+    Décoche automatiquement la checkbox si l'utilisateur modifie manuellement la sélection.
+    Défini au niveau module pour éviter une redéfinition à chaque rerun.
+    '''
     try:
         current_sel = st.session_state.get(multi_key, [])
         # Si la case 'select_all' est active mais la sélection actuelle
