@@ -1,4 +1,6 @@
 import streamlit as st
+from streamlit_extras.metric_cards import style_metric_cards
+import datetime as dt
 import loguru
 import sqlite3
 from pathlib import Path
@@ -53,17 +55,19 @@ gauche,centre, droite = st.columns(3)
 
 with st.container():
     with gauche:
-        st.subheader("Date :", width="content")
-        st.subheader(Charge_globale["date"].iat[-1].strftime("%d/%m/%Y"), divider=True)
+        st.space("small")
+        date_dernier_releve = Charge_globale["date"].iat[-1].strftime("%d/%m/%Y")
+        date_avant_dernier_releve = Charge_globale["date"].iat[-2].strftime("%d/%m/%Y") if len(Charge_globale) >=2 else "N/A"
+        st.metric("Date du dernier relevé", value=date_dernier_releve, delta=date_avant_dernier_releve, delta_color="off")
+        style_metric_cards(background_color= "#292D34")
     with centre:
-        st.subheader("Nombre d'alertes :")
-        st.subheader(nbre_alertes, divider=True)    
+        st.space("small")
+        st.metric("Nombre d'alertes", value=nbre_alertes, delta=nbre_alertes)
+        style_metric_cards(background_color= "#292D34")    
     with droite:
-
         st.space("small")
         # valeur la plus récente formatée
         charge_N = f'{Charge_globale["debit global"].iat[-1]:.2f}'
-
         # Vérifier qu'il existe au moins 2 lignes avant d'accéder à iat[-2]
         if len(Charge_globale) >= 2:
             charge_N_1 = f'{Charge_globale["debit global"].iat[-2]:.2f}'
@@ -73,15 +77,14 @@ with st.container():
             # Valeur de repli : aucune valeur précédente -> ne pas afficher de delta
             charge_N_1 = None
             delta_charge = None
-
         st.metric(
             "CHARGE GLOBALE",
-            label_visibility="visible",
             value=charge_N,
             delta=delta_charge,
             delta_color="inverse",
             help="Si Indicateur vert, le débit global a diminué par rapport à la dernière mesure.",
         )
+        style_metric_cards(background_color= "#292D34")
  
 
 st.markdown("Evolution des débits globaux de l'ensemble des copropriétaires")

@@ -63,7 +63,7 @@ alertes_df = recup_alertes(DB_PATH)
 st.markdown(f"### Nombre total d'alertes : {len(alertes_df)}")
 if not alertes_df.empty:
     st.markdown("#### Détail des alertes")
-    st.dataframe(alertes_df[["Proprietaire", "Code", "Debit", "FirstDetection", "LastDetection"]])
+    st.dataframe(alertes_df[["Proprietaire", "Code", "Debit", "FirstDetection", "LastDetection"]].sort_values(by="Debit", ascending=False))
     st.markdown("#### Répartition des alertes par copropriétaire")
     # Utiliser directement les colonnes du DataFrame pour le graphique
     fig = px.bar(alertes_df, x='Proprietaire', y='Occurence', title='Nombre d\'occurrences par copropriétaire')
