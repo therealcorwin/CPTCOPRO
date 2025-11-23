@@ -53,17 +53,22 @@ gauche,centre, droite = st.columns(3)
 
 with st.container():
     with gauche:
-        st.subheader(" Date :")
+        st.subheader("Date :", width="content")
         st.subheader(Charge_globale["date"].iat[-1].strftime("%d/%m/%Y"), divider=True)
     with centre:
-        st.subheader(" Débit global :")
-        st.subheader(f'{Charge_globale["debit global"].iat[-1]:.2f}', divider=True)
+        st.subheader("Nombre d'alertes :")
+        st.subheader(nbre_alertes, divider=True)    
     with droite:
-        st.subheader(" Nombre d'alertes :")
-        st.subheader(nbre_alertes, divider=True)
+
+        st.space("small")
+        charge_N = f'{Charge_globale["debit global"].iat[-1]:.2f}'
+        charge_N_1 = f'{Charge_globale["debit global"].iat[-2]:.2f}'
+        st.metric("CHARGE GLOBALE",label_visibility="visible", value=charge_N, delta=charge_N_1, delta_color="normal", help="Si Indicateur vert, le débit global a diminué par rapport à la dernière mesure.")
+ 
 
 st.markdown("Evolution des débits globaux de l'ensemble des copropriétaires")
 chart = px.line(Charge_globale, x="date", y="debit global", title="Evolution des débits globaux", markers=True)
-st.plotly_chart(chart, use_container_width=True)
+st.plotly_chart(chart, width="stretch")
 with st.expander("Table des données" ):
     st.dataframe(Charge_globale)
+

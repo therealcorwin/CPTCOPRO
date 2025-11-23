@@ -4,10 +4,7 @@ import loguru
 from pathlib import Path
 import pandas as pd
 
-# By default we don't change Pandas global display options because Streamlit
-# renders tables with `st.table` / `st.dataframe` and isn't affected by
-# `pd.set_option('display.max_rows', ...)`. Enable only for local console
-# debugging by setting `CONSOLE_OUTPUT = True`.
+
 CONSOLE_OUTPUT = False
 if CONSOLE_OUTPUT:
     pd.set_option('display.max_rows', None)

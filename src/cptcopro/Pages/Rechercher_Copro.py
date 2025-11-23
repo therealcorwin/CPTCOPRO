@@ -166,7 +166,7 @@ if proprietaires_selection:
         # Tracer l'évolution du débit par date (une courbe par propriétaire)
         fig = px.line(agg, x="date", y="debit", color="proprietaire", markers=True)
         fig.update_layout(title="Évolution du débit par date", xaxis_title="Date", yaxis_title="Débit")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         # Afficher le tableau agrégé
         with st.expander("Tableau agrégé par date et propriétaire", expanded=False):

@@ -24,7 +24,7 @@ logger.add(
 logger.add(
     "app.log",
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {extra[type_log]} |{name}: {function}: {line} |  {message}",
-    level="DEBUG",
+    level="INFO",
     rotation="10 MB",
     retention="1 month",
     compression="zip",

@@ -67,9 +67,9 @@ if not alertes_df.empty:
     st.markdown("#### Répartition des alertes par copropriétaire")
     # Utiliser directement les colonnes du DataFrame pour le graphique
     fig = px.bar(alertes_df, x='Proprietaire', y='Occurence', title='Nombre d\'occurrences par copropriétaire')
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig,width="stretch")
 
-    # --- Nouveau : graphique des débits par date pour les propriétaires ayant une alerte ---
+    # graphique des débits par date pour les propriétaires ayant une alerte ---
     codes_alertes = alertes_df["Code"].dropna().unique().tolist()
     debits_df = recup_debits_proprietaires_alertes(DB_PATH, codes_alertes)
     if not debits_df.empty:
@@ -83,10 +83,10 @@ if not alertes_df.empty:
             )
             if not agg.empty:
                 fig2 = px.line(agg, x="date", y="debit", color="Proprietaire",
-                               title="Débit (somme) par date pour propriétaires alertés")
+                        title="Débit (somme) par date pour propriétaires alertés")
                 fig2.update_layout(xaxis_title="Date", yaxis_title="Débit (€)")
                 st.markdown("#### Débit par date pour propriétaires alertés")
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width="stretch")
         except Exception as e:
             st.warning(f"Impossible de générer le graphique des débits : {e}")
 else:
