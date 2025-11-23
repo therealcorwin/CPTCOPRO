@@ -61,9 +61,27 @@ with st.container():
     with droite:
 
         st.space("small")
+        # valeur la plus récente formatée
         charge_N = f'{Charge_globale["debit global"].iat[-1]:.2f}'
-        charge_N_1 = f'{Charge_globale["debit global"].iat[-2]:.2f}'
-        st.metric("CHARGE GLOBALE",label_visibility="visible", value=charge_N, delta=charge_N_1, delta_color="normal", help="Si Indicateur vert, le débit global a diminué par rapport à la dernière mesure.")
+
+        # Vérifier qu'il existe au moins 2 lignes avant d'accéder à iat[-2]
+        if len(Charge_globale) >= 2:
+            charge_N_1 = f'{Charge_globale["debit global"].iat[-2]:.2f}'
+            delta_val = Charge_globale["debit global"].iat[-1] - Charge_globale["debit global"].iat[-2]
+            delta_charge = f'{delta_val:.2f}'
+        else:
+            # Valeur de repli : aucune valeur précédente -> ne pas afficher de delta
+            charge_N_1 = None
+            delta_charge = None
+
+        st.metric(
+            "CHARGE GLOBALE",
+            label_visibility="visible",
+            value=charge_N,
+            delta=delta_charge,
+            delta_color="inverse",
+            help="Si Indicateur vert, le débit global a diminué par rapport à la dernière mesure.",
+        )
  
 
 st.markdown("Evolution des débits globaux de l'ensemble des copropriétaires")

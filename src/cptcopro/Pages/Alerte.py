@@ -67,7 +67,7 @@ if not alertes_df.empty:
     st.markdown("#### Répartition des alertes par copropriétaire")
     # Utiliser directement les colonnes du DataFrame pour le graphique
     fig = px.bar(alertes_df, x='Proprietaire', y='Occurence', title='Nombre d\'occurrences par copropriétaire')
-    st.plotly_chart(fig,width="stretch")
+    st.plotly_chart(fig, width="stretch")
 
     # graphique des débits par date pour les propriétaires ayant une alerte ---
     codes_alertes = alertes_df["Code"].dropna().unique().tolist()
