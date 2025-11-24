@@ -5,7 +5,6 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 from loguru import logger
-import os
 from pathlib import Path
 
 logger.remove()
