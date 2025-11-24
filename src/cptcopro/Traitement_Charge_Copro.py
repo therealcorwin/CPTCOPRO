@@ -5,6 +5,8 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 from loguru import logger
+import os
+from pathlib import Path
 
 logger.remove()
 logger = logger.bind(type_log="TRAITEMENT")
@@ -57,8 +59,20 @@ def recuperer_date_situation_copro(htmlparser: HTMLParser) -> str:
     - str: La date extrait au format JJ/MM/AAAA.
     """
     node = htmlparser.css_first("td#lzA1")
+    logger.debug(f"Recherche du noeud 'td#lzA1' -> {'trouvé' if node else 'absent'}")
+
     if node:
-        texte = node.text()
+        try:
+            texte = node.text()
+        except Exception:
+            texte = ""
+        # essayer aussi d'obtenir le HTML du noeud pour debug
+        try:
+            node_html = node.html()
+        except Exception:
+            node_html = ""
+        logger.debug(f"Contenu node.text() repr: {repr(texte)}")
+        logger.debug(f"Contenu node.html() (trunc) repr: {repr(node_html)[:2000]}")
     else:
         # Fallback : chercher la date dans tout le document si la balise précise est absente
         logger.warning(
@@ -66,16 +80,51 @@ def recuperer_date_situation_copro(htmlparser: HTMLParser) -> str:
         )
         try:
             texte = htmlparser.text()
+            logger.debug(f"Contenu document text() (trunc) repr: {repr(texte)[:2000]}")
         except Exception:
-            raise ValueError(
-                "Balise td#lzA1 introuvable et impossible d'extraire le texte du document"
-            )
-    # Normaliser le texte pour faciliter la recherche
-    texte_normalise = re.sub(r"\s+", " ", texte)
-    # Extraire uniquement la date au format JJ/MM/AAAA après "Solde des copropriétaires au"
+            texte = ""
+
+    # Normaliser le texte pour faciliter la recherche (remplacer NBSP, etc.)
+    if texte is None:
+        texte = ""
+    # remplacer NBSP et quelques espaces invisibles communs
+    for ch in ("\u00A0", "\u200B", "\u200C", "\u200D"):
+        texte = texte.replace(ch, " ")
+    texte_normalise = re.sub(r"\s+", " ", texte).strip()
+    logger.debug(f"Texte normalisé (repr): {repr(texte_normalise)[:2000]}")
+
+    # Extraire la date au format JJ/MM/AAAA
     match = re.search(r"(\d{2}/\d{2}/\d{4})", texte_normalise)
     if not match:
-        logger.error("Date de situation introuvable dans td#lzA1")
+        # Avant d'échouer, sauvegarder un dump pour analyser le HTML reçu
+        try:
+            if hasattr(htmlparser, "html"):
+                full_html = getattr(htmlparser, "html")
+            elif hasattr(htmlparser, "raw_html"):
+                full_html = htmlparser.raw_html()
+            else:
+                full_html = str(htmlparser)
+        except Exception:
+            full_html = ""
+
+        dump_path = Path(os.getcwd()) / "_data" / "last_runtime_dump.html"
+        try:
+            dump_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(dump_path, "w", encoding="utf-8") as f:
+                f.write("<!-- Debug dump: recuperer_date_situation_copro failure -->\n")
+                f.write("<!-- texte (repr): -->\n")
+                f.write(repr(texte_normalise) + "\n\n")
+                f.write("<!-- node HTML (if any): -->\n")
+                try:
+                    f.write(node_html if node_html else "")
+                except Exception:
+                    pass
+                f.write("\n<!-- full HTML (trunc 200k): -->\n")
+                f.write(full_html[:200000])
+            logger.error(f"Date non trouvée — dump HTML écrit dans {dump_path}")
+        except Exception as e:
+            logger.error(f"Échec écriture dump HTML : {e}")
+
         raise ValueError("Date de situation introuvable dans td#lzA1")
 
     date_str = match.group(1)

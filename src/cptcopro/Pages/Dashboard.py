@@ -1,6 +1,5 @@
 import streamlit as st
 from streamlit_extras.metric_cards import style_metric_cards
-import datetime as dt
 import loguru
 import sqlite3
 from pathlib import Path

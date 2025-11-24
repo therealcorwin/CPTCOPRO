@@ -1,0 +1,10 @@
+[theme]
+base="dark"
+textColor="darkGoldenrod"
+linkColor="darkOrchid"
+
+[server]
+runOnSave = true
+
+[browser]
+gatherUsageStats = false

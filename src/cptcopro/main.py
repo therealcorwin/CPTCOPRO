@@ -11,6 +11,9 @@ import cptcopro.Traitement_Lots_Copro as tlc
 import cptcopro.Dedoublonnage as doublon
 import cptcopro.utils.streamlit_launcher as usl
 from loguru import logger
+import time
+import atexit
+
 
 logger.remove()
 logger.add(
@@ -59,6 +62,30 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Suivi des copropriétaires")
     parser.add_argument("--no-headless", action="store_true", help="Lancer Playwright en mode visible (pour debugging)")
     parser.add_argument("--db-path", type=str, default=None, help="Chemin vers la base de données SQLite")
+    # Streamlit sera lancé par défaut après le traitement. Utilisez
+    # `--no-serve` pour **désactiver** le lancement automatique de l'UI.
+    parser.add_argument(
+        "--no-serve",
+        action="store_true",
+        help="Ne PAS lancer l'interface Streamlit après le traitement",
+    )
+    parser.add_argument("--serve-port", type=int, default=8501, help="Port pour Streamlit (si utilisé)")
+    parser.add_argument("--serve-host", type=str, default="127.0.0.1", help="Host pour Streamlit (si utilisé)")
+    parser.add_argument(
+        "--serve-python",
+        type=str,
+        default=None,
+        help="Interpréteur Python à utiliser pour lancer Streamlit (optionnel)",
+    )
+    # Options Streamlit supplémentaires (contrôlent le comportement d'affichage)
+    parser.add_argument("--streamlit-no-browser", action="store_true",
+                        help="Ne pas ouvrir le navigateur pour Streamlit")
+    parser.add_argument("--streamlit-no-console", action="store_true",
+                        help="Ne pas ouvrir la console Windows pour Streamlit")
+    parser.add_argument("--streamlit-use-cmd-start", action="store_true",
+                        help="Sur Windows, utiliser `cmd /c start` pour forcer une fenêtre (voir limites)")
+    parser.add_argument("--streamlit-log-file", type=str, default=None,
+                        help="Fichier pour rediriger stdout/stderr de Streamlit (ex: streamlit_stdout.log)")
     args = parser.parse_args()
 
     # override DB_PATH si fourni
@@ -134,8 +161,39 @@ def main() -> None:
             doublon.suppression_doublons(DB_PATH, analyse)
     except Exception as exc:
         logger.error(f"Erreur lors de la déduplication : {exc}")
+    
+    # Par défaut, lancer Streamlit après le traitement, sauf si demandé sinon
+    proc = None
+    if not args.no_serve:
+        try:
+            logger.info("Lancement de Streamlit via utils.streamlit_launcher...")
+            proc = usl.start_streamlit(
+                app_path="src/cptcopro/Affichage_Stream.py",
+                python_executable=args.serve_python,
+                port=args.serve_port,
+                host=args.serve_host,
+                show_console=not args.streamlit_no_console,
+                open_browser=not args.streamlit_no_browser,
+                use_cmd_start=args.streamlit_use_cmd_start,
+                log_file=args.streamlit_log_file,
+            )
+            logger.info(f"Streamlit lancé (pid={proc.pid})")
+            # garantir arrêt propre même si main lève une exception
+            atexit.register(lambda p=proc: usl.stop_streamlit(p))
+        except Exception as exc:
+            logger.error(f"Impossible de lancer Streamlit : {exc}")
 
-
+    try:
+        # Placez ici le reste de votre logique main
+        print("Application principale en cours... Ctrl-C pour interrompre.")
+        while True:
+            # exemple : simuler un travail principal
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Interruption reçue, fermeture en cours...")
+    finally:
+        if proc is not None:
+            usl.stop_streamlit(proc)
 
 if __name__ == "__main__":
     main()

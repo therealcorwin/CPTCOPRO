@@ -17,19 +17,53 @@ import os
 import sys
 import signal
 import subprocess
-import webbrowser
+# webbrowser intentionally not used anymore; Streamlit handles opening the browser
 from typing import Optional
-from typing import Dict
+from typing import Dict, Any
+import socket
+import logging
 
 # map pid -> creation flags used when launching the process. Stored here
 # instead of attaching attributes to the Popen object (typing/privilege issues).
-_PROC_CREATION_FLAGS: Dict[int, int | None] = {}
+_PROC_CREATION_FLAGS: Dict[int, Any] = {}
+# pid -> open file object for redirected stdout/stderr. Kept so we can close on stop.
+_LOG_FILE_HANDLES: Dict[int, Any] = {}
+
+# module logger
+_LOG = logging.getLogger(__name__)
+
+
+def _find_free_port(start_port: int, host: str = "127.0.0.1", max_tries: int = 20) -> int:
+    """Find a free TCP port starting from `start_port` by probing sequentially.
+
+    Returns the first free port found within `max_tries` attempts, otherwise
+    raises a RuntimeError.
+    """
+    for offset in range(max_tries):
+        p = start_port + offset
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind((host, p))
+                return p
+            except OSError:
+                continue
+    raise RuntimeError(f"Aucun port libre trouvé à partir de {start_port} (essais={max_tries})")
 
 
 def start_streamlit(
     app_path: str = "src/cptcopro/Affichage_Stream.py",
+    python_executable: Optional[str] = None,
+    port: int = 8501,
+    host: str = "127.0.0.1",
+    show_console: bool = True,
+    open_browser: bool = True,
+    cols: Optional[int] = None,
+    lines: Optional[int] = None,
     stdout: Optional[int] = subprocess.DEVNULL,
     stderr: Optional[int] = subprocess.DEVNULL,
+    use_cmd_start: bool = False,
+    log_file: Optional[str] = None,
 ) -> subprocess.Popen:
     """Start Streamlit and return the Popen object.
 
@@ -76,6 +110,22 @@ def start_streamlit(
             "Installez-le dans cet environnement (ex. `poetry add streamlit` ou `pip install streamlit`), "
             "ou fournissez un autre interpréteur via `python_executable` (par ex. le binaire créé par Poetry)."
         )
+    # If the requested port is already in use, attempt to find a nearby free
+    # port to avoid the "Port ... is already in use" Streamlit error.
+    used_port = port
+    try:
+        # probe the port by attempting to bind; if binding fails, port is in use
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind((host, port))
+    except OSError:
+        try:
+            used_port = _find_free_port(port, host=host, max_tries=50)
+            _LOG.warning("Port %d indisponible, utilisation du port %d à la place", port, used_port)
+        except RuntimeError as re:
+            # unable to find free port - re-raise as runtime error for caller
+            raise RuntimeError(str(re))
+
     cmd = [
         python_exe,
         "-m",
@@ -83,32 +133,86 @@ def start_streamlit(
         "run",
         app_path,
         "--server.port",
-        str(port),
+        str(used_port),
         "--server.address",
         host,
     ]
 
-    # If user requests a visible console, do not redirect stdout/stderr and
-    # open a new console window on Windows. Otherwise keep defaults.
+    # Prepare optional log file for redirection. If provided and we launch
+    # without `use_cmd_start`, we will pass the open file handles to Popen.
+    # If `use_cmd_start` is used, we embed redirection into the cmdline.
+    log_f = None
+    if log_file:
+        log_path = os.path.abspath(log_file)
+    else:
+        log_path = None
+
+    # If user requests a visible console, do not redirect stdout/stderr by default
+    # and open a new console window on Windows. Otherwise keep defaults.
     if show_console:
         # When requesting a visible console, prefer to open a new console and
         # set its size on Windows using `mode con` before launching Streamlit.
         use_stdout = None
         use_stderr = None
         if os.name == "nt":
-            # Open a new console and run Streamlit directly using the python executable.
-            # Use list args to avoid cmd quoting issues.
-            proc = subprocess.Popen(
-                cmd,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-                stdout=use_stdout,
-                stderr=use_stderr,
-            )
-            # record creation flags so stop_streamlit can choose the correct shutdown
-            try:
-                _PROC_CREATION_FLAGS[proc.pid] = subprocess.CREATE_NEW_CONSOLE
-            except Exception:
-                pass
+            if use_cmd_start:
+                # Use `cmd /c start` to force a new window. Note: the returned Popen
+                # is the cmd process which will exit; stopping the Streamlit process
+                # later may require manual intervention (closing the window).
+                # Use cmd /k inside the new window so the window stays open
+                # even if the Streamlit process exits or errors. This helps
+                # with debugging when the console was opening-and-closing.
+                cmdline = (
+                    f'"{python_exe}" -m streamlit run "{app_path}" '
+                    f'--server.port {port} --server.address {host}'
+                )
+                # Append an echo + pause to keep the new console open after
+                # Streamlit exits so the user can read errors. This is helpful
+                # for debugging when the window was opening-and-closing.
+                # If a log path is requested, redirect stdout/stderr inside the
+                # launched cmd so the output is written to the file even if the
+                # console is closed by the user.
+                if log_path:
+                    # Ensure parent dir exists
+                    os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(log_path) else None
+                    redirected = f'{cmdline} > "{log_path}" 2>&1'
+                else:
+                    redirected = cmdline
+
+                debug_wrapper = (
+                    redirected
+                    + " & echo. & echo --- Streamlit process terminated --- & echo Exit code=%ERRORLEVEL% & echo Log file="
+                    + (f'"{log_path}"' if log_path else 'none')
+                    + " & pause"
+                )
+                start_cmd = [
+                    "cmd",
+                    "/c",
+                    "start",
+                    "Streamlit",
+                    "cmd",
+                    "/k",
+                    debug_wrapper,
+                ]
+                proc = subprocess.Popen(start_cmd, stdout=use_stdout, stderr=use_stderr)
+                try:
+                    _PROC_CREATION_FLAGS[proc.pid] = "CMD_START"
+                except Exception:
+                    pass
+            else:
+                # Open a new console and run Streamlit directly using the python executable.
+                # Use list args to avoid cmd quoting issues.
+                proc = subprocess.Popen(
+                    cmd,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                    stdout=use_stdout,
+                    stderr=use_stderr,
+                )
+                # record creation flags so stop_streamlit can choose the correct shutdown
+                try:
+                    _PROC_CREATION_FLAGS[proc.pid] = subprocess.CREATE_NEW_CONSOLE
+                except Exception:
+                    pass
         else:
             # Non-Windows: fallback to previous visible-start behaviour
             proc = subprocess.Popen(
@@ -120,32 +224,63 @@ def start_streamlit(
                 pass
     else:
         if os.name == "nt":
-            proc = subprocess.Popen(
-                cmd,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                stdout=stdout,
-                stderr=stderr,
-            )
+            # When not showing console, redirect stdout/stderr to the provided
+            # destinations. If a log_path was provided, open it and pass the
+            # file handle so we capture Streamlit output.
+            if log_path:
+                os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(log_path) else None
+                log_f = open(log_path, "a", encoding="utf-8", buffering=1)
+                proc = subprocess.Popen(
+                    cmd,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    stdout=log_f,
+                    stderr=log_f,
+                )
+            else:
+                proc = subprocess.Popen(
+                    cmd,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
             try:
                 _PROC_CREATION_FLAGS[proc.pid] = subprocess.CREATE_NEW_PROCESS_GROUP
+                if log_f is not None:
+                    _LOG_FILE_HANDLES[proc.pid] = log_f
             except Exception:
                 pass
         else:
-            proc = subprocess.Popen(
-                cmd, start_new_session=True, stdout=stdout, stderr=stderr
-            )
-            try:
-                _PROC_CREATION_FLAGS[proc.pid] = None
-            except Exception:
-                pass
+            if log_path:
+                os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(log_path) else None
+                log_f = open(log_path, "a", encoding="utf-8", buffering=1)
+                proc = subprocess.Popen(
+                    cmd, start_new_session=True, stdout=log_f, stderr=log_f
+                )
+                try:
+                    _PROC_CREATION_FLAGS[proc.pid] = None
+                    _LOG_FILE_HANDLES[proc.pid] = log_f
+                except Exception:
+                    pass
+            else:
+                proc = subprocess.Popen(
+                    cmd, start_new_session=True, stdout=stdout, stderr=stderr
+                )
+                try:
+                    _PROC_CREATION_FLAGS[proc.pid] = None
+                except Exception:
+                    pass
 
-    if open_browser:
-        try:
-            webbrowser.open(f"http://{host}:{port}")
-        except Exception:
-            # best-effort opening of browser; don't raise
-            pass
-
+    # Do not call webbrowser.open() here. Streamlit itself opens the browser
+    # by default which was causing duplicate tabs (launcher + Streamlit both
+    # opening). If you want to suppress Streamlit opening the browser, use
+    # Streamlit's own config or pass `--server.headless true` in a future
+    # change; for now we rely on Streamlit's default behaviour.
+    # store logfile handle for non-cmd-start cases so we can close it on stop
+    try:
+        if log_f is not None and proc is not None:
+            _LOG_FILE_HANDLES[proc.pid] = log_f
+    except Exception:
+        pass
     return proc
 
 
@@ -194,6 +329,69 @@ def stop_streamlit(proc: subprocess.Popen, force: bool = True, timeout: int = 5)
                 proc.kill()
             except Exception:
                 pass
+    finally:
+        # Close any logfile handles we opened for this pid
+        try:
+            f = _LOG_FILE_HANDLES.pop(proc.pid, None)
+            if f is not None:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
 
 __all__ = ["start_streamlit", "stop_streamlit"]
+
+
+def _parse_cli_args() -> dict:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Lance Streamlit (par défaut ouvre une console). Utilisez --no-console pour ne PAS ouvrir la console."
+    )
+    parser.add_argument("--app-path", default="src/cptcopro/Affichage_Stream.py")
+    parser.add_argument("--port", type=int, default=8501)
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--no-console", dest="no_console", action="store_true",
+                        help="Ne pas ouvrir de console visible (redirige stdout/stderr).")
+    parser.add_argument("--no-browser", dest="no_browser", action="store_true",
+                        help="Ne pas ouvrir automatiquement le navigateur web.")
+    parser.add_argument("--cols", type=int, default=None, help="Colonnes console (Windows)")
+    parser.add_argument("--lines", type=int, default=None, help="Lignes console (Windows)")
+    parser.add_argument("--use-cmd-start", dest="use_cmd_start", action="store_true",
+                        help="Sur Windows, utilise `cmd /c start` pour forcer une nouvelle fenêtre (fallback).")
+    parser.add_argument("--log-file", dest="log_file", default=None,
+                        help="Fichier dans lequel rediriger stdout/stderr de Streamlit (ex: streamlit_stdout.log)")
+    return vars(parser.parse_args())
+
+
+if __name__ == "__main__":
+    # Comportement CLI : par défaut la console est visible. Utiliser --no-console pour la désactiver.
+    args = _parse_cli_args()
+    show_console = not bool(args["no_console"])
+    open_browser = not bool(args["no_browser"])
+    use_cmd_start = bool(args["use_cmd_start"])
+
+    try:
+        proc = start_streamlit(
+            app_path=args["app_path"],
+            port=args["port"],
+            host=args["host"],
+            show_console=show_console,
+            open_browser=open_browser,
+            cols=args["cols"],
+            lines=args["lines"],
+            use_cmd_start=use_cmd_start,
+            log_file=args.get("log_file"),
+        )
+        print(f"Streamlit lancé (pid={proc.pid}), show_console={show_console}")
+        # Attendre tant que le processus tourne; quitter proprement sur Ctrl-C
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            print("Interruption reçue, arrêt de Streamlit...")
+            stop_streamlit(proc)
+    except Exception as e:
+        print(f"Erreur lancement Streamlit: {e}")
