@@ -107,7 +107,7 @@ def recuperer_date_situation_copro(htmlparser: HTMLParser) -> str:
         except Exception:
             full_html = ""
 
-        dump_path = Path(os.getcwd()) / "_data" / "last_runtime_dump.html"
+        dump_path = Path(__file__) / "last_runtime_dump.html"        
         try:
             dump_path.parent.mkdir(parents=True, exist_ok=True)
             with open(dump_path, "w", encoding="utf-8") as f:
