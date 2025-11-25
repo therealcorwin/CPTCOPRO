@@ -169,6 +169,19 @@ def verif_presence_db(db_path: str) -> None:
             """)
             logger.success("View 'vw_charge_coproprietaires' créée/assurée.")
             
+            logger.info("Creation de la table nombre_alertes")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS nombre_alertes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nombre_alertes INTEGER NOT NULL,
+                    date_releve DATE NOT NULL,
+                    UNIQUE(date_releve)
+                )
+                """
+            )
+            logger.success("Table 'nombre_alertes' vérifiée/créée.")
+
             conn.commit()
             conn.close()
             logger.success("Tables Alerte_debit_eleve, charge et coproprietaires et trigger 'alerte_debit_eleve' créés.")
@@ -187,6 +200,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
     - table `alertes_debit_eleve`
     - trigger `alerte_debit_eleve`
     - table `coproprietaires`
+    - vue `vw_charge_coproprietaires`
+    - table `nombre_alertes`
 
     Retourne un dict récapitulatif contenant l'état après vérification et la liste
     des éléments créés.
@@ -360,6 +375,27 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             logger.success("View 'vw_charge_coproprietaires' créée/assurée.")
         except Exception as e:
             logger.error(f"Impossible de créer la vue vw_charge_coproprietaires : {e}")
+        # table nombre_alertes
+        logger.info("Vérification de la présence de la table 'nombre_alertes'.")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nombre_alertes';")
+        if cur.fetchone():
+            has_nombre_alertes = True
+            logger.info("Table 'nombre_alertes' existe.")
+        else:
+            logger.warning("Table 'nombre_alertes' manquante, création en cours.")
+            has_nombre_alertes = False
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS nombre_alertes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date_releve DATE NOT NULL,
+                    nombre_alertes INTEGER NOT NULL,
+                    UNIQUE(date_releve)
+                )
+                """
+            )
+            logger.success("Table 'nombre_alertes' vérifiée/créée.")
+            created.append('nombre_alertes')
     except Exception as e:
         conn.rollback()
         logger.error(f"Erreur lors de la vérification/création des composants DB : {e}")
@@ -372,6 +408,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         'alertes_debit_eleve': has_alertes,
         'alerte_debit_eleve': has_trigger,
         'coproprietaires': has_coproprietaires,
+        'nombre_alertes': has_nombre_alertes,
         'created': created,
     }
 
@@ -469,3 +506,48 @@ def enregistrer_coproprietaires(data_coproprietaires: list[Any], db_path: str) -
     logger.info(f"{nb_copro} copropriétaires insérés (table remplacée).")
     return
 
+def sauvegarder_nombre_alertes(db_path: str) -> None:
+    """
+    Sauvegarde le nombre d'alertes pour une date de relevé donnée dans la table `nombre_alertes`.
+
+    Args:
+        db_path (str): Chemin vers la base de données SQLite.
+    Returns:
+        None
+    """
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    try:
+        # Récupérer les valeurs à insérer
+        cur.execute(
+            """
+            SELECT 
+                MAX(last_detection) AS date_releve,
+                COUNT(*) AS nombre_alertes
+            FROM alertes_debit_eleve
+            """
+        )
+        row = cur.fetchone()
+        date_releve, nombre_alertes = row[0], row[1]
+        
+        if date_releve is None:
+            logger.warning("Aucune alerte trouvée, rien à sauvegarder.")
+            return
+        
+        # UPSERT : INSERT OR REPLACE fonctionne grâce à UNIQUE(date_releve)
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO nombre_alertes (date_releve, nombre_alertes)
+            VALUES (?, ?)
+            """,
+            (date_releve, nombre_alertes)
+        )
+        conn.commit()
+        logger.info(f"Nombre d'alertes ({nombre_alertes}) sauvegardé pour la date {date_releve}.")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erreur lors de la sauvegarde du nombre d'alertes : {e}")
+        raise
+    finally:
+        conn.close()
+    return

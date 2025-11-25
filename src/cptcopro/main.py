@@ -161,6 +161,14 @@ def main() -> None:
             doublon.suppression_doublons(DB_PATH, analyse)
     except Exception as exc:
         logger.error(f"Erreur lors de la déduplication : {exc}")
+
+
+    try:
+        logger.info("Mise à jour de la table 'nombre_alertes'...")
+        dtb.sauvegarder_nombre_alertes(DB_PATH)
+        logger.success("Table 'nombre_alertes' mise à jour.")
+    except Exception as exc:
+        logger.error(f"Erreur lors de la mise à jour de la table 'nombre_alertes' : {exc}")
     
     # Par défaut, lancer Streamlit après le traitement, sauf si demandé sinon
     proc = None
