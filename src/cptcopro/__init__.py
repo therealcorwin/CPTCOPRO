@@ -16,7 +16,6 @@ import cptcopro.utils.streamlit_launcher as usl
 from loguru import logger
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
-from selectolax.parser import HTMLParser  # type: ignore
 from datetime import datetime
 from typing import Any
 from rich.console import Console

@@ -42,21 +42,8 @@ def recup_nbre_alertes(DB_PATH: Path) -> int:
         return 0
     return nbre_alertes
 
-def suivi_nbre_alertes(DB_PATH: Path) -> int:
-    query = "SELECT COUNT(*) AS 'nombre d alertes' FROM alertes_debit_eleve"
-    conn = sqlite3.connect(str(DB_PATH))
-    try:
-        nbre_alertes_df = pd.read_sql_query(query, conn)
-    finally:
-        conn.close()
-    if nbre_alertes_df.empty:
-        return 0
-    nbre_alertes = int(nbre_alertes_df["nombre d alertes"].item())
-    if nbre_alertes == 0:
-        return 0
-    return nbre_alertes
 
-def recup_suivi_alertes(db_path: Path) -> pd.DataFrame:
+def suivi_nbre_alertes(db_path: Path) -> pd.DataFrame:
     query = "SELECT nombre_alertes FROM nombre_alertes ORDER BY date_releve DESC LIMIT 1;"
     try:
         conn = sqlite3.connect(str(db_path))
@@ -116,7 +103,9 @@ with st.container():
         )
         style_metric_cards(background_color= "#292D34")
 
-st.button("rerun")
+if st.button("rerun"):
+    st.rerun()
+
 st.markdown("Evolution des débits globaux de l'ensemble des copropriétaires")
 chart = px.line(Charge_globale, x="date", y="debit global", title="Evolution des débits globaux", markers=True)
 st.plotly_chart(chart, width="stretch")
