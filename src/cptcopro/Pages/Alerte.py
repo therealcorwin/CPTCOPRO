@@ -6,10 +6,6 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 
-# IMPORTANT: this page expects the view `vw_charge_coproprietaires` to exist
-# with the following columns: `code_proprietaire`, `nom_proprietaire`, `date`, `debit`.
-# If your database uses different names or the view is missing, update the DB or
-# this query accordingly.
 
 def recup_alertes(db_path: Path) -> pd.DataFrame:
     query = "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, debit as Debit, first_detection AS FirstDetection, last_detection AS LastDetection, occurence AS Occurence FROM alertes_debit_eleve"
@@ -56,6 +52,7 @@ def recup_debits_proprietaires_alertes(db_path: Path, codes: list) -> pd.DataFra
     except Exception as e:
         st.error(f"Erreur inattendue lors de la récupération des débits : {e}")
         return pd.DataFrame()
+
 
 st.set_page_config(page_title="Alertes Débit Élevé", layout="wide")
 st.title("Alertes Débit Élevé des Copropriétaires")

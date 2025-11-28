@@ -165,7 +165,7 @@ def main() -> None:
 
     try:
         logger.info("Mise à jour de la table 'nombre_alertes'...")
-        dtb.sauvegarder_nombre_alertes(DB_PATH)
+        #dtb.sauvegarder_nombre_alertes(DB_PATH)
         logger.success("Table 'nombre_alertes' mise à jour.")
     except Exception as exc:
         logger.error(f"Erreur lors de la mise à jour de la table 'nombre_alertes' : {exc}")

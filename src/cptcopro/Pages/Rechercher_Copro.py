@@ -170,7 +170,7 @@ if proprietaires_selection:
 
         # Afficher le tableau agrégé
         with st.expander("Tableau agrégé par date et propriétaire", expanded=False):
-            st.dataframe(agg.sort_values(by=["date", "proprietaire"], ascending=[True, False]))
+            st.dataframe(agg.sort_values(by=["date", "proprietaire"], ascending=[False, True]))
 
 else:
     st.info("Aucun propriétaire sélectionné pour le tracé.")

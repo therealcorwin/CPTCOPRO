@@ -6,7 +6,10 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 
+
+
 DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
+@st.cache_data(ttl=10, show_spinner="Rechargement du cache...")
 
 def chargement_somme_debit_global(DB_PATH: Path) -> pd.DataFrame:
     query = "SELECT sum(debit) AS 'debit global', date FROM vw_charge_coproprietaires GROUP BY date"
@@ -39,13 +42,41 @@ def recup_nbre_alertes(DB_PATH: Path) -> int:
         return 0
     return nbre_alertes
 
+def suivi_nbre_alertes(DB_PATH: Path) -> int:
+    query = "SELECT COUNT(*) AS 'nombre d alertes' FROM alertes_debit_eleve"
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        nbre_alertes_df = pd.read_sql_query(query, conn)
+    finally:
+        conn.close()
+    if nbre_alertes_df.empty:
+        return 0
+    nbre_alertes = int(nbre_alertes_df["nombre d alertes"].item())
+    if nbre_alertes == 0:
+        return 0
+    return nbre_alertes
 
+def recup_suivi_alertes(db_path: Path) -> pd.DataFrame:
+    query = "SELECT nombre_alertes FROM nombre_alertes ORDER BY date_releve DESC LIMIT 1;"
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            recup_alerte = pd.read_sql_query(query, conn)
+        finally:
+            conn.close()
+        return recup_alerte
+    except sqlite3.Error as e:
+        st.error(f"Erreur lors de la récupération des alertes : {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Erreur inattendue : {e}")
+        return pd.DataFrame()
 
 loguru.logger.info("Starting Streamlit app for coproprietaires display")
 Charge_globale = chargement_somme_debit_global(DB_PATH)
-nbre_alertes = recup_nbre_alertes(DB_PATH)
-
-
+nbre_alerte = recup_nbre_alertes(DB_PATH)
+suivi_alerte = suivi_nbre_alertes(DB_PATH)
+delta_alerte = nbre_alerte - suivi_alerte
 if Charge_globale.empty:
     st.error("Aucune donnée disponible à afficher.")
     st.stop()
@@ -61,7 +92,7 @@ with st.container():
         style_metric_cards(background_color= "#292D34")
     with centre:
         st.space("small")
-        st.metric("Nombre d'alertes", value=nbre_alertes, delta=nbre_alertes)
+        st.metric("Nombre d'alertes", value=nbre_alerte, delta=delta_alerte, delta_color="inverse")
         style_metric_cards(background_color= "#292D34")    
     with droite:
         st.space("small")
@@ -84,11 +115,11 @@ with st.container():
             help="Si Indicateur vert, le débit global a diminué par rapport à la dernière mesure.",
         )
         style_metric_cards(background_color= "#292D34")
- 
 
+st.button("rerun")
 st.markdown("Evolution des débits globaux de l'ensemble des copropriétaires")
 chart = px.line(Charge_globale, x="date", y="debit global", title="Evolution des débits globaux", markers=True)
 st.plotly_chart(chart, width="stretch")
 with st.expander("Table des données" ):
-    st.dataframe(Charge_globale)
+    st.dataframe(Charge_globale.sort_values(by="date", ascending=False))
 
