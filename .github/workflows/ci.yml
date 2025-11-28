@@ -9,13 +9,18 @@ on:
 jobs:
   test:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ['3.12', '3.13']
+      fail-fast: false
+    
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
 
       - name: Install Poetry
         run: |
@@ -27,18 +32,18 @@ jobs:
         with:
           path: |
             ~/.cache/pypoetry
-          key: ${{ runner.os }}-poetry-${{ hashFiles('**/pyproject.toml', '**/poetry.lock') }}
+          key: ${{ runner.os }}-poetry-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml', '**/poetry.lock') }}
           restore-keys: |
-            ${{ runner.os }}-poetry-
+            ${{ runner.os }}-poetry-${{ matrix.python-version }}-
 
       - name: Cache .venv (Poetry in-project virtualenv)
         uses: actions/cache@v4
         with:
           path: |
             .venv
-          key: ${{ runner.os }}-venv-${{ hashFiles('**/pyproject.toml', '**/poetry.lock') }}
+          key: ${{ runner.os }}-venv-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml', '**/poetry.lock') }}
           restore-keys: |
-            ${{ runner.os }}-venv-
+            ${{ runner.os }}-venv-${{ matrix.python-version }}-
 
       - name: Configure Poetry to create in-project virtualenv
         run: |
@@ -48,13 +53,13 @@ jobs:
         run: |
           poetry install --no-interaction
 
-      - name: Install Playwright browsers (if needed)
-        if: contains(join(github.event.head_commit.message, ' '), 'playwright') || always()
+      - name: Install Playwright browsers
         run: |
-          poetry run playwright install --with-deps || true
+          poetry run playwright install chromium --with-deps || true
 
       - name: Run tests
         env:
-          CTPCOPRO_DB_PATH: ${{ github.workspace }}/src/cptcopro/coproprietaires.sqlite
+          CTPCOPRO_DB_PATH: ${{ github.workspace }}/src/cptcopro/BDD/test.sqlite
+          PYTHONPATH: src
         run: |
-          poetry run pytest -q
+          poetry run pytest -v --tb=short
