@@ -48,12 +48,14 @@ def suivi_nbre_alertes(db_path: Path) -> int:
         conn = sqlite3.connect(str(db_path))
         try:
             recup_alerte_df = pd.read_sql_query(query, conn)
+            if recup_alerte_df.empty:
+                return 0
             recup_alerte = int(recup_alerte_df["nombre_alertes"].item())
             if recup_alerte == 0:
                 return 0
         finally:
             conn.close()
-        return recup_alerte
+        return recup_alerte    
     except sqlite3.Error as e:
         st.error(f"Erreur lors de la récupération des alertes : {e}")
         return 0
