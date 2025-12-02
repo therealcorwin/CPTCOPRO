@@ -6,11 +6,9 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 
-
-
 DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
-@st.cache_data()
 
+@st.cache_data()
 def chargement_somme_debit_global(DB_PATH: Path) -> pd.DataFrame:
     query = "SELECT sum(debit) AS 'debit global', date FROM vw_charge_coproprietaires GROUP BY date"
     conn = sqlite3.connect(str(DB_PATH))
@@ -28,6 +26,7 @@ def chargement_somme_debit_global(DB_PATH: Path) -> pd.DataFrame:
     debit_global = debit_global.dropna(subset=["date"]).sort_values("date")
     return debit_global
 
+@st.cache_data()
 def recup_nbre_alertes(DB_PATH: Path) -> int:
     query = "SELECT COUNT(*) AS 'nombre d alertes' FROM alertes_debit_eleve"
     conn = sqlite3.connect(str(DB_PATH))
@@ -42,6 +41,7 @@ def recup_nbre_alertes(DB_PATH: Path) -> int:
         return 0
     return nbre_alertes
 
+@st.cache_data()
 def suivi_nbre_alertes(db_path: Path) -> int:
     query = "SELECT nombre_alertes FROM suivi_alertes ORDER BY date_releve DESC LIMIT 1;"
     try:
