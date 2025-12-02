@@ -169,18 +169,17 @@ def verif_presence_db(db_path: str) -> None:
             """)
             logger.success("View 'vw_charge_coproprietaires' créée/assurée.")
             
-            logger.info("Creation de la table nombre_alertes")
+            logger.info("Creation de la table suivi_alertes")
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS nombre_alertes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                CREATE TABLE IF NOT EXISTS suivi_alertes (
+                    date_releve DATE PRIMARY KEY,
                     nombre_alertes INTEGER NOT NULL,
-                    date_releve DATE NOT NULL,
-                    UNIQUE(date_releve)
+                    total_debit REAL NOT NULL
                 )
                 """
             )
-            logger.success("Table 'nombre_alertes' vérifiée/créée.")
+            logger.success("Table 'suivi_alertes' vérifiée/créée.")
 
             conn.commit()
             conn.close()
@@ -375,27 +374,26 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             logger.success("View 'vw_charge_coproprietaires' créée/assurée.")
         except Exception as e:
             logger.error(f"Impossible de créer la vue vw_charge_coproprietaires : {e}")
-        # table nombre_alertes
-        logger.info("Vérification de la présence de la table 'nombre_alertes'.")
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nombre_alertes';")
+        # table suivi_alertes
+        logger.info("Vérification de la présence de la table 'suivi_alertes'.")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='suivi_alertes';")
         if cur.fetchone():
             has_nombre_alertes = True
-            logger.info("Table 'nombre_alertes' existe.")
+            logger.info("Table 'suivi_alertes' existe.")
         else:
-            logger.warning("Table 'nombre_alertes' manquante, création en cours.")
+            logger.warning("Table 'suivi_alertes' manquante, création en cours.")
             has_nombre_alertes = False
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS nombre_alertes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date_releve DATE NOT NULL,
+                CREATE TABLE IF NOT EXISTS suivi_alertes (
+                    date_releve DATE PRIMARY KEY,
                     nombre_alertes INTEGER NOT NULL,
-                    UNIQUE(date_releve)
+                    total_debit REAL NOT NULL
                 )
                 """
             )
-            logger.success("Table 'nombre_alertes' vérifiée/créée.")
-            created.append('nombre_alertes')
+            logger.success("Table 'suivi_alertes' vérifiée/créée.")
+            created.append('suivi_alertes')
     except Exception as e:
         conn.rollback()
         logger.error(f"Erreur lors de la vérification/création des composants DB : {e}")
@@ -523,12 +521,13 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
             """
             SELECT 
                 MAX(last_detection) AS date_releve,
-                COUNT(*) AS nombre_alertes
+                COUNT(*) AS nombre_alertes,
+                SUM(debit) AS total_debit
             FROM alertes_debit_eleve
             """
         )
         row = cur.fetchone()
-        date_releve, nombre_alertes = row[0], row[1]
+        date_releve, nombre_alertes, total_debit = row[0], row[1], row[2]
         
         if date_releve is None:
             logger.warning("Aucune alerte trouvée, rien à sauvegarder.")
@@ -537,13 +536,13 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
         # UPSERT : INSERT OR REPLACE fonctionne grâce à UNIQUE(date_releve)
         cur.execute(
             """
-            INSERT OR REPLACE INTO nombre_alertes (date_releve, nombre_alertes)
-            VALUES (?, ?)
+            INSERT OR REPLACE INTO suivi_alertes (date_releve, nombre_alertes, total_debit)
+            VALUES (?, ?, ?)
             """,
-            (date_releve, nombre_alertes)
+            (date_releve, nombre_alertes, total_debit)
         )
         conn.commit()
-        logger.info(f"Nombre d'alertes ({nombre_alertes}) sauvegardé pour la date {date_releve}.")
+        logger.info(f"Nombre d'alertes ({nombre_alertes}) sauvegardé pour la date {date_releve}. Somme débit : {total_debit}.")
     except Exception as e:
         conn.rollback()
         logger.error(f"Erreur lors de la sauvegarde du nombre d'alertes : {e}")

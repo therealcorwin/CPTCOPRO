@@ -9,7 +9,7 @@ import plotly.express as px
 
 
 DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
-@st.cache_data(ttl=10, show_spinner="Rechargement du cache...")
+@st.cache_data()
 
 def chargement_somme_debit_global(DB_PATH: Path) -> pd.DataFrame:
     query = "SELECT sum(debit) AS 'debit global', date FROM vw_charge_coproprietaires GROUP BY date"
@@ -42,22 +42,24 @@ def recup_nbre_alertes(DB_PATH: Path) -> int:
         return 0
     return nbre_alertes
 
-
-def suivi_nbre_alertes(db_path: Path) -> pd.DataFrame:
-    query = "SELECT nombre_alertes FROM nombre_alertes ORDER BY date_releve DESC LIMIT 1;"
+def suivi_nbre_alertes(db_path: Path) -> int:
+    query = "SELECT nombre_alertes FROM suivi_alertes ORDER BY date_releve DESC LIMIT 1;"
     try:
         conn = sqlite3.connect(str(db_path))
         try:
-            recup_alerte = pd.read_sql_query(query, conn)
+            recup_alerte_df = pd.read_sql_query(query, conn)
+            recup_alerte = int(recup_alerte_df["nombre_alertes"].item())
+            if recup_alerte == 0:
+                return 0
         finally:
             conn.close()
         return recup_alerte
     except sqlite3.Error as e:
         st.error(f"Erreur lors de la récupération des alertes : {e}")
-        return pd.DataFrame()
+        return 0
     except Exception as e:
         st.error(f"Erreur inattendue : {e}")
-        return pd.DataFrame()
+        return 0
 
 loguru.logger.info("Starting Streamlit app for coproprietaires display")
 Charge_globale = chargement_somme_debit_global(DB_PATH)
@@ -67,6 +69,8 @@ delta_alerte = nbre_alerte - suivi_alerte
 if Charge_globale.empty:
     st.error("Aucune donnée disponible à afficher.")
     st.stop()
+
+st.image(Path(__file__).parent / "Assets" / "gb2.png", width= 1000)
 
 gauche,centre, droite = st.columns(3)
 
@@ -103,12 +107,13 @@ with st.container():
         )
         style_metric_cards(background_color= "#292D34")
 
-if st.button("rerun"):
-    st.rerun()
 
-st.markdown("Evolution des débits globaux de l'ensemble des copropriétaires")
-chart = px.line(Charge_globale, x="date", y="debit global", title="Evolution des débits globaux", markers=True)
+chart = px.line(Charge_globale, x="date", y="debit global", title="Evolution des débits des copropriétaires", markers=True)
 st.plotly_chart(chart, width="stretch")
 with st.expander("Table des données" ):
     st.dataframe(Charge_globale.sort_values(by="date", ascending=False))
 
+if st.button("rerun"):
+    st.rerun()
+else:
+    st.stop()

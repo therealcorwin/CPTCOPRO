@@ -54,7 +54,7 @@ else:
     ]
 
 fig = px.line(filtered_df, x="date", y="debit", color="proprietaire", title="Évolution des débits par propriétaire", markers=False)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 # --- Affichage des données brutes ---
 with st.expander("Afficher les données filtrées"):
     st.dataframe(filtered_df.sort_values(by=['date', 'proprietaire'], ascending=[False, True]))
