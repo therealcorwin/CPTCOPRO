@@ -1,7 +1,6 @@
 """Tests pour le module Backup_DB.py."""
 from __future__ import annotations
 
-import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -140,12 +139,46 @@ class TestBackupDb:
     def test_fallback_to_module_dir_when_no_portable_paths(self, sample_db, tmp_path):
         """Utilise le répertoire du module si paths.py n'est pas disponible."""
         # Ce test vérifie le comportement quand _USE_PORTABLE_PATHS est False
-        with patch('cptcopro.Backup_DB._USE_PORTABLE_PATHS', False):
-            with patch('os.path.dirname', return_value=str(tmp_path)):
-                with patch('os.path.exists', side_effect=lambda p: str(tmp_path) in p):
-                    with patch('os.path.join', side_effect=os.path.join):
-                        # Le backup devrait essayer d'utiliser le chemin relatif au module
-                        backup_db(str(sample_db))
+        # En mode fallback, backup_db utilise os.path.dirname(__file__) + "BACKUP"
+        
+        # Patch uniquement _USE_PORTABLE_PATHS et le chemin __file__ du module
+        import cptcopro.Backup_DB as backup_module
+        original_file = backup_module.__file__
+        
+        try:
+            # Simuler que le module est dans tmp_path
+            backup_module.__file__ = str(tmp_path / "Backup_DB.py")
+            
+            with patch.object(backup_module, '_USE_PORTABLE_PATHS', False):
+                backup_db(str(sample_db))
+            
+            # Vérifier que le répertoire BACKUP a été créé dans tmp_path
+            expected_backup_dir = tmp_path / "BACKUP"
+            assert expected_backup_dir.exists(), f"Le répertoire BACKUP devrait exister dans {tmp_path}"
+            
+            # Vérifier que le chemin contient bien le répertoire tmp_path
+            assert str(tmp_path) in str(expected_backup_dir), \
+                f"Le chemin de backup devrait contenir {tmp_path}"
+            
+            # Trouver le fichier de backup créé
+            backup_files = list(expected_backup_dir.glob("backup_*.sqlite"))
+            assert len(backup_files) == 1, \
+                f"Un seul fichier backup devrait exister, trouvé: {backup_files}"
+            
+            backup_file = backup_files[0]
+            
+            # Vérifier que le fichier backup contient les données de sample_db
+            conn = sqlite3.connect(backup_file)
+            cursor = conn.execute("SELECT name FROM test")
+            rows = cursor.fetchall()
+            conn.close()
+            
+            assert len(rows) == 1, "Le backup devrait contenir une ligne"
+            assert rows[0][0] == "test_data", \
+                f"Le backup devrait contenir 'test_data', trouvé: {rows[0][0]}"
+        finally:
+            # Restaurer __file__ original
+            backup_module.__file__ = original_file
 
 
 class TestBackupDbIntegration:

@@ -97,24 +97,16 @@ class TestGetDbPath:
     
     def test_default_db_name(self):
         """Utilise le nom par défaut si non spécifié."""
-        # Nettoyer les variables d'environnement
         with patch.dict(os.environ, {}, clear=True):
-            # Retirer les variables CPTCOPRO/CTPCOPRO si présentes
-            env_without_db = {k: v for k, v in os.environ.items() 
-                           if 'CPTCOPRO_DB_PATH' not in k and 'CTPCOPRO_DB_PATH' not in k}
-            with patch.dict(os.environ, env_without_db, clear=True):
-                db_path = get_db_path()
-                assert db_path.name == "test.sqlite"
-                assert "BDD" in str(db_path)
+            db_path = get_db_path()
+            assert db_path.name == "test.sqlite"
+            assert "BDD" in str(db_path)
     
     def test_custom_db_name(self):
         """Accepte un nom de DB personnalisé."""
         with patch.dict(os.environ, {}, clear=True):
-            env_without_db = {k: v for k, v in os.environ.items() 
-                           if 'CPTCOPRO_DB_PATH' not in k and 'CTPCOPRO_DB_PATH' not in k}
-            with patch.dict(os.environ, env_without_db, clear=True):
-                db_path = get_db_path("ma_base.sqlite")
-                assert db_path.name == "ma_base.sqlite"
+            db_path = get_db_path("ma_base.sqlite")
+            assert db_path.name == "ma_base.sqlite"
     
     def test_env_var_override_new_name(self, tmp_path):
         """La variable CPTCOPRO_DB_PATH override le chemin par défaut."""
@@ -128,16 +120,9 @@ class TestGetDbPath:
     def test_env_var_override_old_name(self, tmp_path):
         """La variable CTPCOPRO_DB_PATH (ancienne) fonctionne aussi."""
         custom_path = tmp_path / "legacy" / "db.sqlite"
-        # S'assurer que la nouvelle variable n'est pas définie
-        env = {"CTPCOPRO_DB_PATH": str(custom_path)}
-        if "CPTCOPRO_DB_PATH" in os.environ:
-            env["CPTCOPRO_DB_PATH"] = ""
-        with patch.dict(os.environ, env, clear=False):
-            # Forcer la suppression de CPTCOPRO_DB_PATH
-            os.environ.pop("CPTCOPRO_DB_PATH", None)
+        with patch.dict(os.environ, {"CTPCOPRO_DB_PATH": str(custom_path)}, clear=True):
             db_path = get_db_path()
-            assert db_path == custom_path.resolve()
-    
+            assert db_path == custom_path.resolve()    
     def test_new_env_var_takes_precedence(self, tmp_path):
         """CPTCOPRO_DB_PATH a priorité sur CTPCOPRO_DB_PATH."""
         new_path = tmp_path / "new" / "db.sqlite"
@@ -165,21 +150,15 @@ class TestGetLogPath:
     def test_default_log_name(self):
         """Utilise le nom par défaut si non spécifié."""
         with patch.dict(os.environ, {}, clear=True):
-            env_without_log = {k: v for k, v in os.environ.items() 
-                            if 'CPTCOPRO_LOG_FILE' not in k}
-            with patch.dict(os.environ, env_without_log, clear=True):
-                log_path = get_log_path()
-                assert log_path.name == "ctpcopro.log"
-                assert "logs" in str(log_path)
+            log_path = get_log_path()
+            assert log_path.name == "ctpcopro.log"
+            assert "logs" in str(log_path)
     
     def test_custom_log_name(self):
         """Accepte un nom de log personnalisé."""
         with patch.dict(os.environ, {}, clear=True):
-            env_without_log = {k: v for k, v in os.environ.items() 
-                            if 'CPTCOPRO_LOG_FILE' not in k}
-            with patch.dict(os.environ, env_without_log, clear=True):
-                log_path = get_log_path("custom.log")
-                assert log_path.name == "custom.log"
+            log_path = get_log_path("custom.log")
+            assert log_path.name == "custom.log"
     
     def test_env_var_override(self, tmp_path):
         """La variable CPTCOPRO_LOG_FILE override le chemin."""
