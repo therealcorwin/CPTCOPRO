@@ -46,12 +46,6 @@ Important : après l'installation de `playwright`, exécuter `playwright install
 - `Data_To_BDD.enregistrer_donnees_sqlite()` fait `executemany(..., data[3:])` : vérifier la longueur et le contenu de `data` avant de l'appeler.
 - Playwright est exécuté en `headless=True` dans `Parsing_Site_Syndic.py`. Pour déboguer des problèmes d'interaction, exécuter avec `headless=False` et/ou ajouter des `await page.screenshot()` temporaires.
 
-## Exemples de tâches utiles pour un agent IA
-
-- Ajouter une option CLI pour forcer `--no-headless` pour Playwright (pour debugging).
-- Exposer un chemin configurable pour la DB via variable d'environnement plutôt que `Path(__file__).with_name(...)`.
-- Ajouter des tests unitaires pour `normalize_amount` et `recuperer_date_situation_copro` (les fonctions sont pures et faciles à tester).
-
 ## CLI & CI
 
 - `main.py` expose désormais deux options CLI utiles : `--no-headless` (lance Playwright en mode visible) et `--db-path <path>` (surcharge le chemin de la DB). Exemple :
