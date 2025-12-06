@@ -96,14 +96,12 @@ def load_and_validate_env(required_vars: list[str] | None = None) -> dict[str, s
     
     # Vérifier l'existence du fichier
     if not env_path.exists():
+        var_examples = '\n'.join(f"  - {var}=VOTRE_VALEUR" for var in required_vars)
         error_msg = (
             f"Fichier .env introuvable!\n"
             f"Chemin attendu: {env_path}\n"
-            f"Veuillez créer un fichier .env avec les variables suivantes:\n"
-            f"  - login_site_copro=VOTRE_LOGIN\n"
-            f"  - password_site_copro=VOTRE_MOT_DE_PASSE\n"
-            f"  - url_site_copro=VOTRE_URL"
-        )
+            f"Veuillez créer un fichier .env avec les variables suivantes:\n{var_examples}"
+        )        
         logger.bind(type_log="ENV").error(error_msg)
         raise FileNotFoundError(error_msg)
     
@@ -122,8 +120,7 @@ def load_and_validate_env(required_vars: list[str] | None = None) -> dict[str, s
         raise ValueError(error_msg)
     
     # Retourner les variables
-    return {var: os.getenv(var) for var in required_vars}
-
+    return {var: os.environ[var] for var in required_vars}
 
 def get_credentials() -> tuple[str, str, str]:
     """

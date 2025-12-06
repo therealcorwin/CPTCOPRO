@@ -37,15 +37,15 @@ def backup_db(db_path) -> None:
 
     # Vérification et création du dossier backup
     if not os.path.exists(backup_dir):
-        logger.warning("Le répertoire 'BACKUP' n'existe pas. Création en cours...")
+        logger.warning(f"Le répertoire '{backup_dir}' n'existe pas. Création en cours...")
         try:
             os.makedirs(backup_dir)
-            logger.success("Répertoire 'BACKUP' créé.")
+            logger.success(f"Répertoire '{backup_dir}' créé.")
         except Exception as e:
-            logger.error(f"Erreur lors de la création du répertoire 'BACKUP' : {e}")
+            logger.error(f"Erreur lors de la création du répertoire '{backup_dir}' : {e}")
             return
     else:
-        logger.info("Répertoire 'BACKUP' déjà existant.")
+        logger.info(f"Répertoire '{backup_dir}' déjà existant.")
 
     # Vérification de l'existence de la base de données
     if not os.path.exists(db_path):

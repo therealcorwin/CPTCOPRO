@@ -10,10 +10,9 @@ import plotly.express as px
 try:
     from cptcopro.utils.paths import get_db_path
     DB_PATH = get_db_path()
-except ImportError:
-    # Fallback pour le mode développement
+except Exception:
+    # Fallback si l'import échoue ou si get_db_path() lève une exception
     DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
-
 @st.cache_data()
 def chargement_somme_debit_global(DB_PATH: Path) -> pd.DataFrame:
     query = "SELECT sum(debit) AS 'debit global', date FROM vw_charge_coproprietaires GROUP BY date"

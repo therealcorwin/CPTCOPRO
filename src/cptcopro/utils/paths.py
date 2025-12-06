@@ -69,10 +69,11 @@ def get_db_path(db_name: str = "test.sqlite") -> Path:
         Chemin vers le fichier DB dans le sous-dossier BDD/
     """
     # Variable d'environnement pour override (CI, tests, etc.)
-    env_path = os.getenv("CTPCOPRO_DB_PATH")
+    env_path = os.getenv("CPTCOPRO_DB_PATH")
     if env_path:
-        return Path(env_path)
-    
+        path = Path(env_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path    
     db_dir = get_data_dir() / "BDD"
     db_dir.mkdir(parents=True, exist_ok=True)
     return db_dir / db_name
@@ -88,10 +89,11 @@ def get_log_path(log_name: str = "ctpcopro.log") -> Path:
         Chemin vers le fichier de log dans le sous-dossier logs/
     """
     # Variable d'environnement pour override
-    env_path = os.getenv("CTPCOPRO_LOG_FILE")
+    env_path = os.getenv("CPTCOPRO_LOG_FILE")
     if env_path:
-        return Path(env_path)
-    
+        path = Path(env_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path    
     log_dir = get_data_dir() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / log_name

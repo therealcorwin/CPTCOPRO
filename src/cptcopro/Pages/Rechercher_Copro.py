@@ -10,9 +10,11 @@ from typing import List
 try:
     from cptcopro.utils.paths import get_db_path
     DB_PATH = get_db_path()
-except ImportError:
-    # Fallback pour le mode développement
+    logger.info("DB_PATH défini via get_db_path(): {}", DB_PATH)
+except Exception as e:
+    # Fallback pour le mode développement ou en cas d'erreur
     DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
+    logger.warning("Fallback DB_PATH utilisé: {} (exception: {})", DB_PATH, e)
 
 
 def _on_select_all_change(multi_key: str, opts: list, sel_key: str):

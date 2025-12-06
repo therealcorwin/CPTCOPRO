@@ -17,15 +17,9 @@ def _get_cached_credentials() -> tuple[str, str, str]:
     """Récupère les credentials de manière lazy avec cache."""
     global _credentials_cache
     if _credentials_cache is None:
-        try:
-            _credentials_cache = get_credentials()
-            logger.info("Credentials chargés avec succès")
-        except (FileNotFoundError, ValueError) as e:
-            logger.error(f"Erreur de configuration: {e}")
-            print(f"\n❌ ERREUR: {e}")
-            sys.exit(1)
+        _credentials_cache = get_credentials()
+        logger.info("Credentials chargés avec succès")
     return _credentials_cache
-
 
 logger.info("Module Parsing_Charge_Copro chargé")
 

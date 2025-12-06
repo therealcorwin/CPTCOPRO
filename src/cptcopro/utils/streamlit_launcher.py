@@ -12,7 +12,7 @@ is used. On Windows a new process group is created to allow sending
 CTRL_BREAK_EVENT for graceful shutdown.
 
 When running from a PyInstaller bundle, Streamlit is launched directly in-process
-using streamlit.web.cli.main_run().
+using streamlit.web.bootstrap.run().
 """
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ import signal
 import subprocess
 import threading
 import webbrowser
-# webbrowser intentionally not used anymore; Streamlit handles opening the browser
 from typing import Optional
 from typing import Dict, Any
 import socket
@@ -36,6 +35,33 @@ _LOG_FILE_HANDLES: Dict[int, Any] = {}
 
 # module logger
 _LOG = logging.getLogger(__name__)
+
+
+def _load_streamlit_config_toml(config_toml_path: str) -> dict:
+    """Load and parse a Streamlit config.toml file.
+    
+    Args:
+        config_toml_path: Path to the config.toml file.
+        
+    Returns:
+        Parsed config dict, or empty dict on error.
+    """
+    if not os.path.isfile(config_toml_path):
+        return {}
+    
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib  # type: ignore[import-not-found]
+    
+    try:
+        with open(config_toml_path, "rb") as f:
+            config_data = tomllib.load(f)
+        _LOG.info(f"Loaded config from {config_toml_path}")
+        return config_data
+    except Exception as e:
+        _LOG.warning(f"Could not load config.toml: {e}")
+        return {}
 
 
 def is_pyinstaller_bundle() -> bool:
@@ -99,30 +125,18 @@ def start_streamlit_inprocess(
         streamlit_config_dir = os.path.join(base_path, "cptcopro", ".streamlit")
         config_toml_path = os.path.join(streamlit_config_dir, "config.toml")
         if os.path.isdir(streamlit_config_dir):
-            # Streamlit doesn't use STREAMLIT_CONFIG_DIR, but we need to load config manually
             _LOG.info(f"Streamlit config directory: {streamlit_config_dir}")
-            # Load config.toml and apply settings
-            if os.path.isfile(config_toml_path):
-                try:
-                    import tomllib
-                except ImportError:
-                    import tomli as tomllib
-                try:
-                    with open(config_toml_path, "rb") as f:
-                        config_data = tomllib.load(f)
-                    # Apply theme settings from config.toml
-                    if "theme" in config_data:
-                        theme = config_data["theme"]
-                        for key, value in theme.items():
-                            st_config.set_option(f"theme.{key}", value)
-                            _LOG.info(f"Applied theme.{key} = {value}")
-                    # Apply other settings
-                    if "browser" in config_data:
-                        for key, value in config_data["browser"].items():
-                            st_config.set_option(f"browser.{key}", value)
-                    _LOG.info(f"Loaded config from {config_toml_path}")
-                except Exception as e:
-                    _LOG.warning(f"Could not load config.toml: {e}")
+            # Load config.toml and apply settings via helper
+            config_data = _load_streamlit_config_toml(config_toml_path)
+            # Apply theme settings from config.toml
+            if "theme" in config_data:
+                for key, value in config_data["theme"].items():
+                    st_config.set_option(f"theme.{key}", value)
+                    _LOG.info(f"Applied theme.{key} = {value}")
+            # Apply browser settings
+            if "browser" in config_data:
+                for key, value in config_data["browser"].items():
+                    st_config.set_option(f"browser.{key}", value)
     
     _LOG.info(f"Lancement Streamlit in-process: {resolved_path}")
     
@@ -168,21 +182,12 @@ def start_streamlit_inprocess(
     if is_pyinstaller_bundle():
         base_path = sys._MEIPASS
         config_toml_path = os.path.join(base_path, "cptcopro", ".streamlit", "config.toml")
-        if os.path.isfile(config_toml_path):
-            try:
-                import tomllib
-            except ImportError:
-                import tomli as tomllib
-            try:
-                with open(config_toml_path, "rb") as f:
-                    config_data = tomllib.load(f)
-                # Add theme settings to flag_options
-                if "theme" in config_data:
-                    for key, value in config_data["theme"].items():
-                        flag_options[f"theme.{key}"] = value
-                        _LOG.info(f"Added to flag_options: theme.{key} = {value}")
-            except Exception as e:
-                _LOG.warning(f"Could not load theme from config.toml: {e}")
+        config_data = _load_streamlit_config_toml(config_toml_path)
+        # Add theme settings to flag_options
+        if "theme" in config_data:
+            for key, value in config_data["theme"].items():
+                flag_options[f"theme.{key}"] = value
+                _LOG.info(f"Added to flag_options: theme.{key} = {value}")
     
     try:
         bootstrap.run(resolved_path, False, [], flag_options)

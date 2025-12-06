@@ -5,11 +5,11 @@ Ordre de priorité : Edge → Chrome → Firefox
 Utilise les navigateurs installés sur le système (pas les navigateurs bundlés Playwright).
 """
 
+from contextlib import asynccontextmanager
 from playwright.async_api import async_playwright, Browser, Playwright
 from loguru import logger
 
 logger = logger.bind(type_log="BROWSER")
-
 # Ordre de priorité des navigateurs
 BROWSER_CHANNELS = [
     ("msedge", "chromium", "Microsoft Edge"),
@@ -59,7 +59,7 @@ async def launch_browser(playwright: Playwright, headless: bool = True) -> Brows
     logger.error("Aucun navigateur disponible (Edge, Chrome, Firefox)")
     return None
 
-
+@asynccontextmanager
 async def launch_browser_with_context(headless: bool = True):
     """
     Context manager pour lancer un navigateur.
