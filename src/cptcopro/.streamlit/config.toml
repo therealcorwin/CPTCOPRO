@@ -5,6 +5,7 @@ linkColor="darkOrchid"
 
 [server]
 runOnSave = true
+fileWatcherType = "none"
 
 [browser]
 gatherUsageStats = false

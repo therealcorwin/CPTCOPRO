@@ -20,8 +20,6 @@ import os
 import sys
 import signal
 import subprocess
-import threading
-import webbrowser
 from typing import Optional
 from typing import Dict, Any
 import socket
@@ -160,22 +158,26 @@ def start_streamlit_inprocess(
     
     os.environ["STREAMLIT_SERVER_PORT"] = str(used_port)
     os.environ["STREAMLIT_SERVER_ADDRESS"] = host
+
     
-    # Open browser manually before starting (Streamlit headless mode won't open it)
-    if open_browser:
-        url = f"http://{host}:{used_port}"
-        threading.Timer(2.0, lambda: webbrowser.open(url)).start()
+    # Don't open browser manually - let Streamlit handle it via headless setting
+    # This prevents duplicate tabs from opening
     
     # Use bootstrap.run() which is designed to be called from main thread
     # This avoids the "signal only works in main thread" error
+    # headless=True means Streamlit won't open browser, headless=False means it will
     flag_options = {
         "global.developmentMode": False,
         "server.port": used_port,
         "server.address": host,
-        "server.headless": True,
+        "server.headless": not open_browser,  # If open_browser=True, headless=False (Streamlit opens browser)
         "server.fileWatcherType": "none",
+        "server.runOnSave": False,
         "browser.gatherUsageStats": False,
+        "browser.serverAddress": host,
+        "browser.serverPort": used_port,
         "runner.fastReruns": False,
+ 
     }
     
     # Load theme options from config.toml if in PyInstaller bundle
