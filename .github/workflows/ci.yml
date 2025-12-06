@@ -59,7 +59,7 @@ jobs:
 
       - name: Run tests
         env:
-          CTPCOPRO_DB_PATH: ${{ github.workspace }}/src/cptcopro/BDD/test.sqlite
+          CPTCOPRO_DB_PATH: ${{ github.workspace }}/src/cptcopro/BDD/test.sqlite
           PYTHONPATH: src
         run: |
           poetry run pytest -v --tb=short
