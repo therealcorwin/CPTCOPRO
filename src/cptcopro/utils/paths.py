@@ -11,8 +11,11 @@ from __future__ import annotations
 
 import os
 import sys
+import logging
 from pathlib import Path
 from typing import Optional
+
+_LOG = logging.getLogger(__name__)
 
 
 def is_pyinstaller_bundle() -> bool:
@@ -67,15 +70,30 @@ def get_db_path(db_name: str = "test.sqlite") -> Path:
     
     Returns:
         Chemin vers le fichier DB dans le sous-dossier BDD/
+    
+    Raises:
+        OSError: Si le répertoire parent ne peut pas être créé
     """
     # Variable d'environnement pour override (CI, tests, etc.)
-    env_path = os.getenv("CPTCOPRO_DB_PATH")
-    if env_path:
-        path = Path(env_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path    
+    # Supporte CPTCOPRO_DB_PATH (nouvelle) et CTPCOPRO_DB_PATH (ancienne, dépréciée)
+    env_path = os.getenv("CPTCOPRO_DB_PATH") or os.getenv("CTPCOPRO_DB_PATH")
+    if env_path and env_path.strip():
+        # Convertir en chemin absolu
+        path = Path(env_path).resolve()
+        _LOG.info(f"DB path from environment variable: {path}")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            _LOG.error(f"Cannot create DB directory '{path.parent}': {e}")
+            raise OSError(f"Cannot create DB directory '{path.parent}': {e}") from e
+        return path
+    
     db_dir = get_data_dir() / "BDD"
-    db_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        db_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        _LOG.error(f"Cannot create DB directory '{db_dir}': {e}")
+        raise OSError(f"Cannot create DB directory '{db_dir}': {e}") from e
     return db_dir / db_name
 
 
@@ -87,15 +105,28 @@ def get_log_path(log_name: str = "ctpcopro.log") -> Path:
     
     Returns:
         Chemin vers le fichier de log dans le sous-dossier logs/
+    
+    Raises:
+        OSError: Si le répertoire parent ne peut pas être créé
     """
     # Variable d'environnement pour override
     env_path = os.getenv("CPTCOPRO_LOG_FILE")
-    if env_path:
-        path = Path(env_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path    
+    if env_path and env_path.strip():
+        path = Path(env_path).resolve()
+        _LOG.info(f"Log path from environment variable: {path}")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            _LOG.error(f"Cannot create log directory '{path.parent}': {e}")
+            raise OSError(f"Cannot create log directory '{path.parent}': {e}") from e
+        return path
+    
     log_dir = get_data_dir() / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        _LOG.error(f"Cannot create log directory '{log_dir}': {e}")
+        raise OSError(f"Cannot create log directory '{log_dir}': {e}") from e
     return log_dir / log_name
 
 

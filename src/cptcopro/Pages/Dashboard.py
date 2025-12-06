@@ -12,6 +12,7 @@ try:
     DB_PATH = get_db_path()
 except Exception:
     # Fallback si l'import échoue ou si get_db_path() lève une exception
+    loguru.logger.warning(f"Failed to get DB path: {e}. Using fallback path.")
     DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 @st.cache_data()
 def chargement_somme_debit_global(DB_PATH: Path) -> pd.DataFrame:

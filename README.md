@@ -19,5 +19,12 @@ Instructions rapides pour lancer le projet et exécuter les tests.
 
 Notes :
 - Les variables d'environnement nécessaires pour l'accès Playwright sont : `login_site_copro`, `password_site_copro`, `url_site_copro`.
-- Vous pouvez surcharger la base de données avec la variable d'environnement `CTPCOPRO_DB_PATH` ou le flag `--db-path`.
+- Vous pouvez surcharger la base de données avec la variable d'environnement `CPTCOPRO_DB_PATH` (ou l'ancienne `CTPCOPRO_DB_PATH` pour compatibilité) ou le flag `--db-path`.
+
+## Migration
+
+### Renommage de variable d'environnement (v2.0+)
+
+La variable d'environnement `CTPCOPRO_DB_PATH` a été renommée en `CPTCOPRO_DB_PATH` pour corriger la faute de frappe.
+L'ancienne variable reste supportée pour compatibilité mais est dépréciée. Mettez à jour vos scripts CI/CD et configurations.
 

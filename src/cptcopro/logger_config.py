@@ -121,7 +121,7 @@ if _HAS_LOGURU:
         try:
             from cptcopro.utils.paths import get_log_path
             log_file = str(get_log_path("ctpcopro.log"))
-        except Exception:
+        except ImportError:
             log_file = "ctpcopro.log"
     logger.add(log_file, rotation="10 MB", level=LOG_LEVEL, format=_format_record)
 
