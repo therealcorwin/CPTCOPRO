@@ -5,7 +5,13 @@ import plotly.express as px
 from pathlib import Path
 from streamlit_extras.metric_cards import style_metric_cards
 
-DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
+# Import du module de chemins portables
+try:
+    from cptcopro.utils.paths import get_db_path
+    DB_PATH = get_db_path()
+except ImportError:
+    # Fallback pour le mode développement
+    DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 
 @st.cache_data()
 def recup_alertes(db_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:

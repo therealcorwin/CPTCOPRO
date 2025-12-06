@@ -1,21 +1,33 @@
-from dotenv import load_dotenv
-import os
+import sys
 from playwright.async_api import async_playwright
 from loguru import logger
 
-load_dotenv()
+# Import lazy des credentials - seront chargés à l'utilisation
+from cptcopro.utils.env_loader import get_credentials
+from cptcopro.utils.browser_launcher import launch_browser
+
 logger.remove()
 logger = logger.bind(type_log="PARSING")
 
-login_site_copro = os.getenv("login_site_copro")
-password_site_copro = os.getenv("password_site_copro")
-url_site_copro = os.getenv("url_site_copro")
-
-if not all([login_site_copro, password_site_copro, url_site_copro]):
-    raise ValueError("Missing required environment variables: login_site_copro, password_site_copro, url_site_copro")
+# Variables globales pour le cache des credentials
+_credentials_cache: tuple[str, str, str] | None = None
 
 
-logger.info("Debut de la récupération du HTML via Playwright")
+def _get_cached_credentials() -> tuple[str, str, str]:
+    """Récupère les credentials de manière lazy avec cache."""
+    global _credentials_cache
+    if _credentials_cache is None:
+        try:
+            _credentials_cache = get_credentials()
+            logger.info("Credentials chargés avec succès")
+        except (FileNotFoundError, ValueError) as e:
+            logger.error(f"Erreur de configuration: {e}")
+            print(f"\n❌ ERREUR: {e}")
+            sys.exit(1)
+    return _credentials_cache
+
+
+logger.info("Module Parsing_Lots_Copro chargé")
 
 
 async def recup_html_lotscopro(headless: bool = False) -> str:
@@ -25,12 +37,13 @@ async def recup_html_lotscopro(headless: bool = False) -> str:
     Paramètres:
     - headless (bool): Si False lance le navigateur en mode visible (utile pour debug).
     """
+    # Charger les credentials au moment de l'exécution
+    login_site_copro, password_site_copro, url_site_copro = _get_cached_credentials()
+    logger.info("Debut de la récupération du HTML via Playwright")
+    
     async with async_playwright() as p:
-        try:
-            browser = await p.chromium.launch(headless=headless)
-            logger.info(f"Navigateur lancé (headless={headless})")
-        except Exception as e:
-            logger.error(f"Erreur lors du lancement du navigateur : {e}")
+        browser = await launch_browser(p, headless=headless)
+        if browser is None:
             return "KO_OPEN_BROWSER"
 
         try:

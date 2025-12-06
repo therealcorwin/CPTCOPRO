@@ -115,14 +115,26 @@ if _HAS_LOGURU:
         sink=lambda msg: print(msg, end=""), level=LOG_LEVEL, format=_format_record
     )
 
-    # File sink (rotating by size)
-    log_file = os.getenv("CTPCOPRO_LOG_FILE", "ctpcopro.log")
+    # File sink (rotating by size) - Utiliser le chemin portable si disponible
+    log_file = os.getenv("CTPCOPRO_LOG_FILE", None)
+    if log_file is None:
+        try:
+            from cptcopro.utils.paths import get_log_path
+            log_file = str(get_log_path("ctpcopro.log"))
+        except ImportError:
+            log_file = "ctpcopro.log"
     logger.add(log_file, rotation="10 MB", level=LOG_LEVEL, format=_format_record)
 
     logger.debug(f"Logger initialisé (level={LOG_LEVEL}, file={log_file})")
 else:
     # Using stdlib logging shim — honor CTPCOPRO_LOG_FILE if set by configuring a FileHandler
     log_file = os.getenv("CTPCOPRO_LOG_FILE", None)
+    if log_file is None:
+        try:
+            from cptcopro.utils.paths import get_log_path
+            log_file = str(get_log_path("ctpcopro.log"))
+        except ImportError:
+            log_file = None
     if log_file:
         try:
             import logging

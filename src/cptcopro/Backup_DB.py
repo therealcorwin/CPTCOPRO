@@ -4,19 +4,30 @@ import sqlite3
 from datetime import datetime
 from loguru import logger
 
+# Import du module de chemins portables
+try:
+    from cptcopro.utils.paths import get_backup_dir
+    _USE_PORTABLE_PATHS = True
+except ImportError:
+    _USE_PORTABLE_PATHS = False
+
 logger.remove()
 logger = logger.bind(type_log="BACKUP")
 
 
 def backup_db(db_path) -> None:
     """
-    Sauvegarde la base de données SQLite dans un dossier 'BACKUP' du répertoire courant.
+    Sauvegarde la base de données SQLite dans un dossier 'BACKUP' du répertoire de l'application.
     Le fichier de sauvegarde est nommé au format 'backup_bdd-DD-MM-YY-HH-MM-SS'. Toutes les étapes et événements sont enregistrés dans le fichier 'backup.txt' via loguru.
     Args:
         db_path (str): Chemin vers la base de données à sauvegarder.
     """
     now: datetime = datetime.now()
-    backup_dir: str = os.path.join(os.path.dirname(__file__), "BACKUP")
+    # Utiliser le chemin portable si disponible
+    if _USE_PORTABLE_PATHS:
+        backup_dir: str = str(get_backup_dir())
+    else:
+        backup_dir: str = os.path.join(os.path.dirname(__file__), "BACKUP")
     backup_filename: str = f"backup_{os.path.basename(db_path)}-{now.strftime('%d-%m-%y-%H-%M-%S')}.sqlite"
     backup_path: str = os.path.join(backup_dir, backup_filename)
 

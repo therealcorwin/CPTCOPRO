@@ -5,7 +5,13 @@ import pandas as pd
 import loguru
 import plotly.express as px
 
-DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
+# Import du module de chemins portables
+try:
+    from cptcopro.utils.paths import get_db_path
+    DB_PATH = get_db_path()
+except ImportError:
+    # Fallback pour le mode développement
+    DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 
 @st.cache_data
 def load_data(db_path):

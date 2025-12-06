@@ -4,11 +4,17 @@ import loguru
 from pathlib import Path
 import pandas as pd
 
+# Import du module de chemins portables
+try:
+    from cptcopro.utils.paths import get_db_path
+    DB_PATH = get_db_path()
+except ImportError:
+    # Fallback pour le mode développement
+    DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 
 CONSOLE_OUTPUT = False
 if CONSOLE_OUTPUT:
     pd.set_option('display.max_rows', None)
-DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 @st.cache_data(ttl=300)  # Cache expires after 5 minutes
 def affiche_copro(db_path) -> pd.DataFrame:
     try:

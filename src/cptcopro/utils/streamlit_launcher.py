@@ -10,6 +10,9 @@ Usage:
 The functions use `sys.executable -m streamlit run` to ensure the same venv
 is used. On Windows a new process group is created to allow sending
 CTRL_BREAK_EVENT for graceful shutdown.
+
+When running from a PyInstaller bundle, Streamlit is launched directly in-process
+using streamlit.web.cli.main_run().
 """
 from __future__ import annotations
 
@@ -17,6 +20,8 @@ import os
 import sys
 import signal
 import subprocess
+import threading
+import webbrowser
 # webbrowser intentionally not used anymore; Streamlit handles opening the browser
 from typing import Optional
 from typing import Dict, Any
@@ -31,6 +36,161 @@ _LOG_FILE_HANDLES: Dict[int, Any] = {}
 
 # module logger
 _LOG = logging.getLogger(__name__)
+
+
+def is_pyinstaller_bundle() -> bool:
+    """Check if running from a PyInstaller bundle."""
+    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+
+def _get_bundled_app_path(app_path: str) -> str:
+    """Get the correct path for the app when running from PyInstaller bundle."""
+    if is_pyinstaller_bundle():
+        # In PyInstaller, files are extracted to sys._MEIPASS
+        base_path = sys._MEIPASS
+        # The app should be in cptcopro/ directory
+        if "Affichage_Stream.py" in app_path:
+            bundled_path = os.path.join(base_path, "cptcopro", "Affichage_Stream.py")
+            if os.path.exists(bundled_path):
+                return bundled_path
+        # Fallback: try the path as-is relative to _MEIPASS
+        alt_path = os.path.join(base_path, app_path)
+        if os.path.exists(alt_path):
+            return alt_path
+    return app_path
+
+
+def start_streamlit_inprocess(
+    app_path: str = "src/cptcopro/Affichage_Stream.py",
+    port: int = 8501,
+    host: str = "127.0.0.1",
+    open_browser: bool = True,
+) -> None:
+    """Start Streamlit in-process (for PyInstaller bundles).
+    
+    This function runs Streamlit directly in the main thread to avoid
+    the "signal only works in main thread" error.
+    
+    Note: This function blocks and does not return until Streamlit exits.
+    """
+    # Set environment variables BEFORE importing streamlit modules
+    # This is critical because streamlit reads these on module import
+    os.environ["STREAMLIT_GLOBAL_DEVELOPMENT_MODE"] = "false"
+    os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
+    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+    os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
+    
+    from streamlit.web import bootstrap
+    import streamlit.config as st_config
+    
+    # Get the correct path for the bundled app
+    resolved_path = _get_bundled_app_path(app_path)
+    
+    if not os.path.exists(resolved_path):
+        raise FileNotFoundError(
+            f"Fichier Streamlit non trouvé: {resolved_path}\n"
+            f"Chemin original: {app_path}\n"
+            f"MEIPASS: {getattr(sys, '_MEIPASS', 'N/A')}"
+        )
+    
+    # Configure Streamlit config directory for PyInstaller bundle
+    if is_pyinstaller_bundle():
+        base_path = sys._MEIPASS
+        streamlit_config_dir = os.path.join(base_path, "cptcopro", ".streamlit")
+        config_toml_path = os.path.join(streamlit_config_dir, "config.toml")
+        if os.path.isdir(streamlit_config_dir):
+            # Streamlit doesn't use STREAMLIT_CONFIG_DIR, but we need to load config manually
+            _LOG.info(f"Streamlit config directory: {streamlit_config_dir}")
+            # Load config.toml and apply settings
+            if os.path.isfile(config_toml_path):
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib
+                try:
+                    with open(config_toml_path, "rb") as f:
+                        config_data = tomllib.load(f)
+                    # Apply theme settings from config.toml
+                    if "theme" in config_data:
+                        theme = config_data["theme"]
+                        for key, value in theme.items():
+                            st_config.set_option(f"theme.{key}", value)
+                            _LOG.info(f"Applied theme.{key} = {value}")
+                    # Apply other settings
+                    if "browser" in config_data:
+                        for key, value in config_data["browser"].items():
+                            st_config.set_option(f"browser.{key}", value)
+                    _LOG.info(f"Loaded config from {config_toml_path}")
+                except Exception as e:
+                    _LOG.warning(f"Could not load config.toml: {e}")
+    
+    _LOG.info(f"Lancement Streamlit in-process: {resolved_path}")
+    
+    # Find a free port if the requested one is in use
+    used_port = port
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind((host, port))
+    except OSError:
+        used_port = _find_free_port(port, host=host, max_tries=50)
+        _LOG.warning("Port %d indisponible, utilisation du port %d", port, used_port)
+    
+    # CRITICAL: Force production mode by directly setting the config option
+    # This prevents Streamlit from trying to connect to Node dev server on port 3000
+    try:
+        st_config.set_option("global.developmentMode", False)
+        _LOG.info("Forced global.developmentMode = False")
+    except Exception as e:
+        _LOG.warning(f"Could not set developmentMode directly: {e}")
+    
+    os.environ["STREAMLIT_SERVER_PORT"] = str(used_port)
+    os.environ["STREAMLIT_SERVER_ADDRESS"] = host
+    
+    # Open browser manually before starting (Streamlit headless mode won't open it)
+    if open_browser:
+        url = f"http://{host}:{used_port}"
+        threading.Timer(2.0, lambda: webbrowser.open(url)).start()
+    
+    # Use bootstrap.run() which is designed to be called from main thread
+    # This avoids the "signal only works in main thread" error
+    flag_options = {
+        "global.developmentMode": False,
+        "server.port": used_port,
+        "server.address": host,
+        "server.headless": True,
+        "server.fileWatcherType": "none",
+        "browser.gatherUsageStats": False,
+        "runner.fastReruns": False,
+    }
+    
+    # Load theme options from config.toml if in PyInstaller bundle
+    if is_pyinstaller_bundle():
+        base_path = sys._MEIPASS
+        config_toml_path = os.path.join(base_path, "cptcopro", ".streamlit", "config.toml")
+        if os.path.isfile(config_toml_path):
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib
+            try:
+                with open(config_toml_path, "rb") as f:
+                    config_data = tomllib.load(f)
+                # Add theme settings to flag_options
+                if "theme" in config_data:
+                    for key, value in config_data["theme"].items():
+                        flag_options[f"theme.{key}"] = value
+                        _LOG.info(f"Added to flag_options: theme.{key} = {value}")
+            except Exception as e:
+                _LOG.warning(f"Could not load theme from config.toml: {e}")
+    
+    try:
+        bootstrap.run(resolved_path, False, [], flag_options)
+    except SystemExit:
+        pass  # Streamlit calls sys.exit() on shutdown
+    except Exception as e:
+        _LOG.error(f"Erreur Streamlit: {e}")
+        raise
 
 
 def _find_free_port(start_port: int, host: str = "127.0.0.1", max_tries: int = 20) -> int:

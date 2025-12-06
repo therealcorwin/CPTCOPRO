@@ -1,6 +1,5 @@
 import asyncio
 import sys
-import os
 from selectolax.parser import HTMLParser
 import cptcopro.Parsing_Charge_Copro as pcc
 import cptcopro.Traitement_Charge_Copro as tp
@@ -10,10 +9,14 @@ import cptcopro.Parsing_Lots_Copro as pcl
 import cptcopro.Traitement_Lots_Copro as tlc
 import cptcopro.Dedoublonnage as doublon
 import cptcopro.utils.streamlit_launcher as usl
+from cptcopro.utils.paths import get_db_path, get_log_path
 from loguru import logger
 import time
 import atexit
 
+
+# Configurer les logs avec le bon chemin
+LOG_PATH = str(get_log_path("app.log"))
 
 logger.remove()
 logger.add(
@@ -25,7 +28,7 @@ logger.add(
     colorize=True,
 )
 logger.add(
-    "app.log",
+    LOG_PATH,
     format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {extra[type_log]} |{name}: {function}: {line} |  {message}",
     level="INFO",
     rotation="10 MB",
@@ -35,7 +38,8 @@ logger.add(
 
 logger = logger.bind(type_log="MAIN")
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "BDD", "test.sqlite")
+# Utiliser le chemin de DB portable
+DB_PATH = str(get_db_path())
 """
 ## Charger le contenu du fichier HTML
 with open(
@@ -86,6 +90,8 @@ def main() -> None:
                         help="Sur Windows, utiliser `cmd /c start` pour forcer une fenêtre (voir limites)")
     parser.add_argument("--streamlit-log-file", type=str, default=None,
                         help="Fichier pour rediriger stdout/stderr de Streamlit (ex: streamlit_stdout.log)")
+    parser.add_argument("--show-console", action="store_true",
+                        help="Afficher les données des copropriétaires dans la console (rich)")
     args = parser.parse_args()
 
     # override DB_PATH si fourni
@@ -135,7 +141,7 @@ def main() -> None:
     if not data_charges and not data_coproprietaires:
         logger.warning("Aucune donnée extraite pour les charges et/ou les lots. Arrêt du traitement.")
         return
-    else:
+    elif args.show_console:
         tp.afficher_etat_coproprietaire(data_charges, date_suivi_copro)
         tlc.afficher_avec_rich(data_coproprietaires)    
     try:
@@ -164,43 +170,59 @@ def main() -> None:
 
 
     try:
-        logger.info("Mise à jour de la table 'nombre_alertes'...")
+        logger.info("Mise à jour de la table 'suivi_alertes'...")
         dtb.sauvegarder_nombre_alertes(DB_PATH)
-        logger.success("Table 'nombre_alertes' mise à jour.")
+        logger.success("Table 'suivi_alertes' mise à jour.")
     except Exception as exc:
-        logger.error(f"Erreur lors de la mise à jour de la table 'nombre_alertes' : {exc}")
-    
+        logger.error(f"Erreur lors de la mise à jour de la table 'suivi_alertes' : {exc}")
+
     # Par défaut, lancer Streamlit après le traitement, sauf si demandé sinon
     proc = None
     if not args.no_serve:
         try:
-            logger.info("Lancement de Streamlit via utils.streamlit_launcher...")
-            proc = usl.start_streamlit(
-                app_path="src/cptcopro/Affichage_Stream.py",
-                python_executable=args.serve_python,
-                port=args.serve_port,
-                host=args.serve_host,
-                show_console=not args.streamlit_no_console,
-                open_browser=not args.streamlit_no_browser,
-                use_cmd_start=args.streamlit_use_cmd_start,
-                log_file=args.streamlit_log_file,
-            )
-            logger.info(f"Streamlit lancé (pid={proc.pid})")
-            # garantir arrêt propre même si main lève une exception
-            atexit.register(lambda p=proc: usl.stop_streamlit(p))
+            # Check if running from PyInstaller bundle
+            if usl.is_pyinstaller_bundle():
+                logger.info("Lancement de Streamlit in-process (mode PyInstaller)...")
+                # start_streamlit_inprocess is BLOCKING - it runs Streamlit in the main thread
+                # This is required to avoid "signal only works in main thread" error
+                # The function only returns when Streamlit exits
+                usl.start_streamlit_inprocess(
+                    app_path="src/cptcopro/Affichage_Stream.py",
+                    port=args.serve_port,
+                    host=args.serve_host,
+                    open_browser=not args.streamlit_no_browser,
+                )
+                # If we get here, Streamlit has exited
+                logger.info("Streamlit terminé")
+                return  # Exit the application
+            else:
+                logger.info("Lancement de Streamlit via utils.streamlit_launcher...")
+                proc = usl.start_streamlit(
+                    app_path="src/cptcopro/Affichage_Stream.py",
+                    python_executable=args.serve_python,
+                    port=args.serve_port,
+                    host=args.serve_host,
+                    show_console=not args.streamlit_no_console,
+                    open_browser=not args.streamlit_no_browser,
+                    use_cmd_start=args.streamlit_use_cmd_start,
+                    log_file=args.streamlit_log_file,
+                )
+                logger.info(f"Streamlit lancé (pid={proc.pid})")
+                # garantir arrêt propre même si main lève une exception
+                atexit.register(lambda p=proc: usl.stop_streamlit(p))
         except Exception as exc:
             logger.error(f"Impossible de lancer Streamlit : {exc}")
 
-    try:
-        # Placez ici le reste de votre logique main
-        print("Application principale en cours... Ctrl-C pour interrompre.")
-        while True:
-            # exemple : simuler un travail principal
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("Interruption reçue, fermeture en cours...")
-    finally:
-        if proc is not None:
+    # This code only runs when NOT in PyInstaller bundle (subprocess mode)
+    if proc is not None:
+        try:
+            print("Application principale en cours... Ctrl-C pour interrompre.")
+            while True:
+                # exemple : simuler un travail principal
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("Interruption reçue, fermeture en cours...")
+        finally:
             usl.stop_streamlit(proc)
 
 if __name__ == "__main__":
