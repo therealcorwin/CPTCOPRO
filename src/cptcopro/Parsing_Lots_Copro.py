@@ -1,132 +1,52 @@
-import sys
-from playwright.async_api import async_playwright
+"""Module de parsing pour les lots des copropriétaires.
+
+Ce module contient la logique de navigation spécifique pour récupérer
+le HTML des lots depuis le site du syndic.
+La connexion et l'orchestration sont gérées par Parsing_Common.
+"""
+from playwright.async_api import Page
 from loguru import logger
 
-# Import lazy des credentials - seront chargés à l'utilisation
-from cptcopro.utils.env_loader import get_credentials
-from cptcopro.utils.browser_launcher import launch_browser
-
 logger.remove()
-logger = logger.bind(type_log="PARSING")
-
-# Variables globales pour le cache des credentials
-_credentials_cache: tuple[str, str, str] | None = None
+logger = logger.bind(type_log="PARSING_LOTS")
 
 
-def _get_cached_credentials() -> tuple[str, str, str]:
-    """Récupère les credentials de manière lazy avec cache."""
-    global _credentials_cache
-    if _credentials_cache is None:
-        try:
-            _credentials_cache = get_credentials()
-            logger.info("Credentials chargés avec succès")
-        except (FileNotFoundError, ValueError) as e:
-            logger.error(f"Erreur de configuration: {e}")
-            print(f"\n❌ ERREUR: {e}")
-            sys.exit(1)
-    return _credentials_cache
-
-
-logger.info("Module Parsing_Lots_Copro chargé")
-
-
-async def recup_html_lotscopro(headless: bool = False) -> str:
+async def recup_lots_coproprietaires(page: Page) -> str:
     """
-    Récupère le HTML via Playwright.
-
-    Paramètres:
-    - headless (bool): Si False lance le navigateur en mode visible (utile pour debug).
-    """
-    # Charger les credentials au moment de l'exécution
-    login_site_copro, password_site_copro, url_site_copro = _get_cached_credentials()
-    logger.info("Debut de la récupération du HTML via Playwright")
+    Navigation spécifique pour récupérer le HTML des lots.
+    La page doit être déjà connectée et le menu ouvert.
     
-    async with async_playwright() as p:
-        browser = await launch_browser(p, headless=headless)
-        if browser is None:
-            return "KO_OPEN_BROWSER"
-
-        try:
-            page = await browser.new_page()
-            logger.info("Nouvelle page ouverte")
-        except Exception as e:
-            logger.error(f"Erreur lors de l'ouverture d'une nouvelle page : {e}")
-            await browser.close()
-            return "KO_NEW_PAGE"
-        try:
-            await page.goto(url_site_copro, timeout=30000)
-            logger.info(f"Accès à l'URL : {url_site_copro}")
-        except Exception as e:
-            logger.error(f"Erreur lors de l'accès à l'URL : {e}")
-            await browser.close()
-            return "KO_GO_TO_URL"
-        try:
-            await page.fill('input[name="A16"]', login_site_copro)
-            logger.info("Champ login rempli")
-        except Exception as e:
-            logger.error(f"Erreur lors du remplissage du champ login : {e}")
-            await browser.close()
-            return "KO_FILL_LOGIN"
-        try:
-            await page.fill('input[name="A17"]', password_site_copro)
-            logger.info("Champ mot de passe rempli")
-        except Exception as e:
-            logger.error(f"Erreur lors du remplissage du champ mot de passe : {e}")
-            await browser.close()
-            return "KO_FILL_PASSWORD"
-        try:
-            await page.click("span#z_A7_IMG")
-            logger.info("Bouton Se connecter cliqué")
-        except Exception as e:
-            logger.error(f"Erreur lors du clic sur le bouton Se connecter : {e}")
-            await browser.close()
-            return "KO_CLICK_LOGIN"
-        try:
-            await page.wait_for_load_state("networkidle", timeout=30000)
-            logger.info("Attente de la fin du chargement après connexion")
-        except Exception as e:
-            logger.error(f"Erreur lors de l'attente du chargement : {e}")
-            await browser.close()
-            return "KO_WAIT_FOR_LOAD"
-        try:
-            await page.click("#z_M12_IMG")
-            logger.info("Bouton menu cliqué")
-        except Exception as e:
-            logger.error(f"Erreur lors du clic sur le bouton menu : {e}")
-            await browser.close()
-            return "KO_CLICK_MENU"
-        try:
-            await page.click("#A9")
-            logger.info("Lien Afficher la liste des copropriétaires cliqué")
-        except Exception as e:
-            logger.error(f"Erreur lors du clic sur le lien Afficher la liste des copropriétaires : {e}")
-            await browser.close()
-            return "KO_CLICK_LISTE_COPRO"
-        try:
-            await page.click("#z_A1_IMG")
-            logger.info("Lien Afficher la liste des copropriétaires depliée cliqué")
-        except Exception as e:
-            logger.error(f"Erreur lors du clic sur le lien Afficher la liste des copropriétaires depliée: {e}")
-            await browser.close()
-            return "KO_CLICK_LISTE_COPRO_EXPANDED"        
-        try:
-            await page.wait_for_load_state("networkidle", timeout=30000)
-            logger.info("Attente de la fin du chargement après affichage de la liste")
-        except Exception as e:
-            logger.error(f"Erreur lors de l'attente du chargement final : {e}")
-            await browser.close()
-            return "KO_WAIT_FOR_FINAL_LOAD"
-        try:
-            html_lots_copro = await page.content()  # Récupère le HTML de la page courante
-            logger.info("HTML de la page récupéré")
-        except Exception as e:
-            logger.error(f"Erreur lors de la récupération du HTML : {e}")
-            await browser.close()
-            return "KO_GET_HTML"
-        try:
-            await browser.close()
-            logger.info("Navigateur fermé")
-        except Exception as e:
-            logger.error(f"Erreur lors de la fermeture du navigateur : {e}")
-            return "KO_CLOSE_BROWSER"
-        return html_lots_copro
+    Args:
+        page: Page Playwright avec menu ouvert
+    
+    Returns:
+        Contenu HTML ou code d'erreur (str commençant par 'KO_')
+    """
+    try:
+        await page.click("#A9")
+        logger.info("Lien Afficher la liste des copropriétaires cliqué")
+    except Exception as e:
+        logger.error(f"Erreur lors du clic sur le lien liste copropriétaires : {e}")
+        return "KO_CLICK_LISTE_COPRO"
+    
+    try:
+        await page.click("#z_A1_IMG")
+        logger.info("Lien Afficher la liste des copropriétaires dépliée cliqué")
+    except Exception as e:
+        logger.error(f"Erreur lors du clic sur le lien liste dépliée : {e}")
+        return "KO_CLICK_LISTE_COPRO_EXPANDED"
+    
+    try:
+        await page.wait_for_load_state("networkidle", timeout=30000)
+        logger.info("Attente de la fin du chargement après affichage de la liste")
+    except Exception as e:
+        logger.error(f"Erreur lors de l'attente du chargement final : {e}")
+        return "KO_WAIT_FOR_FINAL_LOAD"
+    
+    try:
+        html_content = await page.content()
+        logger.info("HTML des lots récupéré")
+        return html_content
+    except Exception as e:
+        logger.error(f"Erreur lors de la récupération du HTML : {e}")
+        return "KO_GET_HTML"

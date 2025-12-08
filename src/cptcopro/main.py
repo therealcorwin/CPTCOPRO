@@ -1,11 +1,10 @@
 import asyncio
 import sys
 from selectolax.parser import HTMLParser
-import cptcopro.Parsing_Charge_Copro as pcc
+import cptcopro.Parsing_Commun as pc
 import cptcopro.Traitement_Charge_Copro as tp
 import cptcopro.Data_To_BDD as dtb
 import cptcopro.Backup_DB as bdb
-import cptcopro.Parsing_Lots_Copro as pcl
 import cptcopro.Traitement_Lots_Copro as tlc
 import cptcopro.Dedoublonnage as doublon
 import cptcopro.utils.streamlit_launcher as usl
@@ -101,12 +100,20 @@ def main() -> None:
 
 
     logger.info("Démarrage du script principal")
-    logger.info("Récupération du HTML contenant les charges des copropriétaires en cours...")
-    html_charge = asyncio.run(pcc.recup_html_suivicopro(headless=not args.no_headless))
-    if not html_charge:
-        logger.error("Aucun HTML récupéré. Arrêt du traitement.")
+    
+    # Récupération parallèle des deux HTML (charges et lots)
+    logger.info("Récupération parallèle du HTML (charges + lots) en cours...")
+    html_charge, html_copro = asyncio.run(pc.recup_all_html_parallel(headless=not args.no_headless))
+    
+    if not html_charge or html_charge.startswith("KO_"):
+        logger.error(f"Erreur récupération HTML charges: {html_charge}")
         return
     logger.success("HTML des charges des copropriétaires récupéré.")
+    
+    if not html_copro or html_copro.startswith("KO_"):
+        logger.error(f"Erreur récupération HTML lots: {html_copro}")
+        return
+    logger.success("HTML des lots des copropriétaires récupéré.")
     
     logger.info("Parsing des charges des copropriétaires en cours...")
     parser_charges = HTMLParser(html_charge)
@@ -121,14 +128,7 @@ def main() -> None:
 
     logger.info("Récupération des données des charges des copropriétaires en cours...")
     data_charges = tp.recuperer_situation_copro(parser_charges, date_suivi_copro)
-    logger.success(f"Données des charges des copropriétaires récupérées : {len(data_charges)} entrées.")
-    
-    logger.info("Récupération du HTML contenant les lots des copropriétaires en cours...")
-    html_copro = asyncio.run(pcl.recup_html_lotscopro(headless=not args.no_headless))
-    if not html_copro:
-        logger.error("Aucun HTML des lots récupéré. Arrêt du traitement.")
-        return
-    logger.success("HTML des lots des copropriétaires récupéré.")    
+    logger.success(f"Données des charges des copropriétaires récupérées : {len(data_charges)} entrées.")    
     
     logger.info("Parsing des lots des copropriétaires en cours...")
     lots_coproprietaires = tlc.extraire_lignes_brutes(html_copro)
