@@ -1,3 +1,18 @@
+"""Module de traitement et parsing HTML des lots des copropriétaires.
+
+Ce module parse le HTML de la liste des lots et extrait :
+- Les propriétaires avec leur code (format: "NOM (CODE)")
+- Les lots associés à chaque propriétaire
+- La consolidation propriétaire-lots
+
+Fonctions principales:
+    extraire_lignes_brutes(): Extrait les lignes du HTML
+    consolider_proprietaires_lots(): Associe propriétaires et lots
+    afficher_avec_rich(): Affiche les données dans la console
+
+Note:
+    Le module vérifie qu'il y a exactement 64 copropriétaires.
+"""
 import re
 from typing import Union
 from selectolax.parser import HTMLParser
@@ -18,8 +33,20 @@ _PREFIXES_PROPRIETAIRE_RE = re.compile(
 
 def normaliser_prefixes_proprietaire(texte: str) -> str:
     """
-    Supprime tous les préfixes de genre trouvés dans la chaîne (globalement).
-    Nettoie ensuite la ponctuation/espaces résiduels.
+    Normalise le nom d'un propriétaire en supprimant les préfixes de civilité.
+    
+    Supprime les préfixes de genre (M., Mme, Monsieur, Madame, etc.) ainsi que
+    les conjonctions (ou, et) et nettoie la ponctuation résiduelle.
+    
+    Args:
+        texte: Chaîne contenant le nom du propriétaire avec préfixes potentiels.
+    
+    Returns:
+        Nom nettoyé sans préfixes de civilité, avec espaces normalisés.
+    
+    Example:
+        >>> normaliser_prefixes_proprietaire("M. et Mme DUPONT")
+        'DUPONT'
     """
     if not texte:
         return texte
@@ -34,10 +61,24 @@ def normaliser_prefixes_proprietaire(texte: str) -> str:
 # motif pour détecter "Nom (CODE)"
 _PATRON_CODE_RE = re.compile(r"^(?P<nom>.+?)\s*\((?P<code>\d+[A-Za-z]?)\)\s*$")
 
-def extraire_lignes_brutes(Html_lot_copro: Union[HTMLParser, str]):
+def extraire_lignes_brutes(Html_lot_copro: Union[HTMLParser, str]) -> list[tuple[str, str]]:
     """
-    Retourne la liste ordonnée des (id, texte_normalise) présents dans le HTML,
-    en excluant explicitement les éléments contenant les mots à exclure.
+    Extrait les lignes pertinentes du HTML de la liste des lots.
+    
+    Parse le HTML et récupère tous les éléments dont l'ID correspond au pattern
+    'A17_X_Y'. Filtre les éléments contenant des mots exclus (boutique, jardin)
+    et normalise les préfixes de civilité.
+    
+    Args:
+        Html_lot_copro: HTML brut ou objet HTMLParser déjà construit.
+    
+    Returns:
+        Liste ordonnée de tuples (id_element, texte_normalise).
+        Chaque tuple représente soit un propriétaire, soit un lot.
+    
+    Example:
+        >>> lignes = extraire_lignes_brutes(html_content)
+        >>> # [('A17_0_1', 'DUPONT (12A)'), ('A17_0_2', 'Lot 0021 Appartement 3P')]
     """
     # Accepte soit une chaîne HTML soit un objet HTMLParser déjà construit.
     if isinstance(Html_lot_copro, HTMLParser):
@@ -59,10 +100,25 @@ def extraire_lignes_brutes(Html_lot_copro: Union[HTMLParser, str]):
             lignes.append((idv, texte))
     return lignes
 
-def detecter_proprietaire(ligne: str):
+def detecter_proprietaire(ligne: str) -> tuple[str, str] | None:
     """
-    Si la ligne ressemble à un propriétaire avec code entre parenthèses,
-    retourne (nom, code) sinon None.
+    Détecte si une ligne représente un propriétaire et extrait ses informations.
+    
+    Recherche le pattern "NOM (CODE)" où CODE est un identifiant numérique
+    éventuellement suivi d'une lettre (ex: "12A").
+    
+    Args:
+        ligne: Texte à analyser.
+    
+    Returns:
+        Tuple (nom, code) si la ligne correspond à un propriétaire,
+        None sinon.
+    
+    Example:
+        >>> detecter_proprietaire("DUPONT Jean (12A)")
+        ('DUPONT Jean', '12A')
+        >>> detecter_proprietaire("Lot 0021 Appartement")
+        None
     """
     m = _PATRON_CODE_RE.match(ligne)
     if m:
@@ -71,9 +127,25 @@ def detecter_proprietaire(ligne: str):
         return nom, code
     return None
 
-def est_ligne_lot(ligne: str):
+def est_ligne_lot(ligne: str) -> bool:
     """
-    Détecte si la ligne décrit un lot (ex: 'Lot 0021' ou contient 'Lot' et 'Appartement').
+    Détermine si une ligne décrit un lot de copropriété.
+    
+    Recherche les patterns caractéristiques d'une ligne de lot:
+    - "Lot" suivi d'un numéro (ex: "Lot 0021")
+    - Présence du mot "Appartement"
+    
+    Args:
+        ligne: Texte à analyser.
+    
+    Returns:
+        True si la ligne décrit un lot, False sinon.
+    
+    Example:
+        >>> est_ligne_lot("Lot 0021 Appartement 3P")
+        True
+        >>> est_ligne_lot("DUPONT (12A)")
+        False
     """
     if re.search(r"\bLot\b\s*\d+", ligne, re.IGNORECASE):
         return True
@@ -178,16 +250,51 @@ def extraire_info_lot(texte_lot: str):
     return numero, typ
 
 def est_scic(nom_proprietaire: str) -> bool:
-    """Retourne True si le nom du propriétaire correspond à une SCIC (cas insensible)."""
+    """
+    Vérifie si le propriétaire est une SCIC ou AB HABITAT.
+    
+    Les SCIC et AB HABITAT sont des entités spéciales qui n'ont pas de lots
+    attribués de manière standard. Leurs lots sont marqués comme "NA".
+    
+    Args:
+        nom_proprietaire: Nom du propriétaire à vérifier.
+    
+    Returns:
+        True si le nom contient "SCIC", "AB HABITAT" ou "AB-HABITAT"
+        (insensible à la casse), False sinon.
+    
+    Example:
+        >>> est_scic("SCIC Habitat")
+        True
+        >>> est_scic("DUPONT Jean")
+        False
+    """
     if not nom_proprietaire:
         return False
     u = nom_proprietaire.upper()
     return "SCIC" in u or "AB HABITAT" in u or "AB-HABITAT" in u
 
-def afficher_avec_rich(consolide):
+def afficher_avec_rich(consolide: list[dict]) -> None:
     """
-    Affiche les données consolidées dans une table Rich avec colonnes:
-    Nom proprietaire | Code | Num Lot | Type Apt
+    Affiche les données consolidées dans une table formatée en console.
+    
+    Utilise la bibliothèque Rich pour afficher un tableau avec les colonnes:
+    - Nom propriétaire
+    - Code propriétaire
+    - Numéro de lot
+    - Type d'appartement
+    
+    Les propriétaires SCIC/AB HABITAT ont leurs lots affichés comme "NA".
+    
+    Args:
+        consolide: Liste de dictionnaires avec les clés:
+            - 'nom_proprietaire' ou 'proprietaire': str
+            - 'code_proprietaire' ou 'code': str
+            - 'num_apt': str (numéro de lot)
+            - 'type_apt': str (type d'appartement, ex: "3p")
+    
+    Returns:
+        None (affiche directement dans la console).
     """
     consoleur = Console()
     tableau = Table(show_header=True, header_style="bold magenta")

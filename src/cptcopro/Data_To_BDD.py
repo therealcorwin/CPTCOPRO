@@ -1,3 +1,17 @@
+"""Module de gestion de la base de données SQLite.
+
+Ce module gère :
+- La création et vérification des tables (charge, alertes_debit_eleve, coproprietaires, suivi_alertes)
+- Les triggers pour la détection automatique des alertes de débit élevé
+- L'insertion des données de charges et copropriétaires
+- La mise à jour des statistiques d'alertes
+
+Tables:
+    charge: Historique des charges par copropriétaire
+    alertes_debit_eleve: Alertes pour les débits > 500€
+    coproprietaires: Liste des copropriétaires et leurs lots
+    suivi_alertes: Statistiques journalières des alertes
+"""
 import os
 import sqlite3
 from loguru import logger

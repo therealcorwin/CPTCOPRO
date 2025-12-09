@@ -86,8 +86,27 @@ def analyse_doublons(DB_PATH: str) -> list[int]:
 
     return liste_ids
 
-def suppression_doublons(DB_PATH: str, liste_ids: list[int]):
-    """Supprime les ids et retourne le nombre de lignes supprimées."""
+def suppression_doublons(DB_PATH: str, liste_ids: list[int]) -> None:
+    """
+    Supprime les enregistrements doublons de la table 'charge'.
+    
+    Cette fonction prend la liste des IDs identifiés comme doublons par
+    analyse_doublons() et les supprime de la base de données. La suppression
+    est effectuée en une seule transaction pour garantir l'intégrité.
+    
+    Args:
+        DB_PATH: Chemin vers le fichier de base de données SQLite.
+        liste_ids: Liste des IDs à supprimer (résultat de analyse_doublons()).
+    
+    Returns:
+        None
+    
+    Raises:
+        Exception: En cas d'erreur SQL, la transaction est annulée (rollback).
+    
+    Note:
+        Si liste_ids est vide, la fonction retourne immédiatement sans action.
+    """
     logger.info("Suppression des doublons...")
     if not liste_ids:
         return
@@ -109,6 +128,33 @@ def suppression_doublons(DB_PATH: str, liste_ids: list[int]):
 
 
 def rapport_doublon(DB_PATH: str, liste_ids: list[int] , rapport_resume_dir: str = rapport_resume_dir, rapport_complet_dir: str = rapport_complet_dir) -> None:
+    """
+    Génère des rapports CSV détaillant les doublons dans la base de données.
+    
+    Cette fonction crée deux fichiers de rapport dans le dossier Rapports/:
+    - Un rapport résumé par propriétaire (nombre de doublons par personne)
+    - Un rapport complet avec toutes les lignes candidates à suppression
+    
+    Args:
+        DB_PATH: Chemin vers le fichier de base de données SQLite.
+        liste_ids: Liste des IDs identifiés comme doublons.
+        rapport_resume_dir: Chemin complet du fichier de rapport résumé.
+            Par défaut: Rapports/rapport_resume-{timestamp}.csv
+        rapport_complet_dir: Chemin complet du fichier de rapport complet.
+            Par défaut: Rapports/rapport_complet-{timestamp}.csv
+    
+    Returns:
+        None
+    
+    Raises:
+        FileNotFoundError: Si le fichier de base de données n'existe pas.
+    
+    Example:
+        >>> ids = analyse_doublons("/path/to/db.sqlite")
+        >>> rapport_doublon("/path/to/db.sqlite", ids)
+        # Crée: Rapports/rapport_resume-01-01-24-12-00-00.csv
+        # Crée: Rapports/rapport_complet-01-01-24-12-00-00.csv
+    """
     logger.info("Génération des rapports de doublons.")
 
     # Connexion à la base de données    

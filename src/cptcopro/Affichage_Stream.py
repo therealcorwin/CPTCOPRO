@@ -1,3 +1,24 @@
+"""Application Streamlit pour la visualisation des données de copropriété.
+
+Ce module définit l'application web Streamlit avec navigation multi-pages
+pour visualiser et analyser les données des copropriétaires.
+
+Pages disponibles:
+    - Dashboard: Vue d'ensemble du suivi des charges
+    - Liste Charge: Suivi détaillé des charges par copropriétaire
+    - Courbe Charge Copro: Analyse graphique des débits
+    - Alertes: Suivi des copropriétaires en situation d'alerte
+    - Liste Copro: Liste complète des copropriétaires
+    - Recherche Copro: Recherche d'informations sur un copropriétaire
+
+Usage:
+    Lancé automatiquement via streamlit_launcher ou manuellement:
+    $ streamlit run src/cptcopro/Affichage_Stream.py
+
+Note:
+    Les pages sont définies dans le dossier Pages/ avec leurs assets
+    dans Pages/Assets/.
+"""
 import streamlit as st
 from pathlib import Path
 

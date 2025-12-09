@@ -1,79 +1,114 @@
 ## But rapide
 
-Ce dépôt extrait et stocke le "solde des copropriétaires" depuis un extranet (Playwright), parse le HTML (selectolax) et écrit dans une base SQLite locale. Ce fichier donne aux agents IA l'essentiel pour être productifs rapidement.
+Ce dépôt extrait et stocke le "solde des copropriétaires" et la liste des lots depuis un extranet (Playwright), parse le HTML (selectolax) et écrit dans une base SQLite locale. Ce fichier donne aux agents IA l'essentiel pour être productifs rapidement.
 
 ## Points d'entrée et architecture
 
-- Point d'entrée principal : `src/cptcopro/main.py` — orchestre la récupération HTML, le parsing, l'affichage et la sauvegarde en base.
-- Récupération HTML : `src/cptcopro/Parsing_Site_Syndic.py` (asynchrone, Playwright). Retourne une chaîne HTML ou des codes d'erreur texte (p.ex. `KO_OPEN_BROWSER`).
-- Parsing et affichage : `src/cptcopro/Traitement_Parsing.py` (selectolax + rich). Cherche spécifiquement `td#lzA1` pour la date et `table#ctzA1` pour le tableau.
-- Persistance : `src/cptcopro/Data_To_BDD.py` (création/insertion SQLite). Le fichier DB s'appelle `coproprietaires.sqlite` à côté du module (voir `DB_PATH` dans `main.py`).
-- Variable d'environnement `CPTCOPRO_DB_PATH` : peut être utilisée pour forcer un chemin de base de données différent (ex : une machine CI). L'ancienne variable `CTPCOPRO_DB_PATH` reste supportée pour compatibilité. Si non définie, le chemin par défaut est `src/cptcopro/coproprietaires.sqlite`.
-- Sauvegarde : `src/cptcopro/Backup_DB.py` crée un dossier `Backup` dans le répertoire courant (os.getcwd()) et y copie la DB.
-- Logging : `src/cptcopro/logger_config.py` configure `loguru` et contient un shim vers `logging` si `loguru` absent. Les modules utilisent `logger.bind(type_log=...)` pour classifier les logs.
+### Orchestration principale
+- **Point d'entrée** : `src/cptcopro/main.py` — orchestre la récupération HTML parallèle, le parsing, l'affichage et la sauvegarde en base.
+
+### Parsing HTML (Playwright) - Architecture à 3 modules
+- **`src/cptcopro/Parsing_Commun.py`** : Orchestration parallèle et authentification
+  - `recup_all_html_parallel()` : Lance 2 navigateurs en parallèle (charges + lots)
+  - `_recup_html_generic()` : Fonction générique pour browser/login/navigation
+  - `login_and_open_menu()` : Connexion et ouverture du menu
+  - Délai de 800ms entre les connexions pour éviter les conflits serveur
+- **`src/cptcopro/Parsing_Charge_Copro.py`** : Navigation spécifique pour les charges
+  - `recup_charges_coproprietaires(page)` : Clique sur le lien solde et récupère le HTML
+- **`src/cptcopro/Parsing_Lots_Copro.py`** : Navigation spécifique pour les lots
+  - `recup_lots_coproprietaires(page)` : Clique sur le lien liste et récupère le HTML
+
+### Traitement et parsing HTML (selectolax)
+- **`src/cptcopro/Traitement_Charge_Copro.py`** : Parsing des charges
+  - `recuperer_date_situation_copro()` : Extrait la date depuis `td#lzA1`
+  - `recuperer_situation_copro()` : Extrait le tableau depuis `table#ctzA1`
+  - `afficher_etat_coproprietaire()` : Affichage rich dans la console
+- **`src/cptcopro/Traitement_Lots_Copro.py`** : Parsing des lots
+  - `extraire_lignes_brutes()` : Extrait les lignes du HTML
+  - `consolider_proprietaires_lots()` : Associe propriétaires et lots (vérifie 64 copropriétaires)
+  - `afficher_avec_rich()` : Affichage rich dans la console
+
+### Persistance SQLite
+- **`src/cptcopro/Data_To_BDD.py`** : Opérations base de données
+  - Tables : `charge`, `alertes_debit_eleve`, `coproprietaires`, `suivi_alertes`
+  - `integrite_db()` : Création/vérification des tables et triggers
+  - `enregistrer_donnees_sqlite()` : INSERT des charges
+  - `enregistrer_coproprietaires()` : INSERT des copropriétaires
+  - `sauvegarder_nombre_alertes()` : Mise à jour de la table suivi_alertes
+- **`src/cptcopro/Dedoublonnage.py`** : Nettoyage des doublons
+  - `analyse_doublons()` : Détecte les doublons par (nom_proprietaire, date)
+  - `suppression_doublons()` : Supprime les doublons détectés
+  - `rapport_doublon()` : Génère des rapports CSV dans `Rapports/`
+
+### Utilitaires
+- **`src/cptcopro/utils/paths.py`** : Gestion des chemins portables (dev/PyInstaller)
+- **`src/cptcopro/utils/env_loader.py`** : Chargement du fichier `.env`
+- **`src/cptcopro/utils/browser_launcher.py`** : Lancement navigateur avec fallback (Edge→Chrome→Firefox)
+- **`src/cptcopro/utils/streamlit_launcher.py`** : Lancement de l'interface Streamlit
+- **`src/cptcopro/Backup_DB.py`** : Sauvegarde de la base dans `BACKUP/`
+
+### Interface utilisateur
+- **`src/cptcopro/Affichage_Stream.py`** : Application Streamlit pour visualiser les données
 
 ## Dépendances et environnement
 
-- Python requis : `>=3.14` (défini dans `pyproject.toml`).
-- Dépendances listées dans `pyproject.toml` : `loguru`, `selectolax`, `pandas`, `plotly`, `rich`, `dotenv`, `playwright`.
-- Variables d'environnement (ou `.env`) nécessaires pour Playwright :
-  - `login_site_copro`
-  - `password_site_copro`
-  - `url_site_copro`
+- **Python requis** : `>=3.12,<3.14` (défini dans `pyproject.toml`)
+- **Dépendances principales** : `loguru`, `selectolax`, `pandas`, `plotly`, `rich`, `dotenv`, `playwright`, `streamlit`
+- **Variables d'environnement** (ou `.env`) nécessaires :
+  - `login_site_copro` : Identifiant de connexion
+  - `password_site_copro` : Mot de passe
+  - `url_site_copro` : URL du site du syndic
 
-Conseil d'exécution local rapide : ajouter `src` au PYTHONPATH puis exécuter le module :
+### Exécution locale
 
-  - Avec PowerShell (session seulement) :
-    $env:PYTHONPATH = 'src'
-    python -m cptcopro.main
+```powershell
+# Avec Poetry (recommandé)
+poetry install
+poetry run playwright install
+poetry run python -m cptcopro.main
 
-  - Ou, si vous utilisez Poetry :
-    poetry install
-    poetry run python -m cptcopro.main
+# Ou avec venv
+$env:PYTHONPATH = 'src'
+python -m cptcopro.main
+```
 
-Important : après l'installation de `playwright`, exécuter `playwright install` pour installer les navigateurs.
+## Patterns et conventions
 
-## Patterns et conventions à connaître
+- **Sélecteurs CSS** : date → `td#lzA1` ; tableau charges → `table#ctzA1`
+- **Codes d'erreur** : Les fonctions de parsing retournent des codes `KO_*` en cas d'échec
+- **Logging** : Chaque module utilise `logger.bind(type_log="NOM_MODULE")` pour classifier les logs
+- **Connexions SQLite** : Pattern `try/finally` simple, chaque fonction gère sa propre connexion
 
-- Sélecteurs CSS attendus : date -> `td#lzA1`; tableau -> `table#ctzA1`; colonnes classes : `td.ttA3/ttA4/ttA5/ttA6`.
-- Les fonctions de parsing renvoient une liste de tuples de la forme `(code, coproprietaire, debit, credit, date, last_check)`.
-- Beaucoup de fonctions utilisent `data[3:]` avant insertion/affichage — attention aux lignes d'en-tête du tableau HTML : un agent doit vérifier la structure du HTML avant de modifier le slicing.
-- Le module `logger_config.py` expose les variables d'environnement `CPTCOPRO_LOG_LEVEL` et `CPTCOPRO_LOG_FILE` pour contrôler le logging côté production/debug.
+## Variables d'environnement
 
-## Opérations risquées / effets de bord connus
+| Variable | Description | Défaut |
+|----------|-------------|--------|
+| `CPTCOPRO_DB_PATH` | Chemin de la base de données | `src/cptcopro/coproprietaires.sqlite` |
+| `CPTCOPRO_LOG_LEVEL` | Niveau de log | `INFO` |
+| `CPTCOPRO_LOG_FILE` | Fichier de log | `logs/app.log` |
 
-- `Backup_DB.backup_db()` utilise `os.getcwd()` pour créer `Backup/` — la sauvegarde est relative au répertoire courant d'exécution.
-- `Data_To_BDD.enregistrer_donnees_sqlite()` fait `executemany(..., data[3:])` : vérifier la longueur et le contenu de `data` avant de l'appeler.
-- Playwright est exécuté en `headless=True` dans `Parsing_Site_Syndic.py`. Pour déboguer des problèmes d'interaction, exécuter avec `headless=False` et/ou ajouter des `await page.screenshot()` temporaires.
+> Note : Les anciennes variables `CTPCOPRO_*` (avec faute de frappe) restent supportées pour compatibilité.
 
-## CLI & CI
+## CLI
 
-- `main.py` expose désormais deux options CLI utiles : `--no-headless` (lance Playwright en mode visible) et `--db-path <path>` (surcharge le chemin de la DB). Exemple :
+```powershell
+python -m cptcopro.main [OPTIONS]
 
-  $env:PYTHONPATH = 'src'
-  python -m cptcopro.main --no-headless --db-path "C:\tmp\copro.sqlite"
-
-- Un workflow GitHub Actions est ajouté dans `.github/workflows/ci.yml` : il installe les dépendances, installe les navigateurs Playwright et lance `pytest`. Le CI fixe `CPTCOPRO_DB_PATH` vers `src/cptcopro/coproprietaires.sqlite`.
-
-## Migration
-
-### Renommage de variables d'environnement (v2.0+)
-
-Les variables d'environnement ont été renommées pour corriger les fautes de frappe :
-- `CTPCOPRO_DB_PATH` → `CPTCOPRO_DB_PATH`
-- `CTPCOPRO_LOG_LEVEL` → `CPTCOPRO_LOG_LEVEL`
-- `CTPCOPRO_LOG_FILE` → `CPTCOPRO_LOG_FILE`
-
-Les anciennes variables restent supportées pour compatibilité mais sont dépréciées.
+Options:
+  --no-headless     Lance Playwright en mode visible (debug)
+  --db-path PATH    Surcharge le chemin de la base de données
+  --no-serve        Ne pas lancer Streamlit après le traitement
+  --show-console    Afficher les données dans la console (rich)
+```
 
 ## Fichiers à consulter rapidement
 
-- `pyproject.toml` (dépendances / version Python)
-- `src/cptcopro/main.py` (flux orchestration)
-- `src/cptcopro/Parsing_Site_Syndic.py` (Playwright, env vars, selectors)
-- `src/cptcopro/Traitement_Parsing.py` (selectolax parsing, format de sortie)
-- `src/cptcopro/Data_To_BDD.py` (création/insertion SQLite)
-- `src/cptcopro/Backup_DB.py` (comportement de backup relatif au CWD)
-- `src/cptcopro/logger_config.py` (contrôles de log)
-
-Si une section n'est pas claire, indiquez exactement quel scénario vous voulez automatiser (ex : "exécuter avec headless False et sauvegarder les captures d'écran"), je mettrai à jour ce fichier.
+| Fichier | Rôle |
+|---------|------|
+| `pyproject.toml` | Dépendances, version Python |
+| `src/cptcopro/main.py` | Orchestration principale |
+| `src/cptcopro/Parsing_Commun.py` | Authentification, parsing parallèle |
+| `src/cptcopro/Traitement_Charge_Copro.py` | Parsing HTML des charges |
+| `src/cptcopro/Traitement_Lots_Copro.py` | Parsing HTML des lots |
+| `src/cptcopro/Data_To_BDD.py` | Opérations SQLite |
+| `reports/call_graph.md` | Graphe des appels de fonctions |

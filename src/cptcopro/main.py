@@ -1,3 +1,20 @@
+"""Point d'entrée principal de l'application CPTCOPRO.
+
+Ce module orchestre :
+- La récupération parallèle du HTML (charges et lots) via Playwright
+- Le parsing des données avec selectolax
+- La sauvegarde en base SQLite
+- Le lancement de l'interface Streamlit
+
+Usage:
+    python -m cptcopro.main [OPTIONS]
+
+Options:
+    --no-headless     Lance Playwright en mode visible (debug)
+    --db-path PATH    Surcharge le chemin de la base de données
+    --no-serve        Ne pas lancer Streamlit après le traitement
+    --show-console    Afficher les données dans la console (rich)
+"""
 import asyncio
 import sys
 from selectolax.parser import HTMLParser
@@ -56,8 +73,38 @@ with open(
 
 def main() -> None:
     """
-    Point d'entrée principal : récupère le HTML, effectue le parsing,
-    affiche les résultats et stocke les données en base.
+    Point d'entrée principal de l'application de suivi des copropriétaires.
+    
+    Cette fonction orchestre l'ensemble du processus:
+    
+    1. **Récupération HTML** : Lance deux navigateurs Playwright en parallèle
+       pour récupérer le HTML des charges et des lots depuis l'extranet.
+    
+    2. **Parsing** : Parse le HTML avec selectolax pour extraire:
+       - La date de situation
+       - Les données des charges (nom, code, débit, crédit)
+       - Les lots associés à chaque copropriétaire
+    
+    3. **Validation** : Vérifie la cohérence des données (64 copropriétaires).
+    
+    4. **Persistance** : Sauvegarde les données en base SQLite après backup.
+    
+    5. **Interface** : Lance l'interface Streamlit pour visualisation.
+    
+    Options CLI:
+        --no-headless: Mode navigateur visible (debug)
+        --db-path: Surcharge du chemin base de données
+        --no-serve: Désactive le lancement automatique de Streamlit
+        --show-console: Affiche les données dans la console (rich)
+    
+    Returns:
+        None
+    
+    Raises:
+        SystemExit: En cas d'erreur de récupération HTML ou de validation.
+    
+    Note:
+        Les credentials sont chargés depuis le fichier .env via env_loader.
     """
     # CLI: parser minimal pour debug / override
     import argparse

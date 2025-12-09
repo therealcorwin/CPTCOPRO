@@ -10,6 +10,7 @@ flowchart TB
 
     subgraph PARSING_COMMUN["🔗 Parsing_Commun.py"]
         recup_all_html_parallel["recup_all_html_parallel()"]
+        recup_html_generic["_recup_html_generic()"]
         recup_html_charges["recup_html_charges()"]
         recup_html_lots["recup_html_lots()"]
         login_and_open_menu["login_and_open_menu()"]
@@ -69,13 +70,14 @@ flowchart TB
     recup_all_html_parallel --> recup_html_charges
     recup_all_html_parallel --> recup_html_lots
     
-    recup_html_charges --> browser_launcher
-    recup_html_charges --> login_and_open_menu
-    recup_html_charges --> recup_charges_coproprietaires
+    %% Fonction générique (DRY)
+    recup_html_charges --> recup_html_generic
+    recup_html_lots --> recup_html_generic
     
-    recup_html_lots --> browser_launcher
-    recup_html_lots --> login_and_open_menu
-    recup_html_lots --> recup_lots_coproprietaires
+    recup_html_generic --> browser_launcher
+    recup_html_generic --> login_and_open_menu
+    recup_html_generic -.->|"fetch_func"| recup_charges_coproprietaires
+    recup_html_generic -.->|"fetch_func"| recup_lots_coproprietaires
     
     get_cached_credentials --> env_loader
     
@@ -125,11 +127,13 @@ sequenceDiagram
     
     par Navigateur 1 (avec délai 0.8s)
         PC->>PC: recup_html_charges()
+        PC->>PC: _recup_html_generic(section_name="Charges")
         PC->>PC: login_and_open_menu()
         PC->>PCC: recup_charges_coproprietaires()
         PCC-->>PC: HTML charges
     and Navigateur 2
         PC->>PC: recup_html_lots()
+        PC->>PC: _recup_html_generic(section_name="Lots")
         PC->>PC: login_and_open_menu()
         PC->>PLC: recup_lots_coproprietaires()
         PLC-->>PC: HTML lots
@@ -170,7 +174,7 @@ sequenceDiagram
 | Module | Responsabilité | Fonctions principales |
 |--------|----------------|----------------------|
 | `main.py` | Orchestration principale, CLI | `main()` |
-| `Parsing_Commun.py` | Connexion, authentification, orchestration parallèle | `recup_all_html_parallel()`, `login_and_open_menu()`, `recup_html_charges()`, `recup_html_lots()` |
+| `Parsing_Commun.py` | Connexion, authentification, orchestration parallèle | `recup_all_html_parallel()`, `_recup_html_generic()`, `login_and_open_menu()` |
 | `Parsing_Charge_Copro.py` | Navigation spécifique pour les charges | `recup_charges_coproprietaires()` |
 | `Parsing_Lots_Copro.py` | Navigation spécifique pour les lots | `recup_lots_coproprietaires()` |
 | `Traitement_Charge_Copro.py` | Parsing HTML des charges | `recuperer_date_situation_copro()`, `recuperer_situation_copro()` |
@@ -274,15 +278,17 @@ flowchart LR
     subgraph Nav1["Navigateur 1 (délai 0.8s)"]
         direction TB
         delay["await sleep(0.8)"] --> charges["recup_html_charges()"]
-        charges --> login1["login_and_open_menu()"]
-        login1 --> nav1["recup_charges_coproprietaires()"]
+        charges --> generic1["_recup_html_generic(Charges)"]
+        generic1 --> login1["login_and_open_menu()"]
+        login1 --> nav1["fetch_func → recup_charges_coproprietaires()"]
         nav1 --> html1["HTML Charges"]
     end
     
     subgraph Nav2["Navigateur 2"]
         direction TB
-        lots["recup_html_lots()"] --> login2["login_and_open_menu()"]
-        login2 --> nav2["recup_lots_coproprietaires()"]
+        lots["recup_html_lots()"] --> generic2["_recup_html_generic(Lots)"]
+        generic2 --> login2["login_and_open_menu()"]
+        login2 --> nav2["fetch_func → recup_lots_coproprietaires()"]
         nav2 --> html2["HTML Lots"]
     end
     
@@ -291,6 +297,52 @@ flowchart LR
     
     html1 --> result["Tuple (html_charges, html_lots)"]
     html2 --> result
+```
+
+## Refactorisation _recup_html_generic (DRY)
+
+La fonction `_recup_html_generic` centralise la logique commune de browser/login/navigation :
+
+```python
+async def _recup_html_generic(
+    headless: bool,
+    login: str,
+    password: str,
+    url: str,
+    section_name: str,  # "Charges" ou "Lots"
+    fetch_func,         # Fonction de navigation spécifique
+) -> str:
+    """Fonction générique pour récupérer le HTML d'une section."""
+    async with async_playwright() as p:
+        browser = await launch_browser(p, headless=headless)
+        if browser is None:
+            return "KO_OPEN_BROWSER"
+        
+        page = await browser.new_page()
+        error = await login_and_open_menu(page, login, password, url)
+        if error:
+            await browser.close()
+            return error
+        
+        html = await fetch_func(page)  # Appel de la fonction spécifique
+        await browser.close()
+        return html
+```
+
+Les fonctions publiques deviennent de simples wrappers :
+
+```python
+async def recup_html_charges(...) -> str:
+    return await _recup_html_generic(
+        ..., section_name="Charges",
+        fetch_func=pcc.recup_charges_coproprietaires
+    )
+
+async def recup_html_lots(...) -> str:
+    return await _recup_html_generic(
+        ..., section_name="Lots",
+        fetch_func=pcl.recup_lots_coproprietaires
+    )
 ```
 
 ## Avantages du parsing parallèle
@@ -306,6 +358,8 @@ flowchart LR
 ## Notes techniques
 
 - **Parsing parallèle** : 2 navigateurs Playwright indépendants avec délai de 800ms
+- **Refactorisation DRY** : `_recup_html_generic()` centralise la logique browser/login/navigation
+- **Timeouts explicites** : `wait_for_selector` avec timeout de 10s avant les clics critiques
 - **Validation** : Vérification que 64 copropriétaires sont consolidés
 - **SQLite** : Chaque fonction gère sa propre connexion (simple et robuste)
-- **Codes d'erreur** : Les fonctions de parsing retournent des codes `KO_*` en cas d'échec
+- **Codes d'erreur** : Les fonctions de parsing retournent des codes `KO_*` en cas d'échec (générés dynamiquement via `section_name`)

@@ -1,3 +1,15 @@
+"""Module de traitement et parsing HTML des charges des copropriétaires.
+
+Ce module parse le HTML récupéré depuis l'extranet du syndic et extrait :
+- La date de la situation (depuis td#lzA1)
+- Le tableau des charges (depuis table#ctzA1)
+- Les montants débit/crédit normalisés
+
+Fonctions principales:
+    recuperer_date_situation_copro(): Extrait la date de situation
+    recuperer_situation_copro(): Extrait les données du tableau des charges
+    afficher_etat_coproprietaire(): Affiche les données dans la console (rich)
+"""
 from selectolax.parser import HTMLParser  # type: ignore
 from datetime import datetime
 import re
@@ -9,9 +21,6 @@ from pathlib import Path
 
 logger.remove()
 logger = logger.bind(type_log="TRAITEMENT")
-
-logger.warning("Début du script de suivi des copropriétaires")
-logger.info("Chargement du fichier HTML")
 
 
 def normalise_somme(s: str) -> float:
