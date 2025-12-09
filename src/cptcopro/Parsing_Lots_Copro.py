@@ -30,7 +30,8 @@ async def recup_lots_coproprietaires(page: Page) -> str:
         return "KO_CLICK_LISTE_COPRO"
     
     try:
-        await page.click("#z_A1_IMG")
+        await page.wait_for_selector("#z_A1_IMG", state="visible", timeout=10000)
+        await page.click("#z_A1_IMG", timeout=10000)
         logger.info("Lien Afficher la liste des copropriétaires dépliée cliqué")
     except Exception as e:
         logger.error(f"Erreur lors du clic sur le lien liste dépliée : {e}")

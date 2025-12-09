@@ -8,7 +8,7 @@ Les navigations spécifiques sont déléguées à :
 - Parsing_Charge_Copro : navigation pour les charges
 - Parsing_Lots_Copro : navigation pour les lots
 """
-from playwright.async_api import Page
+from playwright.async_api import Page, async_playwright
 from loguru import logger
 
 from cptcopro.utils.env_loader import get_credentials
@@ -47,11 +47,10 @@ async def login_and_open_menu(page: Page, login: str, password: str, url: str) -
     """
     try:
         await page.goto(url, timeout=30000)
-        logger.info(f"Accès à l'URL : {url}")
+        logger.info("Accès à l'URL réussi")
     except Exception as e:
         logger.error(f"Erreur lors de l'accès à l'URL : {e}")
-        return "KO_GO_TO_URL"
-    
+        return "KO_GO_TO_URL"    
     try:
         # Attendre que le champ login soit visible
         await page.wait_for_selector('input[name="A16"]', timeout=10000)
@@ -95,84 +94,80 @@ async def login_and_open_menu(page: Page, login: str, password: str, url: str) -
 
 
 # Les fonctions de navigation spécifiques sont maintenant dans leurs modules respectifs :
-# - pcc.recup_html_from_page(page) pour les charges
-# - pcl.recup_html_from_page(page) pour les lots
+# - pcc.recup_charges_coproprietaires(page) pour les charges
+# - pcl.recup_lots_coproprietaires(page) pour les lots
+
+
+async def _recup_html_generic(
+    headless: bool,
+    login: str,
+    password: str,
+    url: str,
+    section_name: str,
+    fetch_func,
+) -> str:
+    """
+    Fonction générique pour récupérer le HTML d'une section dans son propre navigateur.
+    
+    Args:
+        headless: Si True, navigateur invisible.
+        login: Identifiant de connexion.
+        password: Mot de passe.
+        url: URL du site.
+        section_name: Nom de la section pour les logs (ex: "Charges", "Lots").
+        fetch_func: Fonction async à appeler pour récupérer le HTML (prend une Page en paramètre).
+    
+    Returns:
+        Contenu HTML ou code d'erreur (str commençant par 'KO_').
+    """
+    async with async_playwright() as p:
+        browser = await launch_browser(p, headless=headless)
+        if browser is None:
+            logger.error(f"Impossible d'ouvrir le navigateur pour {section_name}")
+            return "KO_OPEN_BROWSER"
+        
+        try:
+            page = await browser.new_page()
+            logger.info(f"[{section_name}] Navigateur démarré, connexion en cours...")
+            
+            error = await login_and_open_menu(page, login, password, url)
+            if error:
+                logger.error(f"[{section_name}] Erreur login: {error}")
+                await browser.close()
+                return error
+            
+            logger.success(f"[{section_name}] Connexion réussie, navigation en cours...")
+            html = await fetch_func(page)
+            
+            await browser.close()
+            logger.info(f"[{section_name}] Navigateur fermé")
+            return html
+            
+        except Exception as e:
+            logger.error(f"[{section_name}] Exception: {e}")
+            try:
+                await browser.close()
+            except Exception:
+                pass
+            return f"KO_{section_name.upper()}_EXCEPTION"
 
 
 async def recup_html_charges(headless: bool, login: str, password: str, url: str) -> str:
-    """
-    Récupère le HTML des charges dans son propre navigateur.
-    """
-    from playwright.async_api import async_playwright
-    
-    async with async_playwright() as p:
-        browser = await launch_browser(p, headless=headless)
-        if browser is None:
-            logger.error("Impossible d'ouvrir le navigateur pour les charges")
-            return "KO_OPEN_BROWSER"
-        
-        try:
-            page = await browser.new_page()
-            logger.info("[Charges] Navigateur démarré, connexion en cours...")
-            
-            error = await login_and_open_menu(page, login, password, url)
-            if error:
-                logger.error(f"[Charges] Erreur login: {error}")
-                await browser.close()
-                return error
-            
-            logger.success("[Charges] Connexion réussie, navigation vers solde...")
-            html = await pcc.recup_charges_coproprietaires(page)
-            
-            await browser.close()
-            logger.info("[Charges] Navigateur fermé")
-            return html
-            
-        except Exception as e:
-            logger.error(f"[Charges] Exception: {e}")
-            try:
-                await browser.close()
-            except Exception:
-                pass
-            return "KO_CHARGES_EXCEPTION"
+    """Récupère le HTML des charges dans son propre navigateur."""
+    return await _recup_html_generic(
+        headless, login, password, url,
+        section_name="Charges",
+        fetch_func=pcc.recup_charges_coproprietaires,
+    )
 
 
 async def recup_html_lots(headless: bool, login: str, password: str, url: str) -> str:
-    """
-    Récupère le HTML des lots dans son propre navigateur.
-    """
-    from playwright.async_api import async_playwright
-    
-    async with async_playwright() as p:
-        browser = await launch_browser(p, headless=headless)
-        if browser is None:
-            logger.error("Impossible d'ouvrir le navigateur pour les lots")
-            return "KO_OPEN_BROWSER"
-        
-        try:
-            page = await browser.new_page()
-            logger.info("[Lots] Navigateur démarré, connexion en cours...")
-            
-            error = await login_and_open_menu(page, login, password, url)
-            if error:
-                logger.error(f"[Lots] Erreur login: {error}")
-                await browser.close()
-                return error
-            
-            logger.success("[Lots] Connexion réussie, navigation vers liste...")
-            html = await pcl.recup_lots_coproprietaires(page)
-            
-            await browser.close()
-            logger.info("[Lots] Navigateur fermé")
-            return html
-            
-        except Exception as e:
-            logger.error(f"[Lots] Exception: {e}")
-            try:
-                await browser.close()
-            except Exception:
-                pass
-            return "KO_LOTS_EXCEPTION"
+    """Récupère le HTML des lots dans son propre navigateur."""
+    return await _recup_html_generic(
+        headless, login, password, url,
+        section_name="Lots",
+        fetch_func=pcl.recup_lots_coproprietaires,
+    )
 
 
 async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
