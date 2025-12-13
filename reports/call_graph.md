@@ -44,6 +44,18 @@ flowchart TB
         enregistrer_charges["enregistrer_donnees_sqlite()"]
         enregistrer_copro["enregistrer_coproprietaires()"]
         sauv_alertes["sauvegarder_nombre_alertes()"]
+        get_config_alertes["get_config_alertes()"]
+        update_config_alerte["update_config_alerte()"]
+        get_threshold["get_threshold_for_type()"]
+        init_config["init_config_alerte_if_missing()"]
+    end
+
+    subgraph STREAMLIT["📊 Pages Streamlit"]
+        alerte_page["Alerte.py"]
+        config_alertes_page["Config_Alertes.py"]
+        recup_alertes["recup_alertes()"]
+        recup_suivi["recup_suivi_alertes()"]
+        recup_debits["recup_debits_proprietaires_alertes()"]
     end
 
     subgraph BACKUP["💿 Backup_DB.py"]
@@ -104,6 +116,17 @@ flowchart TB
     
     %% Alertes
     main --> sauv_alertes
+    
+    %% Configuration alertes
+    integrite_db --> init_config
+    verif_presence --> init_config
+    config_alertes_page --> get_config_alertes
+    config_alertes_page --> update_config_alerte
+    
+    %% Pages Streamlit
+    alerte_page --> recup_alertes
+    alerte_page --> recup_suivi
+    alerte_page --> recup_debits
     
     %% Streamlit
     main --> streamlit_launcher
@@ -179,9 +202,11 @@ sequenceDiagram
 | `Parsing_Lots_Copro.py` | Navigation spécifique pour les lots | `recup_lots_coproprietaires()` |
 | `Traitement_Charge_Copro.py` | Parsing HTML des charges | `recuperer_date_situation_copro()`, `recuperer_situation_copro()` |
 | `Traitement_Lots_Copro.py` | Parsing HTML des lots | `extraire_lignes_brutes()`, `consolider_proprietaires_lots()` |
-| `Data_To_BDD.py` | Opérations SQLite | `enregistrer_donnees_sqlite()`, `enregistrer_coproprietaires()`, `integrite_db()` |
+| `Data_To_BDD.py` | Opérations SQLite, configuration alertes | `enregistrer_donnees_sqlite()`, `enregistrer_coproprietaires()`, `integrite_db()`, `get_config_alertes()`, `update_config_alerte()`, `sauvegarder_nombre_alertes()` |
 | `Backup_DB.py` | Sauvegarde de la base | `backup_db()` |
 | `Dedoublonnage.py` | Détection/suppression doublons | `analyse_doublons()`, `suppression_doublons()`, `rapport_doublon()` |
+| `Pages/Alerte.py` | Affichage des alertes Streamlit | `recup_alertes()`, `recup_suivi_alertes()`, `recup_debits_proprietaires_alertes()` |
+| `Pages/Config_Alertes.py` | Configuration des seuils d'alerte | Interface Streamlit pour `get_config_alertes()`, `update_config_alerte()` |
 
 ## Gestion des connexions SQLite
 
@@ -363,3 +388,76 @@ async def recup_html_lots(...) -> str:
 - **Validation** : Vérification que 64 copropriétaires sont consolidés
 - **SQLite** : Chaque fonction gère sa propre connexion (simple et robuste)
 - **Codes d'erreur** : Les fonctions de parsing retournent des codes `KO_*` en cas d'échec (générés dynamiquement via `section_name`)
+
+## Système d'alertes configurables
+
+```mermaid
+flowchart TB
+    subgraph CONFIG["⚙️ Configuration"]
+        config_alerte[("config_alerte<br/>type_apt, charge_moyenne,<br/>taux, threshold")]
+        get_config["get_config_alertes()"]
+        update_config["update_config_alerte()"]
+        init_config["init_config_alerte_if_missing()"]
+    end
+    
+    subgraph TRIGGERS["🔔 Triggers SQLite"]
+        trigger_insert["alerte_debit_eleve_insert"]
+        trigger_clear["alerte_debit_eleve_insert_clear"]
+        trigger_delete["alerte_debit_eleve_delete"]
+    end
+    
+    subgraph TABLES["📊 Tables"]
+        charge[("charge")]
+        alertes[("alertes_debit_eleve<br/>+ type_alerte")]
+        coproprietaires[("coproprietaires<br/>+ type_apt")]
+        suivi[("suivi_alertes<br/>+ nb_2p, nb_3p, nb_4p,<br/>nb_5p, nb_na, debit_*")]
+    end
+    
+    subgraph PAGES["📱 Pages Streamlit"]
+        page_alerte["Alerte.py"]
+        page_config["Config_Alertes.py"]
+    end
+    
+    %% Configuration
+    init_config --> config_alerte
+    get_config --> config_alerte
+    update_config --> config_alerte
+    
+    %% Triggers dynamiques
+    charge -->|"INSERT"| trigger_insert
+    charge -->|"INSERT (sous seuil)"| trigger_clear
+    charge -->|"DELETE"| trigger_delete
+    
+    trigger_insert -->|"JOIN config_alerte"| config_alerte
+    trigger_insert -->|"JOIN coproprietaires"| coproprietaires
+    trigger_insert -->|"UPSERT"| alertes
+    
+    trigger_clear --> alertes
+    trigger_delete --> alertes
+    
+    %% Suivi statistiques
+    alertes -->|"sauvegarder_nombre_alertes()"| suivi
+    
+    %% Pages
+    page_alerte --> alertes
+    page_alerte --> suivi
+    page_config --> config_alerte
+```
+
+### Tables du système d'alertes
+
+| Table | Colonnes | Description |
+|-------|----------|-------------|
+| `config_alerte` | `type_apt` (PK), `charge_moyenne`, `taux`, `threshold`, `last_update` | Seuils configurables par type d'appartement |
+| `alertes_debit_eleve` | `alerte_id`, `id_origin`, `nom_proprietaire`, `code_proprietaire`, `debit`, `type_alerte`, `first_detection`, `last_detection`, `occurence` | Alertes actives avec type d'appartement |
+| `suivi_alertes` | `date_releve` (PK), `nombre_alertes`, `total_debit`, `nb_2p`, `nb_3p`, `nb_4p`, `nb_5p`, `nb_na`, `debit_2p`, `debit_3p`, `debit_4p`, `debit_5p`, `debit_na` | Historique des alertes par type |
+
+### Seuils par défaut
+
+| Type | Charge moyenne | Taux | Seuil |
+|------|---------------|------|-------|
+| 2p | 1500€ | 1.33 | 2000€ |
+| 3p | 1800€ | 1.33 | 2400€ |
+| 4p | 2100€ | 1.33 | 2800€ |
+| 5p | 2400€ | 1.33 | 3200€ |
+| default | 1500€ | 1.33 | 2000€ |

@@ -30,15 +30,25 @@ Ce dépôt extrait et stocke le "solde des copropriétaires" et la liste des lot
 
 ### Persistance SQLite
 - **`src/cptcopro/Data_To_BDD.py`** : Opérations base de données
-  - Tables : `charge`, `alertes_debit_eleve`, `coproprietaires`, `suivi_alertes`
+  - Tables : `charge`, `alertes_debit_eleve`, `coproprietaires`, `suivi_alertes`, `config_alerte`
   - `integrite_db()` : Création/vérification des tables et triggers
   - `enregistrer_donnees_sqlite()` : INSERT des charges
   - `enregistrer_coproprietaires()` : INSERT des copropriétaires
   - `sauvegarder_nombre_alertes()` : Mise à jour de la table suivi_alertes
+  - `get_config_alertes()` / `update_config_alerte()` : Gestion des seuils d'alerte par type d'appartement
 - **`src/cptcopro/Dedoublonnage.py`** : Nettoyage des doublons
   - `analyse_doublons()` : Détecte les doublons par (nom_proprietaire, date)
   - `suppression_doublons()` : Supprime les doublons détectés
   - `rapport_doublon()` : Génère des rapports CSV dans `Rapports/`
+
+### Système d'alertes
+- **Table `config_alerte`** : Seuils configurables par type d'appartement (2p, 3p, 4p, 5p)
+  - `type_apt` : Type d'appartement (clé primaire)
+  - `charge_moyenne` : Charge moyenne pour ce type
+  - `taux` : Coefficient multiplicateur (ex: 1.33 = 33% au-dessus de la moyenne)
+  - `threshold` : Seuil d'alerte calculé (charge_moyenne × taux)
+- **Triggers dynamiques** : Les triggers consultent `config_alerte` via jointure avec `coproprietaires.type_apt`
+- **Page Streamlit** : `Pages/Config_Alertes.py` permet de visualiser/modifier les seuils
 
 ### Utilitaires
 - **`src/cptcopro/utils/paths.py`** : Gestion des chemins portables (dev/PyInstaller)

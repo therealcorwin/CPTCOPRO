@@ -8,6 +8,7 @@ Pages disponibles:
     - Liste Charge: Suivi détaillé des charges par copropriétaire
     - Courbe Charge Copro: Analyse graphique des débits
     - Alertes: Suivi des copropriétaires en situation d'alerte
+    - Config Alertes: Configuration des seuils d'alerte par type d'appartement
     - Liste Copro: Liste complète des copropriétaires
     - Recherche Copro: Recherche d'informations sur un copropriétaire
 
@@ -56,18 +57,30 @@ Alerte_page = st.Page(
     title="Alertes",
     icon=":material/warning:",
 )
+
+Stat_Alerte_page = st.Page(
+    "Pages/Stat_Alerte.py",
+    title="Statistiques Alertes",
+    icon=":material/area_chart:",
+)
+
+Config_Alertes_page = st.Page(
+    "Pages/Config_Alertes.py",
+    title="Configuration Alertes",
+    icon=":material/settings:",
+)
 Recherche_Copro_page = st.Page(
     "Pages/Rechercher_Copro.py",
     title="Recherche Info Copropriétaires",
     icon=":material/search:",
-)# --- NAVIGATION SETUP [WITHOUT SECTIONS] ---
-# pg = st.navigation(pages=[about_page, project_1_page, project_2_page])
+)
 
 # --- NAVIGATION SETUP [WITH SECTIONS]---
 menus = st.navigation(
     {
         "Dashboard Général": [Dashboard_page],
-        "Suivi des Charges": [Liste_Charge_page, Courbe_Charge_Corpo_page, Alerte_page],
+        "Suivi des Charges": [Liste_Charge_page, Courbe_Charge_Corpo_page],
+        "Suivi Alerte": [Alerte_page, Stat_Alerte_page,Config_Alertes_page],
         "Liste des Copropriétaires": [Liste_Copro_page],
         "Recherche Info Copropriétaires": [Recherche_Copro_page],
     }

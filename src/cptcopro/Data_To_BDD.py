@@ -1,16 +1,17 @@
 """Module de gestion de la base de données SQLite.
 
 Ce module gère :
-- La création et vérification des tables (charge, alertes_debit_eleve, coproprietaires, suivi_alertes)
-- Les triggers pour la détection automatique des alertes de débit élevé
+- La création et vérification des tables (charge, alertes_debit_eleve, coproprietaires, suivi_alertes, config_alerte)
+- Les triggers pour la détection automatique des alertes de débit élevé (seuils configurables par type d'appartement)
 - L'insertion des données de charges et copropriétaires
 - La mise à jour des statistiques d'alertes
 
 Tables:
     charge: Historique des charges par copropriétaire
-    alertes_debit_eleve: Alertes pour les débits > 500€
+    alertes_debit_eleve: Alertes pour les débits dépassant le seuil configuré
     coproprietaires: Liste des copropriétaires et leurs lots
     suivi_alertes: Statistiques journalières des alertes
+    config_alerte: Configuration des seuils d'alerte par type d'appartement
 """
 import os
 import sqlite3
@@ -19,6 +20,17 @@ from typing import Any, Dict
 
 logger.remove()
 logger = logger.bind(type_log="BDD")
+
+# Seuils d'alerte par défaut par type d'appartement
+# Ces valeurs sont utilisées pour initialiser la table config_alerte
+DEFAULT_ALERT_THRESHOLDS = {
+    "2p": {"charge_moyenne": 1500.0, "taux": 1.33, "threshold": 2000.0},
+    "3p": {"charge_moyenne": 1800.0, "taux": 1.33, "threshold": 2400.0},
+    "4p": {"charge_moyenne": 2100.0, "taux": 1.33, "threshold": 2800.0},
+    "5p": {"charge_moyenne": 2400.0, "taux": 1.33, "threshold": 3200.0},
+}
+# Seuil par défaut pour les types non configurés (NA, inconnu, etc.)
+DEFAULT_THRESHOLD_FALLBACK = 2000.0
 
 def verif_repertoire_db(db_path: str) -> None:
     """
@@ -80,6 +92,7 @@ def verif_presence_db(db_path: str) -> None:
                     nom_proprietaire TEXT,
                     code_proprietaire TEXT,
                     debit REAL NOT NULL,
+                    type_alerte text NOT NULL,
                     -- renamed: last_detection stores the last detection timestamp
                     last_detection DATE DEFAULT CURRENT_DATE,
                     -- first_detection: timestamp of first detection for this alert
@@ -92,40 +105,92 @@ def verif_presence_db(db_path: str) -> None:
             )
             logger.success("Table 'alertes_debit_eleve' vérifiée/créée.")
 
+            # Création de la table 'config_alerte' pour les seuils par type d'appartement
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS config_alerte (
+                    type_apt TEXT PRIMARY KEY,
+                    charge_moyenne REAL NOT NULL,
+                    taux REAL NOT NULL DEFAULT 1.33,
+                    threshold REAL NOT NULL,
+                    last_update DATE DEFAULT CURRENT_DATE
+                );
+                """
+            )
+            logger.success("Table 'config_alerte' vérifiée/créée.")
+            
+            # Initialiser les seuils par défaut
+            for type_apt, config in DEFAULT_ALERT_THRESHOLDS.items():
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
+                    VALUES (?, ?, ?, ?, CURRENT_DATE)
+                    """,
+                    (type_apt, config["charge_moyenne"], config["taux"], config["threshold"])
+                )
+            # Ajouter un seuil par défaut pour les types non configurés
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
+                VALUES ('default', ?, 1.0, ?, CURRENT_DATE)
+                """,
+                (DEFAULT_THRESHOLD_FALLBACK, DEFAULT_THRESHOLD_FALLBACK)
+            )
+            logger.info("Seuils d'alerte par défaut initialisés.")
+
             # Créer un index unique sur code_proprietaire pour permettre l'UPSERT
             cur.executescript("""
                 -- Index unique requis pour l'UPSERT (une alerte par proprietaire)
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_alertes_code_proprietaire ON alertes_debit_eleve(code_proprietaire);
 
-                -- INSERT (UPSERT) : si la nouvelle ligne (latest) a debit > 2000, créer ou mettre à jour l'alerte
+                -- INSERT (UPSERT) : si la nouvelle ligne (latest) dépasse le seuil configuré pour son type d'appartement
                 CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert
                 AFTER INSERT ON charge
                 FOR EACH ROW
-                WHEN NEW.debit > 2000.0
-                  AND NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+                WHEN NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+                  AND NEW.debit > COALESCE(
+                      (SELECT ca.threshold 
+                       FROM config_alerte ca 
+                       JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
+                       WHERE cp.code_proprietaire = NEW.code_proprietaire),
+                      (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
+                      2000.0
+                  )
                 BEGIN
                     INSERT INTO alertes_debit_eleve (
-                        id_origin, nom_proprietaire, code_proprietaire, debit,
+                        id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte,
                         first_detection, last_detection, occurence
                     )
                     VALUES (
                         NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit,
+                        COALESCE(
+                            (SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = NEW.code_proprietaire),
+                            'na'
+                        ),
                         CURRENT_DATE, CURRENT_DATE, 1
                     )
                     ON CONFLICT(code_proprietaire) DO UPDATE SET
                         id_origin = excluded.id_origin,
                         nom_proprietaire = excluded.nom_proprietaire,
                         debit = excluded.debit,
+                        type_alerte = excluded.type_alerte,
                         last_detection = CURRENT_DATE,
                         occurence = COALESCE(occurence, 0) + 1;
                 END;
 
-                -- INSERT_CLEAR : si la nouvelle ligne (latest) a debit <= 2000, supprimer toute alerte existante
+                -- INSERT_CLEAR : si la nouvelle ligne (latest) est sous le seuil, supprimer toute alerte existante
                 CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert_clear
                 AFTER INSERT ON charge
                 FOR EACH ROW
-                WHEN NEW.debit <= 2000.0
-                  AND NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+                WHEN NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+                  AND NEW.debit <= COALESCE(
+                      (SELECT ca.threshold 
+                       FROM config_alerte ca 
+                       JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
+                       WHERE cp.code_proprietaire = NEW.code_proprietaire),
+                      (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
+                      2000.0
+                  )
                 BEGIN
                     DELETE FROM alertes_debit_eleve WHERE code_proprietaire = NEW.code_proprietaire;
                 END;
@@ -140,18 +205,29 @@ def verif_presence_db(db_path: str) -> None:
                     DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
 
                     INSERT INTO alertes_debit_eleve (
-                        id_origin, nom_proprietaire, code_proprietaire, debit,
+                        id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte,
                         first_detection, last_detection, occurence
                     )
                     SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit,
+                           COALESCE(
+                               (SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = c.code_proprietaire),
+                               'na'
+                           ),
                            CURRENT_DATE, CURRENT_DATE, 1
                     FROM charge c
                     WHERE c.code_proprietaire = OLD.code_proprietaire
                       AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
-                      AND c.debit > 2000.0;
+                      AND c.debit > COALESCE(
+                          (SELECT ca.threshold 
+                           FROM config_alerte ca 
+                           JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
+                           WHERE cp.code_proprietaire = OLD.code_proprietaire),
+                          (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
+                          2000.0
+                      );
                 END;
             """)
-            logger.info("Triggers 'alerte_debit_eleve' vérifiés/créés (insert/insert_clear/delete).")
+            logger.info("Triggers 'alerte_debit_eleve' vérifiés/créés (insert/insert_clear/delete) avec seuils dynamiques.")
             # Creation Table coproprietaires
             cur.execute(
                 """
@@ -189,7 +265,17 @@ def verif_presence_db(db_path: str) -> None:
                 CREATE TABLE IF NOT EXISTS suivi_alertes (
                     date_releve DATE PRIMARY KEY,
                     nombre_alertes INTEGER NOT NULL,
-                    total_debit REAL NOT NULL
+                    total_debit REAL NOT NULL,
+                    nb_2p INTEGER DEFAULT 0,
+                    nb_3p INTEGER DEFAULT 0,
+                    nb_4p INTEGER DEFAULT 0,
+                    nb_5p INTEGER DEFAULT 0,
+                    nb_na INTEGER DEFAULT 0,
+                    debit_2p REAL DEFAULT 0,
+                    debit_3p REAL DEFAULT 0,
+                    debit_4p REAL DEFAULT 0,
+                    debit_5p REAL DEFAULT 0,
+                    debit_na REAL DEFAULT 0
                 )
                 """
             )
@@ -215,6 +301,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
     - table `coproprietaires`
     - vue `vw_charge_coproprietaires`
     - table `nombre_alertes`
+    - table `config_alerte`
 
     Retourne un dict récapitulatif contenant l'état après vérification et la liste
     des éléments créés.
@@ -224,6 +311,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
     # Ensure the DB file exists by opening a connection
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
+    has_config_alerte = False
     try:
         # charge
         logger.info("Vérification de la présence de la table 'charge'.")        
@@ -266,6 +354,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     nom_proprietaire TEXT,
                     code_proprietaire TEXT,
                     debit REAL NOT NULL,
+                    type_alerte text NOT NULL,
                     last_detection DATE DEFAULT CURRENT_DATE,
                     first_detection DATE DEFAULT CURRENT_DATE,
                     occurence INTEGER NOT NULL,
@@ -276,9 +365,49 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             created.append('alertes_debit_eleve')
             logger.info("Table 'alertes_debit_eleve' créée.")
 
+        # config_alerte - table de configuration des seuils
+        logger.info("Vérification de la présence de la table 'config_alerte'.")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='config_alerte';")
+        if cur.fetchone():
+            has_config_alerte = True
+            logger.info("Table 'config_alerte' existe.")
+        else:
+            logger.warning("Table 'config_alerte' manquante, création en cours.")
+            has_config_alerte = False
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS config_alerte (
+                    type_apt TEXT PRIMARY KEY,
+                    charge_moyenne REAL NOT NULL,
+                    taux REAL NOT NULL DEFAULT 1.33,
+                    threshold REAL NOT NULL,
+                    last_update DATE DEFAULT CURRENT_DATE
+                );
+                """
+            )
+            # Initialiser les seuils par défaut
+            for type_apt, config in DEFAULT_ALERT_THRESHOLDS.items():
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
+                    VALUES (?, ?, ?, ?, CURRENT_DATE)
+                    """,
+                    (type_apt, config["charge_moyenne"], config["taux"], config["threshold"])
+                )
+            # Ajouter un seuil par défaut pour les types non configurés
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
+                VALUES ('default', ?, 1.0, ?, CURRENT_DATE)
+                """,
+                (DEFAULT_THRESHOLD_FALLBACK, DEFAULT_THRESHOLD_FALLBACK)
+            )
+            created.append('config_alerte')
+            logger.info("Table 'config_alerte' créée avec seuils par défaut.")
+
         # trigger alerte_debit_eleve
         logger.info("Vérification de la présence du trigger 'alerte_debit_eleve'.")
-        cur.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name='alerte_debit_eleve';")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name='alerte_debit_eleve_insert';")
         if cur.fetchone():
             has_trigger = True
             logger.info("Trigger 'alerte_debit_eleve' existe.")
@@ -289,35 +418,54 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 -- Index unique requis pour l'UPSERT (une alerte par proprietaire)
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_alertes_code_proprietaire ON alertes_debit_eleve(code_proprietaire);
                 
-                -- INSERT (UPSERT) : si la nouvelle ligne (latest) a debit > 2000, créer ou mettre à jour l'alerte
+                -- INSERT (UPSERT) : si la nouvelle ligne (latest) dépasse le seuil configuré pour son type d'appartement
                 CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert
                 AFTER INSERT ON charge
                 FOR EACH ROW
-                WHEN NEW.debit > 2000.0
-                  AND NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+                WHEN NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+                  AND NEW.debit > COALESCE(
+                      (SELECT ca.threshold 
+                       FROM config_alerte ca 
+                       JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
+                       WHERE cp.code_proprietaire = NEW.code_proprietaire),
+                      (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
+                      2000.0
+                  )
                 BEGIN
                     INSERT INTO alertes_debit_eleve (
-                        id_origin, nom_proprietaire, code_proprietaire, debit,
+                        id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte,
                         first_detection, last_detection, occurence
                     )
                     VALUES (
                         NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit,
+                        COALESCE(
+                            (SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = NEW.code_proprietaire),
+                            'na'
+                        ),
                         CURRENT_DATE, CURRENT_DATE, 1
                     )
                     ON CONFLICT(code_proprietaire) DO UPDATE SET
                         id_origin = excluded.id_origin,
                         nom_proprietaire = excluded.nom_proprietaire,
                         debit = excluded.debit,
+                        type_alerte = excluded.type_alerte,
                         last_detection = CURRENT_DATE,
                         occurence = COALESCE(occurence, 0) + 1;
                 END;
                 
-                -- INSERT_CLEAR : si la nouvelle ligne (latest) a debit <= 2000, supprimer toute alerte existante
+                -- INSERT_CLEAR : si la nouvelle ligne (latest) est sous le seuil, supprimer toute alerte existante
                 CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert_clear
                 AFTER INSERT ON charge
                 FOR EACH ROW
-                WHEN NEW.debit <= 2000.0
-                  AND NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+                WHEN NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+                  AND NEW.debit <= COALESCE(
+                      (SELECT ca.threshold 
+                       FROM config_alerte ca 
+                       JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
+                       WHERE cp.code_proprietaire = NEW.code_proprietaire),
+                      (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
+                      2000.0
+                  )
                 BEGIN
                     DELETE FROM alertes_debit_eleve WHERE code_proprietaire = NEW.code_proprietaire;
                 END;
@@ -332,15 +480,26 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
                 
                     INSERT INTO alertes_debit_eleve (
-                        id_origin, nom_proprietaire, code_proprietaire, debit,
+                        id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte,
                         first_detection, last_detection, occurence
                     )
                     SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit,
+                           COALESCE(
+                               (SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = c.code_proprietaire),
+                               'na'
+                           ),
                            CURRENT_DATE, CURRENT_DATE, 1
                     FROM charge c
                     WHERE c.code_proprietaire = OLD.code_proprietaire
                       AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
-                      AND c.debit > 2000.0;
+                      AND c.debit > COALESCE(
+                          (SELECT ca.threshold 
+                           FROM config_alerte ca 
+                           JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
+                           WHERE cp.code_proprietaire = OLD.code_proprietaire),
+                          (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
+                          2000.0
+                      );
                 END;
             """)
             created.append('alerte_debit_eleve')
@@ -402,7 +561,17 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 CREATE TABLE IF NOT EXISTS suivi_alertes (
                     date_releve DATE PRIMARY KEY,
                     nombre_alertes INTEGER NOT NULL,
-                    total_debit REAL NOT NULL
+                    total_debit REAL NOT NULL,
+                    nb_2p INTEGER DEFAULT 0,
+                    nb_3p INTEGER DEFAULT 0,
+                    nb_4p INTEGER DEFAULT 0,
+                    nb_5p INTEGER DEFAULT 0,
+                    nb_na INTEGER DEFAULT 0,
+                    debit_2p REAL DEFAULT 0,
+                    debit_3p REAL DEFAULT 0,
+                    debit_4p REAL DEFAULT 0,
+                    debit_5p REAL DEFAULT 0,
+                    debit_na REAL DEFAULT 0
                 )
                 """
             )
@@ -421,6 +590,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         'alerte_debit_eleve': has_trigger,
         'coproprietaires': has_coproprietaires,
         'nombre_alertes': has_nombre_alertes,
+        'config_alerte': has_config_alerte,
         'created': created,
     }
 
@@ -520,7 +690,9 @@ def enregistrer_coproprietaires(data_coproprietaires: list[Any], db_path: str) -
 
 def sauvegarder_nombre_alertes(db_path: str) -> None:
     """
-    Sauvegarde le nombre d'alertes pour une date de relevé donnée dans la table `nombre_alertes`.
+    Sauvegarde le nombre d'alertes pour une date de relevé donnée dans la table `suivi_alertes`.
+    
+    Calcule les statistiques globales et par type d'appartement (2p, 3p, 4p, 5p, na).
 
     Args:
         db_path (str): Chemin vers la base de données SQLite.
@@ -530,13 +702,13 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
-        # Récupérer les valeurs à insérer
+        # Récupérer les valeurs globales
         cur.execute(
             """
             SELECT 
                 MAX(last_detection) AS date_releve,
                 COUNT(*) AS nombre_alertes,
-                SUM(debit) AS total_debit
+                COALESCE(SUM(debit), 0) AS total_debit
             FROM alertes_debit_eleve
             """
         )
@@ -547,16 +719,52 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
             logger.warning("Aucune alerte trouvée, rien à sauvegarder.")
             return
         
-        # UPSERT : INSERT OR REPLACE fonctionne grâce à UNIQUE(date_releve)
+        # Récupérer les statistiques par type d'appartement
         cur.execute(
             """
-            INSERT OR REPLACE INTO suivi_alertes (date_releve, nombre_alertes, total_debit)
-            VALUES (?, ?, ?)
+            SELECT 
+                LOWER(COALESCE(type_alerte, 'na')) AS type_apt,
+                COUNT(*) AS nb,
+                COALESCE(SUM(debit), 0) AS total
+            FROM alertes_debit_eleve
+            GROUP BY LOWER(COALESCE(type_alerte, 'na'))
+            """
+        )
+        stats_par_type = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+        
+        # Extraire les valeurs par type (avec valeurs par défaut à 0)
+        nb_2p = stats_par_type.get('2p', (0, 0))[0]
+        nb_3p = stats_par_type.get('3p', (0, 0))[0]
+        nb_4p = stats_par_type.get('4p', (0, 0))[0]
+        nb_5p = stats_par_type.get('5p', (0, 0))[0]
+        nb_na = stats_par_type.get('na', (0, 0))[0]
+        
+        debit_2p = stats_par_type.get('2p', (0, 0))[1]
+        debit_3p = stats_par_type.get('3p', (0, 0))[1]
+        debit_4p = stats_par_type.get('4p', (0, 0))[1]
+        debit_5p = stats_par_type.get('5p', (0, 0))[1]
+        debit_na = stats_par_type.get('na', (0, 0))[1]
+        
+        # UPSERT : INSERT OR REPLACE fonctionne grâce à PRIMARY KEY(date_releve)
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO suivi_alertes (
+                date_releve, nombre_alertes, total_debit,
+                nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
+                debit_2p, debit_3p, debit_4p, debit_5p, debit_na
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (date_releve, nombre_alertes, total_debit)
+            (date_releve, nombre_alertes, total_debit,
+             nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
+             debit_2p, debit_3p, debit_4p, debit_5p, debit_na)
         )
         conn.commit()
-        logger.info(f"Nombre d'alertes ({nombre_alertes}) sauvegardé pour la date {date_releve}. Somme débit : {total_debit}.")
+        logger.info(
+            f"Alertes sauvegardées pour {date_releve}: "
+            f"total={nombre_alertes} ({total_debit}€), "
+            f"2p={nb_2p}, 3p={nb_3p}, 4p={nb_4p}, 5p={nb_5p}, na={nb_na}"
+        )
     except Exception as e:
         conn.rollback()
         logger.error(f"Erreur lors de la sauvegarde du nombre d'alertes : {e}")
@@ -564,3 +772,242 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
     finally:
         conn.close()
     return
+
+
+# ============================================================================
+# Fonctions de gestion de la configuration des alertes
+# ============================================================================
+
+def get_config_alertes(db_path: str) -> list[Dict[str, Any]]:
+    """
+    Récupère la configuration des seuils d'alerte par type d'appartement.
+    
+    Args:
+        db_path: Chemin vers la base de données SQLite.
+    
+    Returns:
+        Liste de dictionnaires contenant pour chaque type d'appartement:
+            - type_apt: Type d'appartement (2p, 3p, 4p, 5p, default)
+            - charge_moyenne: Charge moyenne pour ce type
+            - taux: Taux multiplicateur pour calculer le seuil
+            - threshold: Seuil d'alerte en euros
+            - last_update: Date de dernière mise à jour
+    
+    Example:
+        >>> config = get_config_alertes("/path/to/db.sqlite")
+        >>> print(config[0])
+        {'type_apt': '2p', 'charge_moyenne': 1500.0, 'taux': 1.33, 'threshold': 2000.0, 'last_update': '2024-12-11'}
+    """
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT type_apt, charge_moyenne, taux, threshold, last_update
+            FROM config_alerte
+            ORDER BY type_apt
+            """
+        )
+        rows = cur.fetchall()
+        return [dict(row) for row in rows]
+    except sqlite3.OperationalError as e:
+        logger.warning(f"Table config_alerte non trouvée, retour des valeurs par défaut: {e}")
+        # Retourner les valeurs par défaut si la table n'existe pas
+        result = []
+        for type_apt, config in DEFAULT_ALERT_THRESHOLDS.items():
+            result.append({
+                "type_apt": type_apt,
+                "charge_moyenne": config["charge_moyenne"],
+                "taux": config["taux"],
+                "threshold": config["threshold"],
+                "last_update": None
+            })
+        result.append({
+            "type_apt": "default",
+            "charge_moyenne": DEFAULT_THRESHOLD_FALLBACK,
+            "taux": 1.0,
+            "threshold": DEFAULT_THRESHOLD_FALLBACK,
+            "last_update": None
+        })
+        return result
+    finally:
+        conn.close()
+
+
+def update_config_alerte(
+    db_path: str, 
+    type_apt: str, 
+    charge_moyenne: float | None = None,
+    taux: float | None = None,
+    threshold: float | None = None
+) -> bool:
+    """
+    Met à jour la configuration d'alerte pour un type d'appartement.
+    
+    Permet de mettre à jour un ou plusieurs paramètres pour un type donné.
+    Si threshold n'est pas fourni mais charge_moyenne et/ou taux le sont,
+    le threshold est recalculé automatiquement (charge_moyenne * taux).
+    
+    Args:
+        db_path: Chemin vers la base de données SQLite.
+        type_apt: Type d'appartement à mettre à jour (2p, 3p, 4p, 5p, default).
+        charge_moyenne: Nouvelle charge moyenne (optionnel).
+        taux: Nouveau taux multiplicateur (optionnel).
+        threshold: Nouveau seuil d'alerte (optionnel, recalculé si non fourni).
+    
+    Returns:
+        True si la mise à jour a réussi, False sinon.
+    
+    Example:
+        >>> update_config_alerte("/path/to/db.sqlite", "3p", charge_moyenne=2000.0)
+        True
+    """
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    try:
+        # Récupérer les valeurs actuelles
+        cur.execute(
+            "SELECT charge_moyenne, taux, threshold FROM config_alerte WHERE type_apt = ?",
+            (type_apt.lower(),)
+        )
+        row = cur.fetchone()
+        if not row:
+            logger.error(f"Type d'appartement '{type_apt}' non trouvé dans config_alerte")
+            return False
+        
+        current_charge = row[0]
+        current_taux = row[1]
+        current_threshold = row[2]
+        
+        # Appliquer les nouvelles valeurs (ou garder les anciennes)
+        new_charge = charge_moyenne if charge_moyenne is not None else current_charge
+        new_taux = taux if taux is not None else current_taux
+        
+        # Recalculer threshold si non fourni explicitement
+        if threshold is not None:
+            new_threshold = threshold
+        elif charge_moyenne is not None or taux is not None:
+            # Recalculer automatiquement
+            new_threshold = new_charge * new_taux
+        else:
+            new_threshold = current_threshold
+        
+        # Mettre à jour
+        cur.execute(
+            """
+            UPDATE config_alerte 
+            SET charge_moyenne = ?, taux = ?, threshold = ?, last_update = CURRENT_DATE
+            WHERE type_apt = ?
+            """,
+            (new_charge, new_taux, new_threshold, type_apt.lower())
+        )
+        conn.commit()
+        logger.info(
+            f"Config alerte '{type_apt}' mise à jour: "
+            f"charge_moyenne={new_charge}, taux={new_taux}, threshold={new_threshold}"
+        )
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erreur lors de la mise à jour de config_alerte: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_threshold_for_type(db_path: str, type_apt: str) -> float:
+    """
+    Récupère le seuil d'alerte pour un type d'appartement spécifique.
+    
+    Args:
+        db_path: Chemin vers la base de données SQLite.
+        type_apt: Type d'appartement (2p, 3p, 4p, 5p).
+    
+    Returns:
+        Le seuil d'alerte configuré, ou le seuil par défaut si non trouvé.
+    
+    Example:
+        >>> threshold = get_threshold_for_type("/path/to/db.sqlite", "3p")
+        >>> print(threshold)
+        2400.0
+    """
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT threshold FROM config_alerte WHERE LOWER(type_apt) = LOWER(?)",
+            (type_apt,)
+        )
+        row = cur.fetchone()
+        if row:
+            return row[0]
+        
+        # Fallback au seuil par défaut
+        cur.execute("SELECT threshold FROM config_alerte WHERE type_apt = 'default'")
+        row = cur.fetchone()
+        if row:
+            return row[0]
+        
+        return DEFAULT_THRESHOLD_FALLBACK
+    finally:
+        conn.close()
+
+
+def init_config_alerte_if_missing(db_path: str) -> bool:
+    """
+    Initialise la table config_alerte avec les valeurs par défaut si elle est vide.
+    
+    Cette fonction est utile pour migrer une base existante vers le nouveau
+    système de seuils configurables.
+    
+    Args:
+        db_path: Chemin vers la base de données SQLite.
+    
+    Returns:
+        True si des données ont été insérées, False si la table était déjà remplie.
+    """
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    try:
+        # Vérifier si la table existe
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='config_alerte'")
+        if not cur.fetchone():
+            logger.warning("Table config_alerte inexistante, utiliser integrite_db() d'abord")
+            return False
+        
+        # Vérifier si la table est vide
+        cur.execute("SELECT COUNT(*) FROM config_alerte")
+        count = cur.fetchone()[0]
+        if count > 0:
+            logger.info(f"Table config_alerte déjà initialisée avec {count} entrées")
+            return False
+        
+        # Insérer les valeurs par défaut
+        for type_apt, config in DEFAULT_ALERT_THRESHOLDS.items():
+            cur.execute(
+                """
+                INSERT INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
+                VALUES (?, ?, ?, ?, CURRENT_DATE)
+                """,
+                (type_apt, config["charge_moyenne"], config["taux"], config["threshold"])
+            )
+        
+        # Ajouter le seuil par défaut
+        cur.execute(
+            """
+            INSERT INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
+            VALUES ('default', ?, 1.0, ?, CURRENT_DATE)
+            """,
+            (DEFAULT_THRESHOLD_FALLBACK, DEFAULT_THRESHOLD_FALLBACK)
+        )
+        
+        conn.commit()
+        logger.success("Table config_alerte initialisée avec les valeurs par défaut")
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erreur lors de l'initialisation de config_alerte: {e}")
+        return False
+    finally:
+        conn.close()
