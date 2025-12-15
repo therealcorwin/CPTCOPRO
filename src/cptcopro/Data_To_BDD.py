@@ -852,9 +852,9 @@ def update_config_alerte(
     Args:
         db_path: Chemin vers la base de données SQLite.
         type_apt: Type d'appartement à mettre à jour (2p, 3p, 4p, 5p, default).
-        charge_moyenne: Nouvelle charge moyenne (optionnel).
-        taux: Nouveau taux multiplicateur (optionnel).
-        threshold: Nouveau seuil d'alerte (optionnel, recalculé si non fourni).
+        charge_moyenne: Nouvelle charge moyenne (optionnel, doit être > 0 si fourni).
+        taux: Nouveau taux multiplicateur (optionnel, doit être > 0 si fourni).
+        threshold: Nouveau seuil d'alerte (optionnel, doit être >= 0 si fourni).
     
     Returns:
         True si la mise à jour a réussi, False sinon.
@@ -863,6 +863,41 @@ def update_config_alerte(
         >>> update_config_alerte("/path/to/db.sqlite", "3p", charge_moyenne=2000.0)
         True
     """
+    # --- Validation des entrées ---
+    # Valider et convertir charge_moyenne
+    if charge_moyenne is not None:
+        try:
+            charge_moyenne = float(charge_moyenne)
+            if charge_moyenne <= 0:
+                logger.error(f"charge_moyenne doit être > 0, reçu: {charge_moyenne}")
+                return False
+        except (TypeError, ValueError) as e:
+            logger.error(f"charge_moyenne invalide (non numérique): {charge_moyenne} - {e}")
+            return False
+    
+    # Valider et convertir taux
+    if taux is not None:
+        try:
+            taux = float(taux)
+            if taux <= 0:
+                logger.error(f"taux doit être > 0, reçu: {taux}")
+                return False
+        except (TypeError, ValueError) as e:
+            logger.error(f"taux invalide (non numérique): {taux} - {e}")
+            return False
+    
+    # Valider et convertir threshold
+    if threshold is not None:
+        try:
+            threshold = float(threshold)
+            if threshold < 0:
+                logger.error(f"threshold doit être >= 0, reçu: {threshold}")
+                return False
+        except (TypeError, ValueError) as e:
+            logger.error(f"threshold invalide (non numérique): {threshold} - {e}")
+            return False
+    
+    # --- Opérations DB ---
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
@@ -888,6 +923,13 @@ def update_config_alerte(
         if threshold is not None:
             new_threshold = threshold
         elif charge_moyenne is not None or taux is not None:
+            # Valider les valeurs utilisées pour le recalcul
+            if new_charge is None or new_taux is None:
+                logger.error("Impossible de recalculer threshold: charge_moyenne ou taux manquant")
+                return False
+            if new_charge <= 0 or new_taux <= 0:
+                logger.error(f"Valeurs invalides pour recalcul: charge_moyenne={new_charge}, taux={new_taux}")
+                return False
             # Recalculer automatiquement
             new_threshold = new_charge * new_taux
         else:

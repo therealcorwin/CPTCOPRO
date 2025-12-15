@@ -46,7 +46,25 @@ except ImportError:
     
     def update_config_alerte(db_path, type_apt, charge_moyenne=None, taux=None, threshold=None):
         """Fallback pour mettre à jour la config."""
-        return False
+        try:
+            conn = sqlite3.connect(str(db_path))
+            cur = conn.cursor()
+            cur.execute(
+                """UPDATE config_alerte 
+                   SET charge_moyenne = COALESCE(?, charge_moyenne),
+                       taux = COALESCE(?, taux),
+                       threshold = COALESCE(?, threshold),
+                       last_update = CURRENT_DATE
+                   WHERE type_apt = ?""",
+                (charge_moyenne, taux, threshold, type_apt.lower())
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        except Exception:
+            st.exception(Exception())
+            return False
+        finally:
+            conn.close()
 
 
 def load_config() -> pd.DataFrame:
