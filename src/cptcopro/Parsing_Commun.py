@@ -75,6 +75,8 @@ async def login_and_open_menu(page: Page, login: str, password: str, url: str) -
         return "KO_CLICK_LOGIN"
     
     try:
+        # Attendre que le DOM soit chargé puis que le réseau soit inactif
+        await page.wait_for_load_state("domcontentloaded", timeout=30000)
         await page.wait_for_load_state("networkidle", timeout=30000)
         logger.info("Attente de la fin du chargement après connexion")
     except Exception as e:
@@ -83,7 +85,8 @@ async def login_and_open_menu(page: Page, login: str, password: str, url: str) -
     
     try:
         # Attendre que le bouton menu soit visible et cliquable
-        await page.wait_for_selector("#z_M12_IMG", state="visible", timeout=15000)
+        # Timeout augmenté à 30s pour les connexions lentes ou mode headless
+        await page.wait_for_selector("#z_M12_IMG", state="visible", timeout=30000)
         await page.click("#z_M12_IMG")
         logger.info("Bouton menu cliqué")
     except Exception as e:
