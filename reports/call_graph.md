@@ -53,9 +53,11 @@ flowchart TB
     subgraph STREAMLIT["📊 Pages Streamlit"]
         alerte_page["Alerte.py"]
         config_alertes_page["Config_Alertes.py"]
+        courbe_charge_page["Courbe_Charge_Copro.py"]
         recup_alertes["recup_alertes()"]
         recup_suivi["recup_suivi_alertes()"]
         recup_debits["recup_debits_proprietaires_alertes()"]
+        load_data_courbe["load_data()"]
     end
 
     subgraph BACKUP["💿 Backup_DB.py"]
@@ -127,6 +129,7 @@ flowchart TB
     alerte_page --> recup_alertes
     alerte_page --> recup_suivi
     alerte_page --> recup_debits
+    courbe_charge_page --> load_data_courbe
     
     %% Streamlit
     main --> streamlit_launcher
@@ -207,6 +210,7 @@ sequenceDiagram
 | `Dedoublonnage.py` | Détection/suppression doublons | `analyse_doublons()`, `suppression_doublons()`, `rapport_doublon()` |
 | `Pages/Alerte.py` | Affichage des alertes Streamlit | `recup_alertes()`, `recup_suivi_alertes()`, `recup_debits_proprietaires_alertes()` |
 | `Pages/Config_Alertes.py` | Configuration des seuils d'alerte | Interface Streamlit pour `get_config_alertes()`, `update_config_alerte()` |
+| `Pages/Courbe_Charge_Copro.py` | Visualisation évolution des charges | `load_data()` — Top 10 calculé à la dernière date |
 
 ## Gestion des connexions SQLite
 

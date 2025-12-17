@@ -29,8 +29,9 @@ loguru.logger.info("Démarrage de la page d'analyse des débits.")
 df = load_data(DB_PATH)
 # --- Filtres ---
 st.sidebar.header("Filtres")
-# Calculer les 10 propriétaires avec le plus grand débit total pour la sélection par défaut
-top_10_debit_owners = df.groupby('proprietaire')['debit'].sum().nlargest(10).index.tolist()
+# Calculer les 10 propriétaires avec le plus grand débit à la dernière date
+derniere_date = df["date"].max()
+top_10_debit_owners = df[df["date"] == derniere_date].nlargest(10, 'debit')['proprietaire'].tolist()
 all_owners_sorted = sorted(df["proprietaire"].unique())
 selected_proprietaires = st.sidebar.multiselect(
     "Sélectionner un ou plusieurs propriétaires",
