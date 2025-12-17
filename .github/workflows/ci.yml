@@ -45,6 +45,14 @@ jobs:
         run: |
           poetry config virtualenvs.in-project true
 
+      - name: Clean old virtualenv if needed
+        run: |
+          if (Test-Path .venv) { 
+            Write-Host "Removing old .venv to ensure clean install"
+            Remove-Item -Recurse -Force .venv 
+          }
+        shell: pwsh
+
       - name: Install dependencies (poetry)
         run: |
           poetry install --no-interaction
