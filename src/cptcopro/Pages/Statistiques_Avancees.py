@@ -14,7 +14,6 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 from pathlib import Path
-from datetime import datetime
 from streamlit_extras.metric_cards import style_metric_cards
 
 # Import du module de chemins portables
@@ -137,7 +136,7 @@ with col1:
                 annotation_position="top",
             )
     
-    st.plotly_chart(fig_hist, use_container_width=True)
+    st.plotly_chart(fig_hist, width="stretch")
 
 with col2:
     # Statistiques descriptives
@@ -242,7 +241,7 @@ with col1:
         barmode="group",
     )
     
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width="stretch")
 
 with col2:
     # Tableau récapitulatif
@@ -254,7 +253,7 @@ with col2:
     display_df["Moyenne (€)"] = display_df["Moyenne (€)"].round(2)
     display_df["Médiane (€)"] = display_df["Médiane (€)"].round(2)
     display_df["Seuil (€)"] = display_df["Seuil (€)"].round(2)
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    st.dataframe(display_df, width="stretch", hide_index=True)
 
 st.divider()
 
@@ -303,7 +302,7 @@ if not alertes_df.empty:
             title="Répartition des alertes par type d'appartement",
             color_discrete_sequence=px.colors.qualitative.Set2,
         )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width="stretch")
     
     with col2:
         # Top récidivistes
@@ -312,7 +311,7 @@ if not alertes_df.empty:
             ["proprietaire", "type_alerte", "debit", "occurence", "duree_jours"]
         ].copy()
         top_recidivistes.columns = ["Propriétaire", "Type", "Débit (€)", "Occurrences", "Durée (j)"]
-        st.dataframe(top_recidivistes, use_container_width=True, hide_index=True)
+        st.dataframe(top_recidivistes, width="stretch", hide_index=True)
 else:
     st.info("Aucune alerte active actuellement.")
 
@@ -376,7 +375,7 @@ with col2:
         ].head(15).copy()
         display_risk.columns = ["Propriétaire", "Type", "Débit (€)", "Seuil (€)", "% du seuil"]
         display_risk["% du seuil"] = display_risk["% du seuil"].round(1)
-        st.dataframe(display_risk, use_container_width=True, hide_index=True)
+        st.dataframe(display_risk, width="stretch", hide_index=True)
     else:
         st.success(f"Aucun propriétaire n'est au-dessus de {pct_risque}% du seuil d'alerte.")
 
@@ -420,7 +419,7 @@ with col1:
         color_continuous_scale="RdYlGn_r",
     )
     fig_saison.update_layout(xaxis={"categoryorder": "array", "categoryarray": list(mois_noms.values())})
-    st.plotly_chart(fig_saison, use_container_width=True)
+    st.plotly_chart(fig_saison, width="stretch")
 
 with col2:
     # Identifier les mois critiques
@@ -483,7 +482,7 @@ with col1:
         color_discrete_sequence=["#00CC96"],
     )
     fig_ratio.add_vline(x=1, line_dash="dash", line_color="red", annotation_text="Équilibre")
-    st.plotly_chart(fig_ratio, use_container_width=True)
+    st.plotly_chart(fig_ratio, width="stretch")
 
 with col2:
     # Statistiques
