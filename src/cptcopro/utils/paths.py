@@ -75,8 +75,8 @@ def get_db_path(db_name: str = "test.sqlite") -> Path:
         OSError: Si le répertoire parent ne peut pas être créé
     """
     # Variable d'environnement pour override (CI, tests, etc.)
-    # Supporte CPTCOPRO_DB_PATH (nouvelle) et CTPCOPRO_DB_PATH (ancienne, dépréciée)
-    env_path = os.getenv("CPTCOPRO_DB_PATH") or os.getenv("CTPCOPRO_DB_PATH")
+    # Supporte CPTCOPRO_DB_PATH 
+    env_path = os.getenv("CPTCOPRO_DB_PATH")
     if env_path and env_path.strip():
         # Convertir en chemin absolu
         path = Path(env_path).resolve()

@@ -1,6 +1,6 @@
 import sqlite3
 from pathlib import Path
-from cptcopro.Data_To_BDD import integrite_db
+from cptcopro.Database import integrite_db
 
 
 def test_vw_charge_coproprietaires_exists_and_returns_columns(tmp_path: Path):

@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from cptcopro import Data_To_BDD as dbmod
+from cptcopro import Database as dbmod
 
 
 def setup_db(path: Path):

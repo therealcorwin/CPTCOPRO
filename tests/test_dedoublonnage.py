@@ -2,7 +2,7 @@ import sqlite3
 from pathlib import Path
 
 
-from cptcopro.Dedoublonnage import analyse_doublons, suppression_doublons
+from cptcopro.Database.Dedoublonnage import analyse_doublons, suppression_doublons
 
 
 def create_test_db(path: str):

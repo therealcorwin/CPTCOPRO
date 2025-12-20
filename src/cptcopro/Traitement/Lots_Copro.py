@@ -326,6 +326,3 @@ def afficher_avec_rich(consolide: list[dict]) -> None:
     consoleur.print(tableau)
     total = len(consolide)
     consoleur.print(f"[bold]{total}[/bold] propriétaires/groupes trouvés.")
-
-
-

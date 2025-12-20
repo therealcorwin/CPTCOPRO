@@ -1,4 +1,4 @@
-from cptcopro.Traitement_Lots_Copro import consolider_proprietaires_lots
+from cptcopro.Traitement.Lots_Copro import consolider_proprietaires_lots
 
 
 def test_proprietaire_with_single_lot():

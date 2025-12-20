@@ -8,46 +8,65 @@ flowchart TB
         main["main()"]
     end
 
-    subgraph PARSING_COMMUN["🔗 Parsing_Commun.py"]
-        recup_all_html_parallel["recup_all_html_parallel()"]
-        recup_html_generic["_recup_html_generic()"]
-        recup_html_charges["recup_html_charges()"]
-        recup_html_lots["recup_html_lots()"]
-        login_and_open_menu["login_and_open_menu()"]
-        get_cached_credentials["_get_cached_credentials()"]
+    subgraph PARSING["📡 Parsing/"]
+        subgraph PARSING_COMMUN["🔗 Parsing/Commun.py"]
+            recup_all_html_parallel["recup_all_html_parallel()"]
+            recup_html_generic["_recup_html_generic()"]
+            recup_html_charges["recup_html_charges()"]
+            recup_html_lots["recup_html_lots()"]
+            login_and_open_menu["login_and_open_menu()"]
+            get_cached_credentials["_get_cached_credentials()"]
+        end
+
+        subgraph PARSING_CHARGE["📊 Parsing/Charge_Copro.py"]
+            recup_charges_coproprietaires["recup_charges_coproprietaires()"]
+        end
+
+        subgraph PARSING_LOTS["🏠 Parsing/Lots_Copro.py"]
+            recup_lots_coproprietaires["recup_lots_coproprietaires()"]
+        end
     end
 
-    subgraph PARSING_CHARGE["📊 Parsing_Charge_Copro.py"]
-        recup_charges_coproprietaires["recup_charges_coproprietaires()"]
+    subgraph TRAITEMENT["⚙️ Traitement/"]
+        subgraph TRAITEMENT_CHARGE["📊 Traitement/Charge_Copro.py"]
+            recuperer_date["recuperer_date_situation_copro()"]
+            recuperer_situation["recuperer_situation_copro()"]
+            afficher_etat["afficher_etat_coproprietaire()"]
+        end
+
+        subgraph TRAITEMENT_LOTS["🏠 Traitement/Lots_Copro.py"]
+            extraire_lignes["extraire_lignes_brutes()"]
+            consolider["consolider_proprietaires_lots()"]
+            afficher_rich["afficher_avec_rich()"]
+        end
     end
 
-    subgraph PARSING_LOTS["🏠 Parsing_Lots_Copro.py"]
-        recup_lots_coproprietaires["recup_lots_coproprietaires()"]
-    end
+    subgraph DATABASE["💾 Database/"]
+        subgraph DB_CORE["🗄️ Database Core"]
+            verif_repertoire["verif_repertoire_db()"]
+            verif_presence["verif_presence_db()"]
+            integrite_db["integrite_db()"]
+            enregistrer_charges["enregistrer_donnees_sqlite()"]
+            enregistrer_copro["enregistrer_coproprietaires()"]
+        end
+        
+        subgraph DB_ALERTES["🔔 Alertes_Config.py"]
+            sauv_alertes["sauvegarder_nombre_alertes()"]
+            get_config_alertes["get_config_alertes()"]
+            update_config_alerte["update_config_alerte()"]
+            get_threshold["get_threshold_for_type()"]
+            init_config["init_config_alerte_if_missing()"]
+        end
 
-    subgraph TRAITEMENT_CHARGE["⚙️ Traitement_Charge_Copro.py"]
-        recuperer_date["recuperer_date_situation_copro()"]
-        recuperer_situation["recuperer_situation_copro()"]
-        afficher_etat["afficher_etat_coproprietaire()"]
-    end
+        subgraph BACKUP["💿 Backup_DB.py"]
+            backup_db["backup_db()"]
+        end
 
-    subgraph TRAITEMENT_LOTS["⚙️ Traitement_Lots_Copro.py"]
-        extraire_lignes["extraire_lignes_brutes()"]
-        consolider["consolider_proprietaires_lots()"]
-        afficher_rich["afficher_avec_rich()"]
-    end
-
-    subgraph DATA_BDD["💾 Data_To_BDD.py"]
-        verif_repertoire["verif_repertoire_db()"]
-        verif_presence["verif_presence_db()"]
-        integrite_db["integrite_db()"]
-        enregistrer_charges["enregistrer_donnees_sqlite()"]
-        enregistrer_copro["enregistrer_coproprietaires()"]
-        sauv_alertes["sauvegarder_nombre_alertes()"]
-        get_config_alertes["get_config_alertes()"]
-        update_config_alerte["update_config_alerte()"]
-        get_threshold["get_threshold_for_type()"]
-        init_config["init_config_alerte_if_missing()"]
+        subgraph DEDOUBLONNAGE["🔍 Dedoublonnage.py"]
+            analyse_doublons["analyse_doublons()"]
+            rapport_doublon["rapport_doublon()"]
+            suppression_doublons["suppression_doublons()"]
+        end
     end
 
     subgraph STREAMLIT["📊 Pages Streamlit"]
@@ -58,16 +77,6 @@ flowchart TB
         recup_suivi["recup_suivi_alertes()"]
         recup_debits["recup_debits_proprietaires_alertes()"]
         load_data_courbe["load_data()"]
-    end
-
-    subgraph BACKUP["💿 Backup_DB.py"]
-        backup_db["backup_db()"]
-    end
-
-    subgraph DEDOUBLONNAGE["🔍 Dedoublonnage.py"]
-        analyse_doublons["analyse_doublons()"]
-        rapport_doublon["rapport_doublon()"]
-        suppression_doublons["suppression_doublons()"]
     end
 
     subgraph UTILS["🛠️ Utils"]
@@ -140,13 +149,13 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     participant M as main.py
-    participant PC as Parsing_Commun
-    participant PCC as Parsing_Charge_Copro
-    participant PLC as Parsing_Lots_Copro
-    participant TC as Traitement_Charge_Copro
-    participant TL as Traitement_Lots_Copro
-    participant DB as Data_To_BDD
-    participant DD as Dedoublonnage
+    participant PC as Parsing.Commun
+    participant PCC as Parsing.Charge_Copro
+    participant PLC as Parsing.Lots_Copro
+    participant TC as Traitement.Charge_Copro
+    participant TL as Traitement.Lots_Copro
+    participant DB as Database
+    participant DD as Database.Dedoublonnage
     
     M->>PC: recup_all_html_parallel()
     PC->>PC: _get_cached_credentials()
@@ -200,17 +209,51 @@ sequenceDiagram
 | Module | Responsabilité | Fonctions principales |
 |--------|----------------|----------------------|
 | `main.py` | Orchestration principale, CLI | `main()` |
-| `Parsing_Commun.py` | Connexion, authentification, orchestration parallèle | `recup_all_html_parallel()`, `_recup_html_generic()`, `login_and_open_menu()` |
-| `Parsing_Charge_Copro.py` | Navigation spécifique pour les charges | `recup_charges_coproprietaires()` |
-| `Parsing_Lots_Copro.py` | Navigation spécifique pour les lots | `recup_lots_coproprietaires()` |
-| `Traitement_Charge_Copro.py` | Parsing HTML des charges | `recuperer_date_situation_copro()`, `recuperer_situation_copro()` |
-| `Traitement_Lots_Copro.py` | Parsing HTML des lots | `extraire_lignes_brutes()`, `consolider_proprietaires_lots()` |
-| `Data_To_BDD.py` | Opérations SQLite, configuration alertes | `enregistrer_donnees_sqlite()`, `enregistrer_coproprietaires()`, `integrite_db()`, `get_config_alertes()`, `update_config_alerte()`, `sauvegarder_nombre_alertes()` |
-| `Backup_DB.py` | Sauvegarde de la base | `backup_db()` |
-| `Dedoublonnage.py` | Détection/suppression doublons | `analyse_doublons()`, `suppression_doublons()`, `rapport_doublon()` |
+| `Parsing/Commun.py` | Connexion, authentification, orchestration parallèle | `recup_all_html_parallel()`, `_recup_html_generic()`, `login_and_open_menu()` |
+| `Parsing/Charge_Copro.py` | Navigation spécifique pour les charges | `recup_charges_coproprietaires()` |
+| `Parsing/Lots_Copro.py` | Navigation spécifique pour les lots | `recup_lots_coproprietaires()` |
+| `Traitement/Charge_Copro.py` | Parsing HTML des charges | `recuperer_date_situation_copro()`, `recuperer_situation_copro()` |
+| `Traitement/Lots_Copro.py` | Parsing HTML des lots | `extraire_lignes_brutes()`, `consolider_proprietaires_lots()` |
+| `Database/` | Package des opérations SQLite | `enregistrer_donnees_sqlite()`, `enregistrer_coproprietaires()`, `integrite_db()`, `get_config_alertes()`, `update_config_alerte()`, `sauvegarder_nombre_alertes()`, `backup_db()`, `analyse_doublons()`, `suppression_doublons()`, `rapport_doublon()` |
 | `Pages/Alerte.py` | Affichage des alertes Streamlit | `recup_alertes()`, `recup_suivi_alertes()`, `recup_debits_proprietaires_alertes()` |
 | `Pages/Config_Alertes.py` | Configuration des seuils d'alerte | Interface Streamlit pour `get_config_alertes()`, `update_config_alerte()` |
 | `Pages/Courbe_Charge_Copro.py` | Visualisation évolution des charges | `load_data()` — Top 10 calculé à la dernière date |
+
+## Structure des packages
+
+### Package Database/
+
+```
+Database/
+├── __init__.py              # Réexporte toutes les fonctions publiques
+├── constants.py             # Constantes (CHARGE_DB_PATH, etc.)
+├── Verif_Prerequis_BDD.py   # verif_repertoire_db(), verif_presence_db()
+├── Creation_BDD.py          # integrite_db()
+├── Charges_To_BDD.py        # enregistrer_donnees_sqlite()
+├── Coproprietaires_To_BDD.py# enregistrer_coproprietaires()
+├── Alertes_Config.py        # get_config_alertes(), update_config_alerte(), sauvegarder_nombre_alertes()
+├── Backup_DB.py             # backup_db()
+└── Dedoublonnage.py         # analyse_doublons(), suppression_doublons(), rapport_doublon()
+```
+
+### Package Parsing/
+
+```
+Parsing/
+├── __init__.py              # Réexporte les fonctions publiques
+├── Commun.py                # recup_all_html_parallel(), login_and_open_menu()
+├── Charge_Copro.py          # recup_charges_coproprietaires()
+└── Lots_Copro.py            # recup_lots_coproprietaires()
+```
+
+### Package Traitement/
+
+```
+Traitement/
+├── __init__.py              # Réexporte les fonctions publiques
+├── Charge_Copro.py          # recuperer_date_situation_copro(), recuperer_situation_copro()
+└── Lots_Copro.py            # extraire_lignes_brutes(), consolider_proprietaires_lots()
+```
 
 ## Gestion des connexions SQLite
 
@@ -268,10 +311,10 @@ def enregistrer_donnees_sqlite(data: list, db_path: str) -> None:
 flowchart LR
     subgraph Core["Modules principaux"]
         main
-        PC["Parsing_Commun"]
-        PCC["Parsing_Charge_Copro"]
-        PLC["Parsing_Lots_Copro"]
-        DB["Data_To_BDD"]
+        PC["Parsing.Commun"]
+        PCC["Parsing.Charge_Copro"]
+        PLC["Parsing.Lots_Copro"]
+        DB["Database"]
     end
     
     subgraph External["Dépendances externes"]

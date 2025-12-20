@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from cptcopro.Data_To_BDD import integrite_db, enregistrer_coproprietaires
+from cptcopro.Database import integrite_db, enregistrer_coproprietaires
 
 
 def read_all_coproprietaires(db_path: str):

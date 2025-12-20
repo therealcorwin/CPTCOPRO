@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from cptcopro.Data_To_BDD import integrite_db, enregistrer_donnees_sqlite
+from cptcopro.Database import integrite_db, enregistrer_donnees_sqlite
 
 
 def fetch_all(table: str, db_path: str):

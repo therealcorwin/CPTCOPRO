@@ -2,7 +2,7 @@ from selectolax.parser import HTMLParser
 import os
 import pytest
 
-from cptcopro import Traitement_Charge_Copro as tp
+from cptcopro.Traitement import Charge_Copro as tp
 
 
 def load_fixture(name: str) -> str:

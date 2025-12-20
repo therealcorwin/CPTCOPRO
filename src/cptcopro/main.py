@@ -18,12 +18,10 @@ Options:
 import asyncio
 import sys
 from selectolax.parser import HTMLParser
-import cptcopro.Parsing_Commun as pc
-import cptcopro.Traitement_Charge_Copro as tp
-import cptcopro.Data_To_BDD as dtb
-import cptcopro.Backup_DB as bdb
-import cptcopro.Traitement_Lots_Copro as tlc
-import cptcopro.Dedoublonnage as doublon
+import cptcopro.Parsing.Commun as pc
+import cptcopro.Traitement.Charge_Copro as tp
+import cptcopro.Traitement.Lots_Copro as tlc
+import cptcopro.Database as dtb
 import cptcopro.utils.streamlit_launcher as usl
 from cptcopro.utils.paths import get_db_path, get_log_path
 from loguru import logger
@@ -196,7 +194,7 @@ def main() -> None:
         dtb.verif_repertoire_db(DB_PATH)
         dtb.verif_presence_db(DB_PATH)
         dtb.integrite_db(DB_PATH)
-        bdb.backup_db(DB_PATH)
+        dtb.backup_db(DB_PATH)
         dtb.enregistrer_donnees_sqlite(data_charges, DB_PATH)
         dtb.enregistrer_coproprietaires(data_coproprietaires, DB_PATH)
         logger.info("Traitement terminé et données sauvegardées.")
@@ -205,13 +203,13 @@ def main() -> None:
     
     try:
         logger.info("Vérification des doublons dans la table 'charge'...")
-        analyse = doublon.analyse_doublons(DB_PATH)
+        analyse = dtb.analyse_doublons(DB_PATH)
         if not analyse:
             logger.info("Aucun doublon détecté.")
         else:
             logger.info(f"Doublons détectés (ids à supprimer) : {len(analyse)}")
-            doublon.rapport_doublon(DB_PATH, analyse)
-            doublon.suppression_doublons(DB_PATH, analyse)
+            dtb.rapport_doublon(DB_PATH, analyse)
+            dtb.suppression_doublons(DB_PATH, analyse)
     except Exception as exc:
         logger.error(f"Erreur lors de la déduplication : {exc}")
 

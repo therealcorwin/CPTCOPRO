@@ -2,7 +2,7 @@
 
 Ce module contient la logique de navigation spécifique pour récupérer
 le HTML des lots depuis le site du syndic.
-La connexion et l'orchestration sont gérées par Parsing_Common.
+La connexion et l'orchestration sont gérées par Parsing.Commun.
 """
 from playwright.async_api import Page
 from loguru import logger

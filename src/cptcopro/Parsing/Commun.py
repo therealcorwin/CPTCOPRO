@@ -5,16 +5,16 @@ Ce module gère :
 - L'orchestration parallèle des récupérations HTML
 
 Les navigations spécifiques sont déléguées à :
-- Parsing_Charge_Copro : navigation pour les charges
-- Parsing_Lots_Copro : navigation pour les lots
+- Parsing.Charge_Copro : navigation pour les charges
+- Parsing.Lots_Copro : navigation pour les lots
 """
 from playwright.async_api import Page, async_playwright
 from loguru import logger
 
 from cptcopro.utils.env_loader import get_credentials
 from cptcopro.utils.browser_launcher import launch_browser
-import cptcopro.Parsing_Charge_Copro as pcc
-import cptcopro.Parsing_Lots_Copro as pcl
+from . import Charge_Copro as pcc
+from . import Lots_Copro as pcl
 
 logger.remove()
 logger = logger.bind(type_log="PARSING_COMMUN")
@@ -86,9 +86,19 @@ async def login_and_open_menu(page: Page, login: str, password: str, url: str) -
     try:
         # Attendre que le bouton menu soit visible et cliquable
         # Timeout augmenté à 30s pour les connexions lentes ou mode headless
-        await page.wait_for_selector("#z_M12_IMG", state="visible", timeout=30000)
-        await page.click("#z_M12_IMG")
-        logger.info("Bouton menu cliqué")
+        # Retry en cas d'échec (serveur peut être lent au premier lancement)
+        for attempt in range(3):
+            try:
+                await page.wait_for_selector("#z_M12_IMG", state="visible", timeout=15000)
+                await page.click("#z_M12_IMG")
+                logger.info("Bouton menu cliqué")
+                break
+            except Exception:
+                if attempt < 2:
+                    logger.warning(f"Menu non visible, tentative {attempt + 2}/3...")
+                    await page.wait_for_timeout(2000)  # Attendre 2s avant retry
+                else:
+                    raise
     except Exception as e:
         logger.error(f"Erreur lors du clic sur le bouton menu : {e}")
         return "KO_CLICK_MENU"
@@ -191,7 +201,7 @@ async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
     
     async def _fetch_charges_delayed():
         """Lance les charges avec un léger délai pour éviter collision de login."""
-        await asyncio.sleep(0.8)  # Décalage de 800ms pour éviter conflit serveur
+        await asyncio.sleep(1.5)  # Décalage de 1.5s pour éviter conflit serveur (augmenté de 800ms)
         return await recup_html_charges(headless, login, password, url)
     
     # Lancer les deux récupérations en parallèle (lots d'abord, charges avec délai)

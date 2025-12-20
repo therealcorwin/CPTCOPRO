@@ -14,7 +14,7 @@ from pathlib import Path
 # Import du module de chemins portables
 try:
     from cptcopro.utils.paths import get_db_path
-    from cptcopro.Data_To_BDD import (
+    from cptcopro.Database import (
         get_config_alertes,
         update_config_alerte,
         DEFAULT_ALERT_THRESHOLDS,

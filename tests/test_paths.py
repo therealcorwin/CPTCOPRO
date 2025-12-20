@@ -117,23 +117,6 @@ class TestGetDbPath:
             # Le répertoire parent doit être créé
             assert custom_path.parent.exists()
     
-    def test_env_var_override_old_name(self, tmp_path):
-        """La variable CTPCOPRO_DB_PATH (ancienne) fonctionne aussi."""
-        custom_path = tmp_path / "legacy" / "db.sqlite"
-        with patch.dict(os.environ, {"CTPCOPRO_DB_PATH": str(custom_path)}, clear=True):
-            db_path = get_db_path()
-            assert db_path == custom_path.resolve()    
-    def test_new_env_var_takes_precedence(self, tmp_path):
-        """CPTCOPRO_DB_PATH a priorité sur CTPCOPRO_DB_PATH."""
-        new_path = tmp_path / "new" / "db.sqlite"
-        old_path = tmp_path / "old" / "db.sqlite"
-        with patch.dict(os.environ, {
-            "CPTCOPRO_DB_PATH": str(new_path),
-            "CTPCOPRO_DB_PATH": str(old_path)
-        }):
-            db_path = get_db_path()
-            assert db_path == new_path.resolve()
-    
     def test_creates_parent_directory(self, tmp_path):
         """Crée le répertoire parent si nécessaire."""
         custom_path = tmp_path / "niveau1" / "niveau2" / "db.sqlite"

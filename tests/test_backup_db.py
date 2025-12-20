@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cptcopro.Backup_DB import backup_db
+from cptcopro.Database.Backup_DB import backup_db
 
 
 class TestBackupDb:
@@ -32,8 +32,8 @@ class TestBackupDb:
     
     def test_creates_backup_file(self, sample_db, backup_dir):
         """Crée un fichier de backup avec le bon format de nom."""
-        with patch('cptcopro.Backup_DB.get_backup_dir', return_value=backup_dir):
-            with patch('cptcopro.Backup_DB._USE_PORTABLE_PATHS', True):
+        with patch('cptcopro.Database.Backup_DB.get_backup_dir', return_value=backup_dir):
+            with patch('cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS', True):
                 backup_db(str(sample_db))
         
         # Vérifier que le backup existe
@@ -47,8 +47,8 @@ class TestBackupDb:
     
     def test_backup_contains_same_data(self, sample_db, backup_dir):
         """Le backup contient les mêmes données que l'original."""
-        with patch('cptcopro.Backup_DB.get_backup_dir', return_value=backup_dir):
-            with patch('cptcopro.Backup_DB._USE_PORTABLE_PATHS', True):
+        with patch('cptcopro.Database.Backup_DB.get_backup_dir', return_value=backup_dir):
+            with patch('cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS', True):
                 backup_db(str(sample_db))
         
         backup_files = list(backup_dir.glob("backup_*.sqlite"))
@@ -67,8 +67,8 @@ class TestBackupDb:
         """Crée le répertoire BACKUP s'il n'existe pas."""
         assert not backup_dir.exists()
         
-        with patch('cptcopro.Backup_DB.get_backup_dir', return_value=backup_dir):
-            with patch('cptcopro.Backup_DB._USE_PORTABLE_PATHS', True):
+        with patch('cptcopro.Database.Backup_DB.get_backup_dir', return_value=backup_dir):
+            with patch('cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS', True):
                 backup_db(str(sample_db))
         
         assert backup_dir.exists()
@@ -77,8 +77,8 @@ class TestBackupDb:
         """Gère gracieusement une base de données inexistante."""
         nonexistent_db = tmp_path / "nonexistent.sqlite"
         
-        with patch('cptcopro.Backup_DB.get_backup_dir', return_value=backup_dir):
-            with patch('cptcopro.Backup_DB._USE_PORTABLE_PATHS', True):
+        with patch('cptcopro.Database.Backup_DB.get_backup_dir', return_value=backup_dir):
+            with patch('cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS', True):
                 # Ne doit pas lever d'exception
                 backup_db(str(nonexistent_db))
         
@@ -90,7 +90,7 @@ class TestBackupDb:
     def test_handles_permission_error_on_backup_dir(self, sample_db, tmp_path):
         """Gère gracieusement une erreur de permission sur le répertoire."""
         # Simuler une erreur lors de la création du répertoire
-        with patch('cptcopro.Backup_DB._USE_PORTABLE_PATHS', False):
+        with patch('cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS', False):
             with patch('os.makedirs', side_effect=PermissionError("Access denied")):
                 with patch('os.path.exists', return_value=False):
                     # Ne doit pas lever d'exception non gérée
@@ -98,8 +98,8 @@ class TestBackupDb:
     
     def test_multiple_backups_have_different_names(self, sample_db, backup_dir):
         """Plusieurs backups ont des noms différents (timestamp)."""
-        with patch('cptcopro.Backup_DB.get_backup_dir', return_value=backup_dir):
-            with patch('cptcopro.Backup_DB._USE_PORTABLE_PATHS', True):
+        with patch('cptcopro.Database.Backup_DB.get_backup_dir', return_value=backup_dir):
+            with patch('cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS', True):
                 # Premier backup
                 backup_db(str(sample_db))
                 
@@ -119,8 +119,8 @@ class TestBackupDb:
     
     def test_backup_timestamp_format(self, sample_db, backup_dir):
         """Le timestamp dans le nom du backup est au bon format."""
-        with patch('cptcopro.Backup_DB.get_backup_dir', return_value=backup_dir):
-            with patch('cptcopro.Backup_DB._USE_PORTABLE_PATHS', True):
+        with patch('cptcopro.Database.Backup_DB.get_backup_dir', return_value=backup_dir):
+            with patch('cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS', True):
                 backup_db(str(sample_db))
         
         backup_files = list(backup_dir.glob("backup_*.sqlite"))
@@ -142,7 +142,7 @@ class TestBackupDb:
         # En mode fallback, backup_db utilise os.path.dirname(__file__) + "BACKUP"
         
         # Patch uniquement _USE_PORTABLE_PATHS et le chemin __file__ du module
-        import cptcopro.Backup_DB as backup_module
+        import cptcopro.Database.Backup_DB as backup_module
         original_file = backup_module.__file__
         
         try:
@@ -207,8 +207,8 @@ class TestBackupDbIntegration:
         
         # Créer le backup
         backup_dir = tmp_path / "BACKUP"
-        with patch('cptcopro.Backup_DB.get_backup_dir', return_value=backup_dir):
-            with patch('cptcopro.Backup_DB._USE_PORTABLE_PATHS', True):
+        with patch('cptcopro.Database.Backup_DB.get_backup_dir', return_value=backup_dir):
+            with patch('cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS', True):
                 backup_db(str(db_path))
         
         # Vérifier l'intégrité du backup
