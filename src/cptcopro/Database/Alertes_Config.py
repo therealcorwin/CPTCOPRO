@@ -133,6 +133,41 @@ def get_config_alertes(db_path: str) -> List[Dict]:
             conn.close()
 
 
+def _valider_parametre_numerique(
+    valeur: float | None,
+    nom: str,
+    allow_zero: bool = False,
+) -> tuple[float | None, str | None]:
+    """
+    Valide et convertit un paramètre numérique.
+    
+    Args:
+        valeur: La valeur à valider (peut être None).
+        nom: Nom du paramètre pour les messages d'erreur.
+        allow_zero: Si True, accepte >= 0. Si False, exige > 0.
+    
+    Returns:
+        Tuple (valeur_convertie, erreur). Si erreur est None, la validation a réussi.
+        Si valeur est None, retourne (None, None).
+    """
+    if valeur is None:
+        return None, None
+    
+    try:
+        valeur_float = float(valeur)
+    except (TypeError, ValueError) as e:
+        return None, f"{nom} invalide (non numérique): {valeur} - {e}"
+    
+    if allow_zero:
+        if valeur_float < 0:
+            return None, f"{nom} doit être >= 0, reçu: {valeur_float}"
+    else:
+        if valeur_float <= 0:
+            return None, f"{nom} doit être > 0, reçu: {valeur_float}"
+    
+    return valeur_float, None
+
+
 def update_config_alerte(
     db_path: str,
     type_apt: str,
@@ -158,35 +193,20 @@ def update_config_alerte(
         bool: True si succès, False sinon.
     """
     # --- Validation des entrées ---
-    if charge_moyenne is not None:
-        try:
-            charge_moyenne = float(charge_moyenne)
-            if charge_moyenne <= 0:
-                logger.error(f"charge_moyenne doit être > 0, reçu: {charge_moyenne}")
-                return False
-        except (TypeError, ValueError) as e:
-            logger.error(f"charge_moyenne invalide (non numérique): {charge_moyenne} - {e}")
-            return False
+    charge_moyenne, err = _valider_parametre_numerique(charge_moyenne, "charge_moyenne", allow_zero=False)
+    if err:
+        logger.error(err)
+        return False
     
-    if taux is not None:
-        try:
-            taux = float(taux)
-            if taux <= 0:
-                logger.error(f"taux doit être > 0, reçu: {taux}")
-                return False
-        except (TypeError, ValueError) as e:
-            logger.error(f"taux invalide (non numérique): {taux} - {e}")
-            return False
+    taux, err = _valider_parametre_numerique(taux, "taux", allow_zero=False)
+    if err:
+        logger.error(err)
+        return False
     
-    if threshold is not None:
-        try:
-            threshold = float(threshold)
-            if threshold < 0:
-                logger.error(f"threshold doit être >= 0, reçu: {threshold}")
-                return False
-        except (TypeError, ValueError) as e:
-            logger.error(f"threshold invalide (non numérique): {threshold} - {e}")
-            return False
+    threshold, err = _valider_parametre_numerique(threshold, "threshold", allow_zero=True)
+    if err:
+        logger.error(err)
+        return False
     
     # --- Opérations DB ---
     conn = sqlite3.connect(db_path)

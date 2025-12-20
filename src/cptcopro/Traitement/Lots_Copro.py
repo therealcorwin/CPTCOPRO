@@ -153,6 +153,55 @@ def est_ligne_lot(ligne: str) -> bool:
         return True
     return False
 
+
+def _creer_entree_proprietaire(nom: str | None, code: str | None, num_apt: str = "", type_apt: str = "") -> dict:
+    """
+    Crée une entrée propriétaire normalisée.
+    
+    Si le propriétaire est une SCIC/AB HABITAT, les champs num_apt et type_apt
+    sont forcés à "NA" quelle que soit la valeur passée.
+    
+    Args:
+        nom: Nom du propriétaire (peut être None).
+        code: Code du propriétaire (peut être None).
+        num_apt: Numéro de lot (sera normalisé).
+        type_apt: Type d'appartement (sera normalisé en minuscules).
+    
+    Returns:
+        Dictionnaire avec les clés nom_proprietaire, code_proprietaire, num_apt, type_apt.
+    """
+    # Forcer "NA" pour les SCIC / AB HABITAT
+    if est_scic(nom or ""):
+        num_apt, type_apt = "NA", "NA"
+    
+    return {
+        "nom_proprietaire": nom,
+        "code_proprietaire": code,
+        "num_apt": num_apt,
+        "type_apt": type_apt,
+    }
+
+
+def _ajouter_entree_owner_sans_lot(consolide: list[dict], owner: dict) -> None:
+    """
+    Ajoute une entrée pour un propriétaire sans lot.
+    
+    Pour les propriétaires sans lot, les champs num_apt et type_apt sont vides,
+    sauf pour les SCIC/AB HABITAT où ils sont "NA".
+    
+    Args:
+        consolide: Liste de consolidation à modifier en place.
+        owner: Dictionnaire avec les clés "nom" et "code".
+    """
+    entry = _creer_entree_proprietaire(
+        nom=owner["nom"],
+        code=owner["code"],
+        num_apt="",
+        type_apt="",
+    )
+    consolide.append(entry)
+
+
 def consolider_proprietaires_lots(elements) -> list[dict]:
     """
     elements : liste ordonnée de (id, texte)
@@ -170,17 +219,7 @@ def consolider_proprietaires_lots(elements) -> list[dict]:
         if proprietaire:
             # si le propriétaire précédent n'avait pas de lot, on ajoute une entrée vide
             if current_owner is not None and not current_owner_had_lot:
-                # Pour les propriétaires sans lot: mettre 'NA' si c'est une SCIC/AB HABITAT
-                if est_scic(current_owner.get("nom") or ""):
-                    na_num, na_type = "NA", "NA"
-                else:
-                    na_num, na_type = "", ""
-                consolide.append({
-                    "nom_proprietaire": current_owner["nom"],
-                    "code_proprietaire": current_owner["code"],
-                    "num_apt": na_num,
-                    "type_apt": na_type,
-                })
+                _ajouter_entree_owner_sans_lot(consolide, current_owner)
             nom, code = proprietaire
             current_owner = {"nom": nom, "code": code}
             current_owner_had_lot = False
@@ -191,40 +230,24 @@ def consolider_proprietaires_lots(elements) -> list[dict]:
             num = num or ""
             typ = (typ or "").lower()
             if current_owner is None:
-                consolide.append({
-                    "nom_proprietaire": None,
-                    "code_proprietaire": None,
-                    "num_apt": num,
-                    "type_apt": typ,
-                })
+                # Lot sans propriétaire connu
+                entry = _creer_entree_proprietaire(None, None, num, typ)
+                consolide.append(entry)
             else:
-                # Si le propriétaire est une SCIC / AB HABITAT, forcer 'NA' même si un lot est trouvé
-                if est_scic(current_owner.get("nom") or ""):
-                    entry_num, entry_type = "NA", "NA"
-                else:
-                    entry_num, entry_type = num, typ
-                consolide.append({
-                    "nom_proprietaire": current_owner["nom"],
-                    "code_proprietaire": current_owner["code"],
-                    "num_apt": entry_num,
-                    "type_apt": entry_type,
-                })
+                # Lot avec propriétaire - SCIC/NA handling est dans _creer_entree_proprietaire
+                entry = _creer_entree_proprietaire(
+                    current_owner["nom"],
+                    current_owner["code"],
+                    num,
+                    typ,
+                )
+                consolide.append(entry)
                 current_owner_had_lot = True
             continue
 
     # fin de boucle : si le dernier propriétaire n'a pas eu de lot, ajouter une entrée vide
     if current_owner is not None and not current_owner_had_lot:
-        # Pour les propriétaires sans lot: mettre 'NA' si c'est une SCIC/AB HABITAT
-        if est_scic(current_owner.get("nom") or ""):
-            na_num, na_type = "NA", "NA"
-        else:
-            na_num, na_type = "", ""
-        consolide.append({
-            "nom_proprietaire": current_owner["nom"],
-            "code_proprietaire": current_owner["code"],
-            "num_apt": na_num,
-            "type_apt": na_type,
-        })
+        _ajouter_entree_owner_sans_lot(consolide, current_owner)
 
     return consolide
 

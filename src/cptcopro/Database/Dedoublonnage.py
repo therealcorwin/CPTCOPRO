@@ -11,78 +11,79 @@ logger.remove()
 logger = logger.bind(type_log="DEDOUBLONNAGE")
 
 # Initialisation des noms de fichiers de rapport avec horodatage et répertoire
-now: datetime = datetime.now()
-rapport_dir: str = os.path.join(os.path.dirname(__file__), "Rapports")
-rapport_resume = f"rapport_resume-{now.strftime('%d-%m-%y-%H-%M-%S')}.csv"
-rapport_complet = f"rapport_complet-{now.strftime('%d-%m-%y-%H-%M-%S')}.csv"
-rapport_resume_dir = os.path.join(rapport_dir, rapport_resume)
-rapport_complet_dir = os.path.join(rapport_dir, rapport_complet)
+_now: datetime = datetime.now()
+_rapport_dir: str = os.path.join(os.path.dirname(__file__), "Rapports")
+_rapport_resume = f"rapport_resume-{_now.strftime('%d-%m-%y-%H-%M-%S')}.csv"
+_rapport_complet = f"rapport_complet-{_now.strftime('%d-%m-%y-%H-%M-%S')}.csv"
+_rapport_resume_dir_default = os.path.join(_rapport_dir, _rapport_resume)
+_rapport_complet_dir_default = os.path.join(_rapport_dir, _rapport_complet)
 
 
 
 def analyse_doublons(DB_PATH: str) -> list[int]:
     """
-    Dédoublonne la table 'coproprietaires' dans la base de données SQLite.
+    Analyse les doublons dans la table 'charge' de la base de données SQLite.
 
     La règle de dédoublonnage est la suivante : pour un ensemble de lignes
-    ayant les mêmes 'code', 'coproprietaire' et 'date', seul l'enregistrement
+    ayant les mêmes 'nom_proprietaire' et 'date', seul l'enregistrement
     avec la date 'last_check' la plus récente est conservé. Les autres sont
-    supprimés.
+    marqués comme doublons.
 
     Args:
-        db_path (Union[str, Path]): Le chemin vers le fichier de la base de données SQLite.
+        DB_PATH: Le chemin vers le fichier de la base de données SQLite.
+    
+    Returns:
+        Liste des IDs des enregistrements doublons à supprimer.
     """
     logger.info("Début du processus de dédoublonnage de la base de données.")
     logger.info("Analyse des doublons dans la base de données : {}", DB_PATH)
 
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
     liste_ids: list[int] = []
-    try:
-        cur.execute(
-            """
-            WITH ranked AS (
-              SELECT id,
-                     ROW_NUMBER() OVER (
-                       PARTITION BY nom_proprietaire, date
-                       ORDER BY COALESCE(last_check, '0001-01-01') DESC, id DESC
-                     ) AS rn
-              FROM charge
-            )
-            SELECT id FROM ranked WHERE rn > 1;
-            """
-        )
-        ids = cur.fetchall()
-        liste_ids = [r[0] for r in ids]
-    except sqlite3.OperationalError:
-        # Fallback : requête corrélée compatible avec d'anciennes versions SQLite
-        logger.warning("ROW_NUMBER() non supporté → utilisation du fallback corrélé")
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
         try:
             cur.execute(
                 """
-                SELECT c.id
-                FROM charge c
-                WHERE EXISTS (
-                  SELECT 1 FROM charge c2
-                  WHERE c2.nom_proprietaire = c.nom_proprietaire
-                    AND c2.date = c.date
-                    AND (
-                      COALESCE(c2.last_check, '0001-01-01') > COALESCE(c.last_check, '0001-01-01')
-                      OR (
-                        COALESCE(c2.last_check, '0001-01-01') = COALESCE(c.last_check, '0001-01-01')
-                        AND c2.id > c.id
-                      )
-                    )
-                );
+                WITH ranked AS (
+                  SELECT id,
+                         ROW_NUMBER() OVER (
+                           PARTITION BY nom_proprietaire, date
+                           ORDER BY COALESCE(last_check, '0001-01-01') DESC, id DESC
+                         ) AS rn
+                  FROM charge
+                )
+                SELECT id FROM ranked WHERE rn > 1;
                 """
             )
             ids = cur.fetchall()
             liste_ids = [r[0] for r in ids]
-        except Exception as e:
-            logger.error(f"Erreur lors du fallback corrélé pour récupérer les doublons : {e}")
-            liste_ids = []
-    finally:
-        conn.close()
+        except sqlite3.OperationalError:
+            # Fallback : requête corrélée compatible avec d'anciennes versions SQLite
+            logger.warning("ROW_NUMBER() non supporté → utilisation du fallback corrélé")
+            try:
+                cur.execute(
+                    """
+                    SELECT c.id
+                    FROM charge c
+                    WHERE EXISTS (
+                      SELECT 1 FROM charge c2
+                      WHERE c2.nom_proprietaire = c.nom_proprietaire
+                        AND c2.date = c.date
+                        AND (
+                          COALESCE(c2.last_check, '0001-01-01') > COALESCE(c.last_check, '0001-01-01')
+                          OR (
+                            COALESCE(c2.last_check, '0001-01-01') = COALESCE(c.last_check, '0001-01-01')
+                            AND c2.id > c.id
+                          )
+                        )
+                    );
+                    """
+                )
+                ids = cur.fetchall()
+                liste_ids = [r[0] for r in ids]
+            except Exception:
+                logger.exception("Erreur lors du fallback corrélé pour récupérer les doublons")
+                raise
 
     return liste_ids
 
@@ -110,24 +111,26 @@ def suppression_doublons(DB_PATH: str, liste_ids: list[int]) -> None:
     logger.info("Suppression des doublons...")
     if not liste_ids:
         return
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    try:
-        placeholders = ",".join("?" for _ in liste_ids)
-        cur.execute(f"DELETE FROM charge WHERE id IN ({placeholders})", liste_ids)
-        nb_doublons_supprimes = cur.rowcount
-        conn.commit()
-        logger.info("Suppression des doublons terminée. Nombre de lignes supprimées: {}", nb_doublons_supprimes)
-    except Exception:
-        logger.error("Erreur lors de la suppression des doublons")
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-    
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        try:
+            placeholders = ",".join("?" for _ in liste_ids)
+            cur.execute(f"DELETE FROM charge WHERE id IN ({placeholders})", liste_ids)
+            nb_doublons_supprimes = cur.rowcount
+            conn.commit()
+            logger.info("Suppression des doublons terminée. Nombre de lignes supprimées: {}", nb_doublons_supprimes)
+        except Exception:
+            logger.error("Erreur lors de la suppression des doublons")
+            conn.rollback()
+            raise    
 
 
-def rapport_doublon(DB_PATH: str, liste_ids: list[int] , rapport_resume_dir: str = rapport_resume_dir, rapport_complet_dir: str = rapport_complet_dir) -> None:
+def rapport_doublon(
+    DB_PATH: str,
+    liste_ids: list[int],
+    rapport_resume_dir: str | None = None,
+    rapport_complet_dir: str | None = None,
+) -> None:
     """
     Génère des rapports CSV détaillant les doublons dans la base de données.
     
@@ -155,44 +158,49 @@ def rapport_doublon(DB_PATH: str, liste_ids: list[int] , rapport_resume_dir: str
         # Crée: Rapports/rapport_resume-01-01-24-12-00-00.csv
         # Crée: Rapports/rapport_complet-01-01-24-12-00-00.csv
     """
+    # Initialiser les chemins par défaut si non fournis
+    if rapport_resume_dir is None:
+        rapport_resume_dir = _rapport_resume_dir_default
+    if rapport_complet_dir is None:
+        rapport_complet_dir = _rapport_complet_dir_default
+    
     logger.info("Génération des rapports de doublons.")
 
     # Connexion à la base de données    
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(f"DB file not found: {DB_PATH}")
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
+    
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
 
-    # Nbre enregistrements par propriétaire
-    cur.execute("SELECT nom_proprietaire, COUNT(*) FROM charge GROUP BY nom_proprietaire")
-    totals = {row[0]: row[1] for row in cur.fetchall()}
+        # Nbre enregistrements par propriétaire
+        cur.execute("SELECT nom_proprietaire, COUNT(*) FROM charge GROUP BY nom_proprietaire")
+        totals = {row[0]: row[1] for row in cur.fetchall()}
 
-    # groupes par propriétaire avec leurs tailles
-    cur.execute(
-        """
-        SELECT nom_proprietaire, date, COUNT(*) as cnt
-        FROM charge
-        GROUP BY nom_proprietaire, date
-        HAVING cnt > 1
-        """
-    )
-    groups = {}
-    for proprietaire, date, nbre in cur.fetchall():
-        groups.setdefault(proprietaire, []).append((date, nbre))
-
-    # Si aucune id n'est fournie après tentative, éviter d'exécuter une requête invalide
-    if liste_ids:
-        placeholders = ",".join("?" for _ in liste_ids)
+        # groupes par propriétaire avec leurs tailles
         cur.execute(
-            f"SELECT * FROM charge WHERE id IN ({placeholders}) ORDER BY nom_proprietaire, date",
-            tuple(liste_ids),
+            """
+            SELECT nom_proprietaire, date, COUNT(*) as cnt
+            FROM charge
+            GROUP BY nom_proprietaire, date
+            HAVING cnt > 1
+            """
         )
-        liste_complete = cur.fetchall()
-        logger.info("Exemples de lignes candidates à suppression: {}", min(len(liste_complete), 10))
-    else:
-        liste_complete = []
+        groups = {}
+        for proprietaire, date, nbre in cur.fetchall():
+            groups.setdefault(proprietaire, []).append((date, nbre))
 
-    conn.close()
+        # Si aucune id n'est fournie après tentative, éviter d'exécuter une requête invalide
+        if liste_ids:
+            placeholders = ",".join("?" for _ in liste_ids)
+            cur.execute(
+                f"SELECT * FROM charge WHERE id IN ({placeholders}) ORDER BY nom_proprietaire, date",
+                tuple(liste_ids),
+            )
+            liste_complete = cur.fetchall()
+            logger.info("Exemples de lignes candidates à suppression: {}", min(len(liste_complete), 10))
+        else:
+            liste_complete = []
 
     # Rapport par propriétaire
     enregistrements = []
@@ -208,8 +216,8 @@ def rapport_doublon(DB_PATH: str, liste_ids: list[int] , rapport_resume_dir: str
         })
 
     # Creation du dossier rapport s'il n'existe pas
-    logger.info("Vérification de l'existence du dossier des rapports : {}", rapport_dir)
-    os.makedirs(rapport_dir, exist_ok=True)
+    logger.info("Vérification de l'existence du dossier des rapports : {}", _rapport_dir)
+    os.makedirs(_rapport_dir, exist_ok=True)
 
     # Creation du rapport doublons au format CSV
     with open(rapport_resume_dir, "w", newline='', encoding="utf-8") as f:
