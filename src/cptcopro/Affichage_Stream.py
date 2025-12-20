@@ -64,6 +64,12 @@ Stat_Alerte_page = st.Page(
     icon=":material/area_chart:",
 )
 
+Statistiques_Avancees_page = st.Page(
+    "Pages/Statistiques_Avancees.py",
+    title="Statistiques Avancées",
+    icon=":material/area_chart:",
+)
+
 Config_Alertes_page = st.Page(
     "Pages/Config_Alertes.py",
     title="Configuration Alertes",
@@ -80,7 +86,7 @@ menus = st.navigation(
     {
         "Dashboard Général": [Dashboard_page],
         "Suivi des Charges": [Liste_Charge_page, Courbe_Charge_Corpo_page],
-        "Suivi Alerte": [Alerte_page, Stat_Alerte_page,Config_Alertes_page],
+        "Suivi Alerte": [Alerte_page, Stat_Alerte_page,Statistiques_Avancees_page,Config_Alertes_page],
         "Liste des Copropriétaires": [Liste_Copro_page],
         "Recherche Info Copropriétaires": [Recherche_Copro_page],
     }
