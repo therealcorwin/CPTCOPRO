@@ -76,10 +76,13 @@ flowchart TB
         alerte_page["Alerte.py"]
         config_alertes_page["Config_Alertes.py"]
         courbe_charge_page["Courbe_Charge_Copro.py"]
+        stats_avancees_page["Statistiques_Avancees.py"]
         recup_alertes["recup_alertes()"]
         recup_suivi["recup_suivi_alertes()"]
         recup_debits["recup_debits_proprietaires_alertes()"]
         load_data_courbe["load_data()"]
+        load_charges_stats["load_charges()"]
+        load_alertes_stats["load_alertes()"]
     end
 
     subgraph UTILS["🛠️ Utils"]
@@ -221,6 +224,7 @@ sequenceDiagram
 | `Pages/Alerte.py` | Affichage des alertes Streamlit | `recup_alertes()`, `recup_suivi_alertes()`, `recup_debits_proprietaires_alertes()` |
 | `Pages/Config_Alertes.py` | Configuration des seuils d'alerte | Interface Streamlit pour `get_config_alertes()`, `update_config_alerte()` |
 | `Pages/Courbe_Charge_Copro.py` | Visualisation évolution des charges | `load_data()` — Top 10 calculé à la dernière date |
+| `Pages/Statistiques_Avancees.py` | Statistiques avancées | `load_charges()`, `load_alertes()`, `load_config_alertes()`, `load_coproprietaires()` — Distribution, saisonnalité, récidive, risque |
 
 ## Structure des packages
 
