@@ -38,6 +38,8 @@ flowchart TB
             extraire_lignes["extraire_lignes_brutes()"]
             consolider["consolider_proprietaires_lots()"]
             afficher_rich["afficher_avec_rich()"]
+            creer_entree["_creer_entree_proprietaire()"]
+            ajouter_owner["_ajouter_entree_owner_sans_lot()"]
         end
     end
 
@@ -56,6 +58,7 @@ flowchart TB
             update_config_alerte["update_config_alerte()"]
             get_threshold["get_threshold_for_type()"]
             init_config["init_config_alerte_if_missing()"]
+            valider_param["_valider_parametre_numerique()"]
         end
 
         subgraph BACKUP["💿 Backup_DB.py"]
@@ -213,7 +216,7 @@ sequenceDiagram
 | `Parsing/Charge_Copro.py` | Navigation spécifique pour les charges | `recup_charges_coproprietaires()` |
 | `Parsing/Lots_Copro.py` | Navigation spécifique pour les lots | `recup_lots_coproprietaires()` |
 | `Traitement/Charge_Copro.py` | Parsing HTML des charges | `recuperer_date_situation_copro()`, `recuperer_situation_copro()` |
-| `Traitement/Lots_Copro.py` | Parsing HTML des lots | `extraire_lignes_brutes()`, `consolider_proprietaires_lots()` |
+| `Traitement/Lots_Copro.py` | Parsing HTML des lots | `extraire_lignes_brutes()`, `consolider_proprietaires_lots()`, `_creer_entree_proprietaire()`, `_ajouter_entree_owner_sans_lot()` |
 | `Database/` | Package des opérations SQLite | `enregistrer_donnees_sqlite()`, `enregistrer_coproprietaires()`, `integrite_db()`, `get_config_alertes()`, `update_config_alerte()`, `sauvegarder_nombre_alertes()`, `backup_db()`, `analyse_doublons()`, `suppression_doublons()`, `rapport_doublon()` |
 | `Pages/Alerte.py` | Affichage des alertes Streamlit | `recup_alertes()`, `recup_suivi_alertes()`, `recup_debits_proprietaires_alertes()` |
 | `Pages/Config_Alertes.py` | Configuration des seuils d'alerte | Interface Streamlit pour `get_config_alertes()`, `update_config_alerte()` |
@@ -231,9 +234,9 @@ Database/
 ├── Creation_BDD.py          # integrite_db()
 ├── Charges_To_BDD.py        # enregistrer_donnees_sqlite()
 ├── Coproprietaires_To_BDD.py# enregistrer_coproprietaires()
-├── Alertes_Config.py        # get_config_alertes(), update_config_alerte(), sauvegarder_nombre_alertes()
+├── Alertes_Config.py        # get_config_alertes(), update_config_alerte(), sauvegarder_nombre_alertes(), _valider_parametre_numerique()
 ├── Backup_DB.py             # backup_db()
-└── Dedoublonnage.py         # analyse_doublons(), suppression_doublons(), rapport_doublon()
+└── Dedoublonnage.py         # analyse_doublons(), suppression_doublons(), rapport_doublon() [context managers]
 ```
 
 ### Package Parsing/
@@ -252,40 +255,50 @@ Parsing/
 Traitement/
 ├── __init__.py              # Réexporte les fonctions publiques
 ├── Charge_Copro.py          # recuperer_date_situation_copro(), recuperer_situation_copro()
-└── Lots_Copro.py            # extraire_lignes_brutes(), consolider_proprietaires_lots()
+└── Lots_Copro.py            # extraire_lignes_brutes(), consolider_proprietaires_lots(), _creer_entree_proprietaire(), _ajouter_entree_owner_sans_lot()
 ```
 
 ## Gestion des connexions SQLite
 
 ```mermaid
 flowchart TB
-    subgraph Architecture["✅ Architecture simple (try/finally)"]
+    subgraph Architecture["Patterns de connexion SQLite"]
         direction TB
         
-        subgraph Func1["enregistrer_donnees_sqlite()"]
+        subgraph ContextManager["✅ Context Manager (Dedoublonnage)"]
+            cm_with["with sqlite3.connect(db_path) as conn:"]
+            cm_cur["cur = conn.cursor()"]
+            cm_ops["opérations DB"]
+            cm_auto["commit/close automatique"]
+            cm_with --> cm_cur --> cm_ops --> cm_auto
+        end
+        
+        subgraph TryFinally["✅ Try/Finally (autres modules)"]
             conn1["conn = sqlite3.connect(db_path)"]
-            try1["try: cursor.executemany(...)"]
+            try1["try: cursor.execute(...)"]
             finally1["finally: conn.close()"]
             conn1 --> try1 --> finally1
-        end
-        
-        subgraph Func2["enregistrer_coproprietaires()"]
-            conn2["conn = sqlite3.connect(db_path)"]
-            try2["try: cursor.executemany(...)"]
-            finally2["finally: conn.close()"]
-            conn2 --> try2 --> finally2
-        end
-        
-        subgraph Func3["analyse_doublons()"]
-            conn3["conn = sqlite3.connect(db_path)"]
-            try3["try: cursor.execute(...)"]
-            finally3["finally: conn.close()"]
-            conn3 --> try3 --> finally3
         end
     end
 ```
 
-### Pattern simple (sans context manager)
+### Pattern Context Manager (recommandé)
+
+Utilisé dans `Dedoublonnage.py` pour une gestion automatique des ressources :
+
+```python
+def analyse_doublons(DB_PATH: str) -> list[int]:
+    """Analyse les doublons avec context manager."""
+    liste_ids: list[int] = []
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT ...")
+        liste_ids = [r[0] for r in cur.fetchall()]
+    # conn.close() appelé automatiquement
+    return liste_ids
+```
+
+### Pattern Try/Finally (legacy)
 
 Chaque fonction gère sa propre connexion avec `try/finally` :
 
@@ -347,7 +360,7 @@ flowchart LR
         creds --> parallel["asyncio.gather()"]
     end
     
-    subgraph Nav1["Navigateur 1 (délai 0.8s)"]
+    subgraph Nav1["Navigateur 1 (délai 1.5s)"]
         direction TB
         delay["await sleep(0.8)"] --> charges["recup_html_charges()"]
         charges --> generic1["_recup_html_generic(Charges)"]
@@ -425,16 +438,20 @@ async def recup_html_lots(...) -> str:
 | **Sessions** | Partagée | Isolées |
 | **Temps** | ~T1 + T2 | ~max(T1, T2) |
 | **Risques** | Conflits de cookies | Aucun |
-| **Délai entre logins** | N/A | 800ms (évite blocage serveur) |
+| **Délai entre logins** | N/A | 1.5s (évite blocage serveur) |
+| **Retry menu** | Non | 3 tentatives avec 2s d'attente |
 
 ## Notes techniques
 
-- **Parsing parallèle** : 2 navigateurs Playwright indépendants avec délai de 800ms
+- **Parsing parallèle** : 2 navigateurs Playwright indépendants avec délai de 1.5s
+- **Retry automatique** : 3 tentatives pour le clic sur le menu (robustesse au premier lancement)
 - **Refactorisation DRY** : `_recup_html_generic()` centralise la logique browser/login/navigation
-- **Timeouts explicites** : `wait_for_selector` avec timeout de 10s avant les clics critiques
+- **Timeouts explicites** : `wait_for_selector` avec timeout de 15s par tentative avant les clics critiques
 - **Validation** : Vérification que 64 copropriétaires sont consolidés
-- **SQLite** : Chaque fonction gère sa propre connexion (simple et robuste)
-- **Codes d'erreur** : Les fonctions de parsing retournent des codes `KO_*` en cas d'échec (générés dynamiquement via `section_name`)
+- **SQLite** : Context managers dans Dedoublonnage, try/finally ailleurs
+- **Codes d'erreur** : Les fonctions de parsing retournent des codes `KO_*` en cas d'échec
+- **Helpers de validation** : `_valider_parametre_numerique()` pour validation cohérente des paramètres numériques
+- **Helpers de création** : `_creer_entree_proprietaire()` et `_ajouter_entree_owner_sans_lot()` pour DRY dans Lots_Copro
 
 ## Système d'alertes configurables
 
