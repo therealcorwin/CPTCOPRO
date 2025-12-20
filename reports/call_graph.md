@@ -163,7 +163,7 @@ sequenceDiagram
     M->>PC: recup_all_html_parallel()
     PC->>PC: _get_cached_credentials()
     
-    par Navigateur 1 (avec délai 0.8s)
+    par Navigateur 1 (avec délai 1.5s)
         PC->>PC: recup_html_charges()
         PC->>PC: _recup_html_generic(section_name="Charges")
         PC->>PC: login_and_open_menu()
@@ -362,7 +362,7 @@ flowchart LR
     
     subgraph Nav1["Navigateur 1 (délai 1.5s)"]
         direction TB
-        delay["await sleep(0.8)"] --> charges["recup_html_charges()"]
+        delay["await sleep(1.5)"] --> charges["recup_html_charges()"]
         charges --> generic1["_recup_html_generic(Charges)"]
         generic1 --> login1["login_and_open_menu()"]
         login1 --> nav1["fetch_func → recup_charges_coproprietaires()"]
