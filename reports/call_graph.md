@@ -81,8 +81,10 @@ flowchart TB
         recup_suivi["recup_suivi_alertes()"]
         recup_debits["recup_debits_proprietaires_alertes()"]
         load_data_courbe["load_data()"]
-        load_charges_stats["load_charges()"]
-        load_alertes_stats["load_alertes()"]
+        load_charges["load_charges()"]
+        load_alertes["load_alertes()"]
+        load_config_alertes["load_config_alertes()"]
+        load_coproprietaires["load_coproprietaires()"]
     end
 
     subgraph UTILS["🛠️ Utils"]
