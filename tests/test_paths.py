@@ -132,24 +132,14 @@ class TestGetLogPath:
     
     def test_default_log_name(self):
         """Utilise le nom par défaut si non spécifié."""
-        with patch.dict(os.environ, {}, clear=True):
-            log_path = get_log_path()
-            assert log_path.name == "ctpcopro.log"
-            assert "logs" in str(log_path)
+        log_path = get_log_path()
+        assert log_path.name == "ctpcopro.log"
+        assert "logs" in str(log_path)
     
     def test_custom_log_name(self):
         """Accepte un nom de log personnalisé."""
-        with patch.dict(os.environ, {}, clear=True):
-            log_path = get_log_path("custom.log")
-            assert log_path.name == "custom.log"
-    
-    def test_env_var_override(self, tmp_path):
-        """La variable CPTCOPRO_LOG_FILE override le chemin."""
-        custom_path = tmp_path / "logs" / "app.log"
-        with patch.dict(os.environ, {"CPTCOPRO_LOG_FILE": str(custom_path)}):
-            log_path = get_log_path()
-            assert log_path == custom_path.resolve()
-            assert custom_path.parent.exists()
+        log_path = get_log_path("custom.log")
+        assert log_path.name == "custom.log"
 
 
 class TestGetBackupDir:

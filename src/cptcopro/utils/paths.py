@@ -15,7 +15,25 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
+
 _LOG = logging.getLogger(__name__)
+
+# Charger le .env au chargement du module
+def _load_env_file() -> None:
+    """Charge le fichier .env depuis src/cptcopro/ ou à côté de l'exe."""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Mode PyInstaller: chercher à côté de l'exe
+        env_path = Path(sys.executable).parent / ".env"
+    else:
+        # Mode développement: src/cptcopro/.env
+        env_path = Path(__file__).parent.parent / ".env"
+    
+    if env_path.exists():
+        load_dotenv(env_path)
+        _LOG.debug(f"Fichier .env chargé depuis: {env_path}")
+
+_load_env_file()
 
 
 def is_pyinstaller_bundle() -> bool:
@@ -62,11 +80,19 @@ def get_data_dir() -> Path:
     return data_dir
 
 
-def get_db_path(db_name: str = "test.sqlite") -> Path:
+_DEFAULT_DB_NAME = "coproprietaires.sqlite"
+
+
+def get_db_path(db_name: str | None = None) -> Path:
     """Retourne le chemin complet vers la base de données.
     
+    Le nom du fichier est déterminé dans cet ordre de priorité:
+    1. Paramètre `db_name` s'il est fourni
+    2. Variable d'environnement `db_name` (depuis .env)
+    3. Valeur par défaut: coproprietaires.sqlite
+    
     Args:
-        db_name: Nom du fichier de base de données (défaut: test.sqlite)
+        db_name: Nom du fichier de base de données (optionnel)
     
     Returns:
         Chemin vers le fichier DB dans le sous-dossier BDD/
@@ -74,8 +100,7 @@ def get_db_path(db_name: str = "test.sqlite") -> Path:
     Raises:
         OSError: Si le répertoire parent ne peut pas être créé
     """
-    # Variable d'environnement pour override (CI, tests, etc.)
-    # Supporte CPTCOPRO_DB_PATH 
+    # Variable d'environnement pour override du chemin complet (CI, tests, etc.)
     env_path = os.getenv("CPTCOPRO_DB_PATH")
     if env_path and env_path.strip():
         # Convertir en chemin absolu
@@ -87,6 +112,14 @@ def get_db_path(db_name: str = "test.sqlite") -> Path:
             _LOG.error(f"Cannot create DB directory '{path.parent}': {e}")
             raise OSError(f"Cannot create DB directory '{path.parent}': {e}") from e
         return path
+    
+    # Déterminer le nom de la BDD: paramètre > variable d'env > défaut
+    if db_name is None:
+        env_db_name = os.getenv("db_name")
+        if env_db_name and env_db_name.strip():
+            db_name = env_db_name.strip()
+        else:
+            db_name = _DEFAULT_DB_NAME
     
     db_dir = get_data_dir() / "BDD"
     try:
@@ -109,18 +142,6 @@ def get_log_path(log_name: str = "ctpcopro.log") -> Path:
     Raises:
         OSError: Si le répertoire parent ne peut pas être créé
     """
-    # Variable d'environnement pour override
-    env_path = os.getenv("CPTCOPRO_LOG_FILE")
-    if env_path and env_path.strip():
-        path = Path(env_path).resolve()
-        _LOG.info(f"Log path from environment variable: {path}")
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            _LOG.error(f"Cannot create log directory '{path.parent}': {e}")
-            raise OSError(f"Cannot create log directory '{path.parent}': {e}") from e
-        return path
-    
     log_dir = get_data_dir() / "logs"
     try:
         log_dir.mkdir(parents=True, exist_ok=True)

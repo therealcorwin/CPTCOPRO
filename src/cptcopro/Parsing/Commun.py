@@ -46,8 +46,19 @@ async def login_and_open_menu(page: Page, login: str, password: str, url: str) -
         None si succès, sinon un code d'erreur (str)
     """
     try:
-        await page.goto(url, timeout=30000)
-        logger.info("Accès à l'URL réussi")
+        # Premier accès avec retry - le serveur peut être lent à "se réveiller"
+        for attempt in range(2):
+            try:
+                await page.goto(url, timeout=30000)
+                logger.info("Accès à l'URL réussi")
+                break
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning(f"Premier accès URL lent, rafraîchissement... ({e})")
+                    await page.wait_for_timeout(2000)
+                    await page.reload(timeout=30000)
+                else:
+                    raise
     except Exception as e:
         logger.error(f"Erreur lors de l'accès à l'URL : {e}")
         return "KO_GO_TO_URL"    
@@ -85,8 +96,7 @@ async def login_and_open_menu(page: Page, login: str, password: str, url: str) -
     
     try:
         # Attendre que le bouton menu soit visible et cliquable
-        # Timeout augmenté à 30s pour les connexions lentes ou mode headless
-        # Retry en cas d'échec (serveur peut être lent au premier lancement)
+        # Retry avec rechargement de page en cas d'échec (serveur lent au premier lancement)
         for attempt in range(3):
             try:
                 await page.wait_for_selector("#z_M12_IMG", state="visible", timeout=15000)
@@ -95,8 +105,14 @@ async def login_and_open_menu(page: Page, login: str, password: str, url: str) -
                 break
             except Exception:
                 if attempt < 2:
-                    logger.warning(f"Menu non visible, tentative {attempt + 2}/3...")
-                    await page.wait_for_timeout(2000)  # Attendre 2s avant retry
+                    logger.warning(f"Menu non visible, tentative {attempt + 2}/3 avec rechargement...")
+                    # Recharger la page et re-tenter la connexion complète
+                    await page.wait_for_timeout(3000)  # Attendre 3s avant retry
+                    try:
+                        await page.reload(timeout=30000)
+                        await page.wait_for_load_state("networkidle", timeout=30000)
+                    except Exception as reload_err:
+                        logger.warning(f"Rechargement échoué: {reload_err}, on continue...")
                 else:
                     raise
     except Exception as e:
@@ -200,8 +216,9 @@ async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
     logger.info("Démarrage de la récupération parallèle avec 2 navigateurs séparés")
     
     async def _fetch_charges_delayed():
-        """Lance les charges avec un léger délai pour éviter collision de login."""
-        await asyncio.sleep(1.5)  # Décalage de 1.5s pour éviter conflit serveur (augmenté de 800ms)
+        """Lance les charges avec un délai pour éviter collision de login."""
+        # Attendre que les lots soient probablement connectés avant de démarrer
+        await asyncio.sleep(3.0)  # Décalage de 3s pour éviter conflit serveur
         return await recup_html_charges(headless, login, password, url)
     
     # Lancer les deux récupérations en parallèle (lots d'abord, charges avec délai)
