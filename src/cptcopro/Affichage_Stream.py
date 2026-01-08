@@ -23,6 +23,13 @@ Note:
 import streamlit as st
 from pathlib import Path
 
+# Charger les variables d'environnement
+try:
+    from cptcopro.utils.paths import init_env
+    init_env()
+except ImportError:
+    pass  # Fallback si l'import échoue
+
 # --- Configuration de la page ---
 st.set_page_config(
     page_title="Suivi Charges Copropriétaires",
