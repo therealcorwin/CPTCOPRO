@@ -16,6 +16,15 @@ from cptcopro.utils.env_loader import get_credentials
 from cptcopro.utils.browser_launcher import launch_browser
 from . import Charge_Copro as pcc
 from . import Lots_Copro as pcl
+from .constants import (
+    ERROR_GO_TO_URL,
+    ERROR_FILL_LOGIN,
+    ERROR_FILL_PASSWORD,
+    ERROR_CLICK_LOGIN,
+    ERROR_WAIT_FOR_LOAD,
+    ERROR_CLICK_MENU,
+    ERROR_OPEN_BROWSER,
+)
 
 logger.remove()
 logger = logger.bind(type_log="PARSING_COMMUN")
@@ -66,7 +75,7 @@ async def login_and_open_menu(
                     raise
     except Exception as e:
         logger.error(f"Erreur lors de l'accès à l'URL : {e}")
-        return "KO_GO_TO_URL"
+        return ERROR_GO_TO_URL
     try:
         # Attendre que le champ login soit visible
         await page.wait_for_selector('input[name="A16"]', timeout=10000)
@@ -74,21 +83,21 @@ async def login_and_open_menu(
         logger.info("Champ login rempli")
     except Exception as e:
         logger.error(f"Erreur lors du remplissage du champ login : {e}")
-        return "KO_FILL_LOGIN"
+        return ERROR_FILL_LOGIN
 
     try:
         await page.fill('input[name="A17"]', password)
         logger.info("Champ mot de passe rempli")
     except Exception as e:
         logger.error(f"Erreur lors du remplissage du champ mot de passe : {e}")
-        return "KO_FILL_PASSWORD"
+        return ERROR_FILL_PASSWORD
 
     try:
         await page.click("span#z_A7_IMG")
         logger.info("Bouton Se connecter cliqué")
     except Exception as e:
         logger.error(f"Erreur lors du clic sur le bouton Se connecter : {e}")
-        return "KO_CLICK_LOGIN"
+        return ERROR_CLICK_LOGIN
 
     try:
         # Attendre que le DOM soit chargé puis que le réseau soit inactif
@@ -97,7 +106,7 @@ async def login_and_open_menu(
         logger.info("Attente de la fin du chargement après connexion")
     except Exception as e:
         logger.error(f"Erreur lors de l'attente du chargement : {e}")
-        return "KO_WAIT_FOR_LOAD"
+        return ERROR_WAIT_FOR_LOAD
 
     try:
         # Attendre que le bouton menu soit visible et cliquable
@@ -128,7 +137,7 @@ async def login_and_open_menu(
                     raise
     except Exception as e:
         logger.error(f"Erreur lors du clic sur le bouton menu : {e}")
-        return "KO_CLICK_MENU"
+        return ERROR_CLICK_MENU
 
     return None  # Succès
 
@@ -164,7 +173,7 @@ async def _recup_html_generic(
         browser = await launch_browser(p, headless=headless)
         if browser is None:
             logger.error(f"Impossible d'ouvrir le navigateur pour {section_name}")
-            return "KO_OPEN_BROWSER"
+            return ERROR_OPEN_BROWSER
 
         try:
             page = await browser.new_page()
