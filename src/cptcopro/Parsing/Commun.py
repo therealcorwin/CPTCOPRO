@@ -24,6 +24,15 @@ from .constants import (
     ERROR_WAIT_FOR_LOAD,
     ERROR_CLICK_MENU,
     ERROR_OPEN_BROWSER,
+    TIMEOUT_URL_ACCESS,
+    TIMEOUT_ELEMENT_WAIT,
+    TIMEOUT_MENU_WAIT,
+    TIMEOUT_PAGE_LOAD,
+    DELAY_RETRY_URL,
+    DELAY_RETRY_MENU,
+    DELAY_PARALLEL_LOGIN,
+    MAX_RETRY_URL,
+    MAX_RETRY_MENU,
 )
 
 logger.remove()
@@ -59,9 +68,9 @@ async def login_and_open_menu(
     """
     try:
         # Premier accès avec retry - le serveur peut être lent à "se réveiller"
-        for attempt in range(2):
+        for attempt in range(MAX_RETRY_URL):
             try:
-                await page.goto(url, timeout=30000)
+                await page.goto(url, timeout=TIMEOUT_URL_ACCESS)
                 logger.info("Accès à l'URL réussi")
                 break
             except Exception as e:
@@ -69,7 +78,7 @@ async def login_and_open_menu(
                     logger.warning(
                         f"Premier accès URL lent, nouvelle tentative... ({e})"
                     )
-                    await page.wait_for_timeout(2000)
+                    await page.wait_for_timeout(DELAY_RETRY_URL)
                     # On laisse la boucle faire un nouveau page.goto
                 else:
                     raise
@@ -78,7 +87,7 @@ async def login_and_open_menu(
         return ERROR_GO_TO_URL
     try:
         # Attendre que le champ login soit visible
-        await page.wait_for_selector('input[name="A16"]', timeout=10000)
+        await page.wait_for_selector('input[name="A16"]', timeout=TIMEOUT_ELEMENT_WAIT)
         await page.fill('input[name="A16"]', login)
         logger.info("Champ login rempli")
     except Exception as e:
@@ -101,8 +110,8 @@ async def login_and_open_menu(
 
     try:
         # Attendre que le DOM soit chargé puis que le réseau soit inactif
-        await page.wait_for_load_state("domcontentloaded", timeout=30000)
-        await page.wait_for_load_state("networkidle", timeout=30000)
+        await page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_PAGE_LOAD)
+        await page.wait_for_load_state("networkidle", timeout=TIMEOUT_PAGE_LOAD)
         logger.info("Attente de la fin du chargement après connexion")
     except Exception as e:
         logger.error(f"Erreur lors de l'attente du chargement : {e}")
@@ -111,24 +120,26 @@ async def login_and_open_menu(
     try:
         # Attendre que le bouton menu soit visible et cliquable
         # Retry avec rechargement de page en cas d'échec (serveur lent au premier lancement)
-        for attempt in range(3):
+        for attempt in range(MAX_RETRY_MENU):
             try:
                 await page.wait_for_selector(
-                    "#z_M12_IMG", state="visible", timeout=15000
+                    "#z_M12_IMG", state="visible", timeout=TIMEOUT_MENU_WAIT
                 )
                 await page.click("#z_M12_IMG")
                 logger.info("Bouton menu cliqué")
                 break
             except Exception:
-                if attempt < 2:
+                if attempt < MAX_RETRY_MENU - 1:
                     logger.warning(
-                        f"Menu non visible, tentative {attempt + 2}/3 avec rechargement..."
+                        f"Menu non visible, tentative {attempt + 2}/{MAX_RETRY_MENU} avec rechargement..."
                     )
                     # Recharger la page et re-tenter la connexion complète
-                    await page.wait_for_timeout(3000)  # Attendre 3s avant retry
+                    await page.wait_for_timeout(DELAY_RETRY_MENU)
                     try:
-                        await page.reload(timeout=30000)
-                        await page.wait_for_load_state("networkidle", timeout=30000)
+                        await page.reload(timeout=TIMEOUT_PAGE_LOAD)
+                        await page.wait_for_load_state(
+                            "networkidle", timeout=TIMEOUT_PAGE_LOAD
+                        )
                     except Exception as reload_err:
                         logger.warning(
                             f"Rechargement échoué: {reload_err}, on continue..."
@@ -248,7 +259,7 @@ async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
     async def _fetch_charges_delayed():
         """Lance les charges avec un délai pour éviter collision de login."""
         # Attendre que les lots soient probablement connectés avant de démarrer
-        await asyncio.sleep(3.0)  # Décalage de 3s pour éviter conflit serveur
+        await asyncio.sleep(DELAY_PARALLEL_LOGIN)
         return await recup_html_charges(headless, login, password, url)
 
     # Lancer les deux récupérations en parallèle (lots d'abord, charges avec délai)

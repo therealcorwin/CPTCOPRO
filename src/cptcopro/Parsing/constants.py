@@ -28,3 +28,20 @@ ERROR_CLICK_LISTE_COPRO_EXPANDED = "KO_CLICK_LISTE_COPRO_EXPANDED"
 # === Codes d'erreur communs ===
 ERROR_WAIT_FOR_FINAL_LOAD = "KO_WAIT_FOR_FINAL_LOAD"
 ERROR_GET_HTML = "KO_GET_HTML"
+
+# === Timeouts (en millisecondes) ===
+TIMEOUT_URL_ACCESS = 30000
+TIMEOUT_ELEMENT_WAIT = 10000
+TIMEOUT_MENU_WAIT = 15000
+TIMEOUT_PAGE_LOAD = 30000
+
+# === Délais (en millisecondes) ===
+DELAY_RETRY_URL = 2000
+DELAY_RETRY_MENU = 3000
+
+# === Délai pour éviter collision de login (en secondes) ===
+DELAY_PARALLEL_LOGIN = 3.0
+
+# === Tentatives de retry ===
+MAX_RETRY_URL = 2
+MAX_RETRY_MENU = 3
