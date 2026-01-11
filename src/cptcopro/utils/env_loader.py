@@ -139,7 +139,8 @@ def get_credentials() -> tuple[str, str, str]:
         FileNotFoundError: Si le fichier .env n'existe pas.
         ValueError: Si des variables requises sont manquantes.
     """
-    env_vars = load_and_validate_env()
+    required_vars = ["login_site_copro", "password_site_copro", "url_site_copro"]
+    env_vars = load_and_validate_env(required_vars)
     return (
         env_vars["login_site_copro"],
         env_vars["password_site_copro"],
