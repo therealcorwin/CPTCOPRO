@@ -2,6 +2,7 @@
 
 Ce module gère l'insertion des données de charges des copropriétaires.
 """
+
 import os
 import sqlite3
 from typing import Any, List
@@ -34,11 +35,14 @@ def enregistrer_donnees_sqlite(data: List[Any], db_path: str) -> None:
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
-        # Insertion des données
+        # Insertion des données avec INSERT OR REPLACE
+        # Si une entrée avec le même (code_proprietaire, date) existe, elle est mise à jour
         # Ignorer les trois premiers éléments de data (en-têtes) avec data[3:]
         # data[3:] contient des tuples (code_proprietaire, nom_proprietaire, debit, credit, date)
         cur.executemany(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
+            """INSERT OR REPLACE INTO charge 
+               (code_proprietaire, nom_proprietaire, debit, credit, date, last_check) 
+               VALUES (?, ?, ?, ?, ?, CURRENT_DATE)""",
             data[3:],
         )
         conn.commit()
@@ -47,9 +51,9 @@ def enregistrer_donnees_sqlite(data: List[Any], db_path: str) -> None:
         raise
     finally:
         conn.close()
-    # Log le nombre de lignes insérées (on ignore les 3 premiers éléments d'en-tête)
+    # Log le nombre de lignes traitées (on ignore les 3 premiers éléments d'en-tête)
     try:
-        inserted_count = len(data[3:])
+        processed_count = len(data[3:])
     except Exception:
-        inserted_count = 0
-    logger.info(f"{inserted_count} enregistrements insérés dans la base de données.")
+        processed_count = 0
+    logger.info(f"{processed_count} enregistrements traités (insérés ou mis à jour).")

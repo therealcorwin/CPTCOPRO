@@ -6,6 +6,7 @@ Ce module gère :
 - La vérification de l'intégrité de la base de données
 - La création de la vue vw_charge_coproprietaires
 """
+
 import os
 import sqlite3
 from typing import Any, Dict
@@ -31,7 +32,7 @@ def verif_presence_db(db_path: str) -> None:
         try:
             conn = sqlite3.connect(db_path)
             cur = conn.cursor()
-            
+
             # Table charge
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS charge (
@@ -41,7 +42,8 @@ def verif_presence_db(db_path: str) -> None:
                     debit REAL,
                     credit REAL,
                     date DATE,
-                    last_check DATE DEFAULT CURRENT_DATE
+                    last_check DATE DEFAULT CURRENT_DATE,
+                    UNIQUE(code_proprietaire, date)
                 )
             """)
             logger.info("Table 'charge' vérifiée/créée.")
@@ -74,18 +76,29 @@ def verif_presence_db(db_path: str) -> None:
                 );
             """)
             logger.success("Table 'config_alerte' vérifiée/créée.")
-            
+
             # Initialiser les seuils par défaut
             for type_apt, config in DEFAULT_ALERT_THRESHOLDS.items():
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
                     VALUES (?, ?, ?, ?, CURRENT_DATE)
-                """, (type_apt, config["charge_moyenne"], config["taux"], config["threshold"]))
-            
-            cur.execute("""
+                """,
+                    (
+                        type_apt,
+                        config["charge_moyenne"],
+                        config["taux"],
+                        config["threshold"],
+                    ),
+                )
+
+            cur.execute(
+                """
                 INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
                 VALUES ('default', ?, 1.0, ?, CURRENT_DATE)
-            """, (DEFAULT_THRESHOLD_FALLBACK, DEFAULT_THRESHOLD_FALLBACK))
+            """,
+                (DEFAULT_THRESHOLD_FALLBACK, DEFAULT_THRESHOLD_FALLBACK),
+            )
             logger.info("Seuils d'alerte par défaut initialisés.")
 
             # Index et triggers
@@ -178,7 +191,7 @@ def verif_presence_db(db_path: str) -> None:
                 LEFT JOIN coproprietaires cp ON c.code_proprietaire = cp.code_proprietaire;
             """)
             logger.success("View 'vw_charge_coproprietaires' créée.")
-            
+
             # Table suivi_alertes
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS suivi_alertes (
@@ -221,14 +234,29 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     has_config_alerte = False
-    
+
     try:
         # Table charge
         logger.info("Vérification de la présence de la table 'charge'.")
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='charge';")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='charge';"
+        )
         if cur.fetchone():
             has_charge = True
             logger.info("Table 'charge' existe.")
+            # Vérifier/créer l'index UNIQUE pour éviter les doublons
+            cur.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_charge_unique';"
+            )
+            if not cur.fetchone():
+                logger.info(
+                    "Création de l'index UNIQUE sur (code_proprietaire, date)..."
+                )
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_charge_unique ON charge(code_proprietaire, date);"
+                )
+                created.append("idx_charge_unique")
+                logger.success("Index 'idx_charge_unique' créé.")
         else:
             logger.warning("Table 'charge' manquante, création en cours.")
             has_charge = False
@@ -240,15 +268,18 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     debit REAL,
                     credit REAL,
                     date DATE,
-                    last_check DATE DEFAULT CURRENT_DATE
+                    last_check DATE DEFAULT CURRENT_DATE,
+                    UNIQUE(code_proprietaire, date)
                 )
             """)
-            created.append('charge')
+            created.append("charge")
             logger.info("Table 'charge' créée.")
 
         # Table alertes_debit_eleve
         logger.info("Vérification de la présence de la table 'alertes_debit_eleve'.")
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='alertes_debit_eleve';")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='alertes_debit_eleve';"
+        )
         if cur.fetchone():
             has_alertes = True
             logger.info("Table 'alertes_debit_eleve' existe.")
@@ -269,12 +300,14 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
                 );
             """)
-            created.append('alertes_debit_eleve')
+            created.append("alertes_debit_eleve")
             logger.info("Table 'alertes_debit_eleve' créée.")
 
         # Table config_alerte
         logger.info("Vérification de la présence de la table 'config_alerte'.")
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='config_alerte';")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='config_alerte';"
+        )
         if cur.fetchone():
             has_config_alerte = True
             logger.info("Table 'config_alerte' existe.")
@@ -291,20 +324,33 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 );
             """)
             for type_apt, config in DEFAULT_ALERT_THRESHOLDS.items():
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
                     VALUES (?, ?, ?, ?, CURRENT_DATE)
-                """, (type_apt, config["charge_moyenne"], config["taux"], config["threshold"]))
-            cur.execute("""
+                """,
+                    (
+                        type_apt,
+                        config["charge_moyenne"],
+                        config["taux"],
+                        config["threshold"],
+                    ),
+                )
+            cur.execute(
+                """
                 INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
                 VALUES ('default', ?, 1.0, ?, CURRENT_DATE)
-            """, (DEFAULT_THRESHOLD_FALLBACK, DEFAULT_THRESHOLD_FALLBACK))
-            created.append('config_alerte')
+            """,
+                (DEFAULT_THRESHOLD_FALLBACK, DEFAULT_THRESHOLD_FALLBACK),
+            )
+            created.append("config_alerte")
             logger.info("Table 'config_alerte' créée avec seuils par défaut.")
 
         # Trigger alerte_debit_eleve
         logger.info("Vérification de la présence du trigger 'alerte_debit_eleve'.")
-        cur.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name='alerte_debit_eleve_insert';")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND name='alerte_debit_eleve_insert';"
+        )
         if cur.fetchone():
             has_trigger = True
             logger.info("Trigger 'alerte_debit_eleve' existe.")
@@ -370,11 +416,13 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                           2000.0);
                 END;
             """)
-            created.append('alerte_debit_eleve')
+            created.append("alerte_debit_eleve")
 
         # Table coproprietaires
         logger.info("Vérification de la présence de la table 'coproprietaires'.")
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coproprietaires';")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='coproprietaires';"
+        )
         if cur.fetchone():
             has_coproprietaires = True
             logger.info("Table 'coproprietaires' existe.")
@@ -390,13 +438,15 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     last_check DATE DEFAULT CURRENT_DATE
                 )
             """)
-            created.append('coproprietaires')
+            created.append("coproprietaires")
             logger.info("Table 'coproprietaires' créée.")
-        
+
         conn.commit()
 
         # Vue vw_charge_coproprietaires
-        logger.info("Vérification de la présence de la vue 'vw_charge_coproprietaires'.")
+        logger.info(
+            "Vérification de la présence de la vue 'vw_charge_coproprietaires'."
+        )
         try:
             cur.executescript("""
                 CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
@@ -418,7 +468,9 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
 
         # Table suivi_alertes
         logger.info("Vérification de la présence de la table 'suivi_alertes'.")
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='suivi_alertes';")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='suivi_alertes';"
+        )
         if cur.fetchone():
             has_nombre_alertes = True
             logger.info("Table 'suivi_alertes' existe.")
@@ -443,8 +495,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 )
             """)
             logger.success("Table 'suivi_alertes' vérifiée/créée.")
-            created.append('suivi_alertes')
-            
+            created.append("suivi_alertes")
+
     except Exception as e:
         conn.rollback()
         logger.error(f"Erreur lors de la vérification/création des composants DB : {e}")
@@ -453,11 +505,11 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         conn.close()
 
     return {
-        'charge': has_charge,
-        'alertes_debit_eleve': has_alertes,
-        'alerte_debit_eleve': has_trigger,
-        'coproprietaires': has_coproprietaires,
-        'nombre_alertes': has_nombre_alertes,
-        'config_alerte': has_config_alerte,
-        'created': created,
+        "charge": has_charge,
+        "alertes_debit_eleve": has_alertes,
+        "alerte_debit_eleve": has_trigger,
+        "coproprietaires": has_coproprietaires,
+        "nombre_alertes": has_nombre_alertes,
+        "config_alerte": has_config_alerte,
+        "created": created,
     }

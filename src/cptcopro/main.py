@@ -244,17 +244,8 @@ def main() -> None:
     except Exception as exc:
         logger.error(f"Erreur lors des opérations BDD/backup : {exc}")
 
-    try:
-        logger.info("Vérification des doublons dans la table 'charge'...")
-        analyse = dtb.analyse_doublons(DB_PATH)
-        if not analyse:
-            logger.info("Aucun doublon détecté.")
-        else:
-            logger.info(f"Doublons détectés (ids à supprimer) : {len(analyse)}")
-            dtb.rapport_doublon(DB_PATH, analyse)
-            dtb.suppression_doublons(DB_PATH, analyse)
-    except Exception as exc:
-        logger.error(f"Erreur lors de la déduplication : {exc}")
+    # Note: Le dédoublonnage n'est plus nécessaire grâce à l'index UNIQUE
+    # et INSERT OR REPLACE dans enregistrer_donnees_sqlite()
 
     try:
         logger.info("Mise à jour de la table 'suivi_alertes'...")

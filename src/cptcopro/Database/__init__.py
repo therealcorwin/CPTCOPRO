@@ -23,7 +23,6 @@ from .Alertes_Config import (
     init_config_alerte_if_missing,
 )
 from .Backup_DB import backup_db
-from .Dedoublonnage import analyse_doublons, suppression_doublons, rapport_doublon
 
 __all__ = [
     # Constants
@@ -46,8 +45,4 @@ __all__ = [
     "init_config_alerte_if_missing",
     # Backup_DB
     "backup_db",
-    # Dedoublonnage
-    "analyse_doublons",
-    "suppression_doublons",
-    "rapport_doublon",
 ]

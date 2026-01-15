@@ -5,6 +5,7 @@ Ce module gère :
 - La récupération et mise à jour des seuils d'alerte par type d'appartement
 - L'initialisation des seuils par défaut si absents
 """
+
 import sqlite3
 from typing import Dict, List
 from loguru import logger
@@ -17,7 +18,7 @@ logger = logger.bind(type_log="BDD")
 def sauvegarder_nombre_alertes(db_path: str) -> None:
     """
     Sauvegarde le nombre d'alertes pour une date de relevé donnée dans la table `suivi_alertes`.
-    
+
     Calcule les statistiques globales et par type d'appartement (2p, 3p, 4p, 5p, na).
 
     Args:
@@ -40,11 +41,11 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
         )
         row = cur.fetchone()
         date_releve, nombre_alertes, total_debit = row[0], row[1], row[2]
-        
+
         if date_releve is None:
             logger.warning("Aucune alerte trouvée, rien à sauvegarder.")
             return
-        
+
         # Récupérer les statistiques par type d'appartement
         cur.execute(
             """
@@ -57,20 +58,20 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
             """
         )
         stats_par_type = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
-        
+
         # Extraire les valeurs par type (avec valeurs par défaut à 0)
-        nb_2p = stats_par_type.get('2p', (0, 0))[0]
-        nb_3p = stats_par_type.get('3p', (0, 0))[0]
-        nb_4p = stats_par_type.get('4p', (0, 0))[0]
-        nb_5p = stats_par_type.get('5p', (0, 0))[0]
-        nb_na = stats_par_type.get('na', (0, 0))[0]
-        
-        debit_2p = stats_par_type.get('2p', (0, 0))[1]
-        debit_3p = stats_par_type.get('3p', (0, 0))[1]
-        debit_4p = stats_par_type.get('4p', (0, 0))[1]
-        debit_5p = stats_par_type.get('5p', (0, 0))[1]
-        debit_na = stats_par_type.get('na', (0, 0))[1]
-        
+        nb_2p = stats_par_type.get("2p", (0, 0))[0]
+        nb_3p = stats_par_type.get("3p", (0, 0))[0]
+        nb_4p = stats_par_type.get("4p", (0, 0))[0]
+        nb_5p = stats_par_type.get("5p", (0, 0))[0]
+        nb_na = stats_par_type.get("na", (0, 0))[0]
+
+        debit_2p = stats_par_type.get("2p", (0, 0))[1]
+        debit_3p = stats_par_type.get("3p", (0, 0))[1]
+        debit_4p = stats_par_type.get("4p", (0, 0))[1]
+        debit_5p = stats_par_type.get("5p", (0, 0))[1]
+        debit_na = stats_par_type.get("na", (0, 0))[1]
+
         # UPSERT : INSERT OR REPLACE fonctionne grâce à PRIMARY KEY(date_releve)
         cur.execute(
             """
@@ -81,9 +82,21 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (date_releve, nombre_alertes, total_debit,
-             nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
-             debit_2p, debit_3p, debit_4p, debit_5p, debit_na)
+            (
+                date_releve,
+                nombre_alertes,
+                total_debit,
+                nb_2p,
+                nb_3p,
+                nb_4p,
+                nb_5p,
+                nb_na,
+                debit_2p,
+                debit_3p,
+                debit_4p,
+                debit_5p,
+                debit_na,
+            ),
         )
         conn.commit()
         logger.info(
@@ -140,31 +153,31 @@ def _valider_parametre_numerique(
 ) -> tuple[float | None, str | None]:
     """
     Valide et convertit un paramètre numérique.
-    
+
     Args:
         valeur: La valeur à valider (peut être None).
         nom: Nom du paramètre pour les messages d'erreur.
         allow_zero: Si True, accepte >= 0. Si False, exige > 0.
-    
+
     Returns:
         Tuple (valeur_convertie, erreur). Si erreur est None, la validation a réussi.
         Si valeur est None, retourne (None, None).
     """
     if valeur is None:
         return None, None
-    
+
     try:
         valeur_float = float(valeur)
     except (TypeError, ValueError) as e:
         return None, f"{nom} invalide (non numérique): {valeur} - {e}"
-    
+
     if allow_zero:
         if valeur_float < 0:
             return None, f"{nom} doit être >= 0, reçu: {valeur_float}"
     else:
         if valeur_float <= 0:
             return None, f"{nom} doit être > 0, reçu: {valeur_float}"
-    
+
     return valeur_float, None
 
 
@@ -177,7 +190,7 @@ def update_config_alerte(
 ) -> bool:
     """
     Met à jour la configuration d'alerte pour un type d'appartement.
-    
+
     Permet de mettre à jour un ou plusieurs paramètres pour un type donné.
     Si threshold n'est pas fourni mais charge_moyenne et/ou taux le sont,
     le threshold est recalculé automatiquement (charge_moyenne * taux).
@@ -193,21 +206,25 @@ def update_config_alerte(
         bool: True si succès, False sinon.
     """
     # --- Validation des entrées ---
-    charge_moyenne, err = _valider_parametre_numerique(charge_moyenne, "charge_moyenne", allow_zero=False)
+    charge_moyenne, err = _valider_parametre_numerique(
+        charge_moyenne, "charge_moyenne", allow_zero=False
+    )
     if err:
         logger.error(err)
         return False
-    
+
     taux, err = _valider_parametre_numerique(taux, "taux", allow_zero=False)
     if err:
         logger.error(err)
         return False
-    
-    threshold, err = _valider_parametre_numerique(threshold, "threshold", allow_zero=True)
+
+    threshold, err = _valider_parametre_numerique(
+        threshold, "threshold", allow_zero=True
+    )
     if err:
         logger.error(err)
         return False
-    
+
     # --- Opérations DB ---
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
@@ -215,35 +232,41 @@ def update_config_alerte(
         # Récupérer les valeurs actuelles
         cur.execute(
             "SELECT charge_moyenne, taux, threshold FROM config_alerte WHERE type_apt = ?",
-            (type_apt.lower(),)
+            (type_apt.lower(),),
         )
         row = cur.fetchone()
         if not row:
-            logger.error(f"Type d'appartement '{type_apt}' non trouvé dans config_alerte")
+            logger.error(
+                f"Type d'appartement '{type_apt}' non trouvé dans config_alerte"
+            )
             return False
-        
+
         current_charge = row[0]
         current_taux = row[1]
         current_threshold = row[2]
-        
+
         # Appliquer les nouvelles valeurs (ou garder les anciennes)
         new_charge = charge_moyenne if charge_moyenne is not None else current_charge
         new_taux = taux if taux is not None else current_taux
-        
+
         # Recalculer threshold si non fourni explicitement
         if threshold is not None:
             new_threshold = threshold
         elif charge_moyenne is not None or taux is not None:
             if new_charge is None or new_taux is None:
-                logger.error("Impossible de recalculer threshold: charge_moyenne ou taux manquant")
+                logger.error(
+                    "Impossible de recalculer threshold: charge_moyenne ou taux manquant"
+                )
                 return False
             if new_charge <= 0 or new_taux <= 0:
-                logger.error(f"Valeurs invalides pour recalcul: charge_moyenne={new_charge}, taux={new_taux}")
+                logger.error(
+                    f"Valeurs invalides pour recalcul: charge_moyenne={new_charge}, taux={new_taux}"
+                )
                 return False
             new_threshold = new_charge * new_taux
         else:
             new_threshold = current_threshold
-        
+
         # Mettre à jour
         cur.execute(
             """
@@ -251,7 +274,7 @@ def update_config_alerte(
             SET charge_moyenne = ?, taux = ?, threshold = ?, last_update = CURRENT_DATE
             WHERE type_apt = ?
             """,
-            (new_charge, new_taux, new_threshold, type_apt.lower())
+            (new_charge, new_taux, new_threshold, type_apt.lower()),
         )
         conn.commit()
         logger.info(
@@ -293,9 +316,7 @@ def get_threshold_for_type(db_path: str, type_apt: str) -> float:
             return float(row[0])
 
         # Fallback vers 'default'
-        cur.execute(
-            "SELECT threshold FROM config_alerte WHERE type_apt = 'default'"
-        )
+        cur.execute("SELECT threshold FROM config_alerte WHERE type_apt = 'default'")
         row = cur.fetchone()
 
         if row:
@@ -304,7 +325,9 @@ def get_threshold_for_type(db_path: str, type_apt: str) -> float:
         return DEFAULT_THRESHOLD_FALLBACK
 
     except sqlite3.Error as e:
-        logger.error(f"Erreur SQLite lors de la récupération du seuil pour {type_apt} : {e}")
+        logger.error(
+            f"Erreur SQLite lors de la récupération du seuil pour {type_apt} : {e}"
+        )
         return DEFAULT_THRESHOLD_FALLBACK
     finally:
         if conn:
@@ -339,7 +362,12 @@ def init_config_alerte_if_missing(db_path: str) -> bool:
                 INSERT INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
                 VALUES (?, ?, ?, ?, CURRENT_DATE)
                 """,
-                (type_apt, config["charge_moyenne"], config["taux"], config["threshold"]),
+                (
+                    type_apt,
+                    config["charge_moyenne"],
+                    config["taux"],
+                    config["threshold"],
+                ),
             )
 
         cur.execute(
