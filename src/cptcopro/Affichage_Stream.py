@@ -20,21 +20,20 @@ Note:
     Les pages sont définies dans le dossier Pages/ avec leurs assets
     dans Pages/Assets/.
 """
+
 import streamlit as st
 from pathlib import Path
 
 # Charger les variables d'environnement
 try:
     from cptcopro.utils.paths import init_env
+
     init_env()
 except ImportError:
     pass  # Fallback si l'import échoue
 
 # --- Configuration de la page ---
-st.set_page_config(
-    page_title="Suivi Charges Copropriétaires",
-    layout="wide"
-)
+st.set_page_config(page_title="Suivi Charges Copropriétaires", layout="wide")
 
 # --- COnfiguration de la navigation ---
 Dashboard_page = st.Page(
@@ -93,7 +92,12 @@ menus = st.navigation(
     {
         "Dashboard Général": [Dashboard_page],
         "Suivi des Charges": [Liste_Charge_page, Courbe_Charge_Corpo_page],
-        "Suivi Alerte": [Alerte_page, Stat_Alerte_page,Statistiques_Avancees_page,Config_Alertes_page],
+        "Suivi Alerte": [
+            Alerte_page,
+            Stat_Alerte_page,
+            Statistiques_Avancees_page,
+            Config_Alertes_page,
+        ],
         "Liste des Copropriétaires": [Liste_Copro_page],
         "Recherche Info Copropriétaires": [Recherche_Copro_page],
     }
@@ -104,6 +108,19 @@ menus = st.navigation(
 # pour éviter les problèmes de chemin relatif.
 LOGO_PATH = Path(__file__).parent / "Pages" / "Assets" / "gb2.png"
 st.logo(str(LOGO_PATH), size="large")
+
+# Toggle de confidentialité dans la sidebar (visible sur toutes les pages)
+st.sidebar.divider()
+st.sidebar.subheader("🔒 Confidentialité")
+privacy_enabled = st.sidebar.checkbox(
+    "Masquer données sensibles",
+    key="masquer_donnees_sensibles",
+    help="Masque les noms, codes et numéros d'appartement des copropriétaires",
+)
+if privacy_enabled:
+    st.sidebar.success("Mode confidentiel actif")
+st.sidebar.divider()
+
 st.sidebar.markdown("Made with ❤️ by [Therealcorwin](https://github.com/Therealcorwin)")
 
 # --- RUN NAVIGATION ---

@@ -7,14 +7,19 @@ import pandas as pd
 # Import du module de chemins portables
 try:
     from cptcopro.utils.paths import get_db_path
+    from cptcopro.utils.privacy import appliquer_confidentialite, is_privacy_enabled
+
     DB_PATH = get_db_path()
 except ImportError:
     # Fallback pour le mode développement
     DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
+    from cptcopro.utils.privacy import appliquer_confidentialite, is_privacy_enabled
 
 CONSOLE_OUTPUT = False
 if CONSOLE_OUTPUT:
-    pd.set_option('display.max_rows', None)
+    pd.set_option("display.max_rows", None)
+
+
 @st.cache_data(ttl=300)  # Cache expires after 5 minutes
 def affiche_copro(db_path) -> pd.DataFrame:
     try:
@@ -30,34 +35,40 @@ def affiche_copro(db_path) -> pd.DataFrame:
         raise
 
 
-if __name__ == "__main__":
-    loguru.logger.info("Starting Streamlit app for coproprietaires display")
-    df = affiche_copro(DB_PATH)
-    st.title("Liste des copropriétaires")
+loguru.logger.info("Starting Streamlit app for coproprietaires display")
+df = affiche_copro(DB_PATH)
+st.title("Liste des copropriétaires")
 
-    gauche,centre, droite = st.columns(3)
+# Indicateur de statut de confidentialité
+if is_privacy_enabled():
+    st.info("🔒 Mode confidentiel actif")
 
-    with gauche:
-        proprietaires = st.multiselect(
-            "Filtrer par copropriétaire",
-            options=df["Proprietaire"].unique(),
-            default=df["Proprietaire"].unique(),
-        )
-    with centre:
-        code = st.multiselect(
-            "Filtrer par code",
-            options=df["Code"].unique(),
-            default=df["Code"].unique(),
-        )
-    with droite:
-        type_apt = st.multiselect(
-            "Filtrer par type d'appartement",
-            options=df["Type"].unique(),
-            default=df["Type"].unique(),
-        )
+gauche, centre, droite = st.columns(3)
 
-    # Pour afficher le dataframe complet dans Streamlit avec une hauteur dynamique,
-    # On calcule le nombre de lignes du dataframe (+ 1 pour l'en-tête) * nbre pixels en hauteurs par ligne.
-    #height = (len(df) + 1) * 35
-    #st.dataframe(df, height=height, use_container_width=True)
-    st.table(df.query("Proprietaire == @proprietaires & Code == @code & Type == @type_apt"))
+with gauche:
+    proprietaires = st.multiselect(
+        "Filtrer par copropriétaire",
+        options=df["Proprietaire"].unique(),
+        default=df["Proprietaire"].unique(),
+    )
+with centre:
+    code = st.multiselect(
+        "Filtrer par code",
+        options=df["Code"].unique(),
+        default=df["Code"].unique(),
+    )
+with droite:
+    type_apt = st.multiselect(
+        "Filtrer par type d'appartement",
+        options=df["Type"].unique(),
+        default=df["Type"].unique(),
+    )
+
+# Pour afficher le dataframe complet dans Streamlit avec une hauteur dynamique,
+# On calcule le nombre de lignes du dataframe (+ 1 pour l'en-tête) * nbre pixels en hauteurs par ligne.
+# height = (len(df) + 1) * 35
+# st.dataframe(df, height=height, use_container_width=True)
+df_filtre = df.query(
+    "Proprietaire == @proprietaires & Code == @code & Type == @type_apt"
+)
+st.table(appliquer_confidentialite(df_filtre))

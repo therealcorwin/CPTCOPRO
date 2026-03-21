@@ -8,10 +8,13 @@ import datetime as dt
 # Import du module de chemins portables
 try:
     from cptcopro.utils.paths import get_db_path
+    from cptcopro.utils.privacy import appliquer_confidentialite, is_privacy_enabled
+
     DB_PATH = get_db_path()
 except ImportError:
     # Fallback pour le mode développement
     DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
+    from cptcopro.utils.privacy import appliquer_confidentialite, is_privacy_enabled
 
 
 @st.cache_data
@@ -29,22 +32,35 @@ def load_charges(db_path: Path) -> pd.DataFrame:
 
 st.set_page_config(page_title="Suivi de charge détaillé", layout="wide")
 st.title("Suivi de charge détaillé des copropriétaires")
+
+# Debug: afficher l'état de confidentialité
+if is_privacy_enabled():
+    st.info("🔒 Mode confidentiel actif - données anonymisées")
+
 df = load_charges(DB_PATH)
 st.divider()
 gauche, centre, droite = st.columns(3)
 with gauche:
     proprietaires = st.multiselect(
-        "Filtrer par copropriétaire", options=df["proprietaire"].unique(), default=df["proprietaire"].unique()
+        "Filtrer par copropriétaire",
+        options=df["proprietaire"].unique(),
+        default=df["proprietaire"].unique(),
     )
 with centre:
-    code = st.multiselect("Filtrer par code", options=df["code"].unique(), default=df["code"].unique())
+    code = st.multiselect(
+        "Filtrer par code", options=df["code"].unique(), default=df["code"].unique()
+    )
 with droite:
     type_apt = st.multiselect(
-        "Filtrer par type d'appartement", options=df["type_apt"].unique(), default=df["type_apt"].unique()
+        "Filtrer par type d'appartement",
+        options=df["type_apt"].unique(),
+        default=df["type_apt"].unique(),
     )
 date_min = df["date"].min()
 date_max = df["date"].max()
-date_range = st.date_input("Sélectionner une plage de dates", value=[date_min, date_max])
+date_range = st.date_input(
+    "Sélectionner une plage de dates", value=[date_min, date_max]
+)
 loguru.logger.info("Starting Streamlit app for coproprietaires display")
 
 # Normaliser la valeur retournée par `st.date_input` de manière robuste.
@@ -71,6 +87,7 @@ def _to_date(val):
         return val
     return None
 
+
 if isinstance(date_range, (list, tuple)):
     if len(date_range) >= 2:
         start_date = _to_date(date_range[0])
@@ -96,5 +113,7 @@ mask = (
     & (df["date"] <= end_date)
 )
 filtered_df = df.loc[mask].copy()
-filtered_df = filtered_df.sort_values(["date", "proprietaire"], ascending=[False, True])  # tri par défaut
-st.dataframe(filtered_df)
+filtered_df = filtered_df.sort_values(
+    ["date", "proprietaire"], ascending=[False, True]
+)  # tri par défaut
+st.dataframe(appliquer_confidentialite(filtered_df))

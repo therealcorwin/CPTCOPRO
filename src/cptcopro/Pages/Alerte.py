@@ -8,10 +8,20 @@ from streamlit_extras.metric_cards import style_metric_cards
 # Import du module de chemins portables
 try:
     from cptcopro.utils.paths import get_db_path
+    from cptcopro.utils.privacy import (
+        appliquer_confidentialite,
+        preparer_df_pour_graphe,
+    )
+
     DB_PATH = get_db_path()
 except ImportError:
     # Fallback pour le mode développement
     DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
+    from cptcopro.utils.privacy import (
+        appliquer_confidentialite,
+        preparer_df_pour_graphe,
+    )
+
 
 @st.cache_data()
 def recup_alertes(db_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -59,6 +69,7 @@ def recup_debits_proprietaires_alertes(db_path: Path) -> pd.DataFrame:
         st.error(f"Erreur inattendue lors de la récupération des débits : {e}")
         return pd.DataFrame()
 
+
 def recup_suivi_alertes(db_path: Path) -> pd.DataFrame:
     query = """
         SELECT date_releve, nombre_alertes, total_debit,
@@ -81,53 +92,86 @@ def recup_suivi_alertes(db_path: Path) -> pd.DataFrame:
         st.error(f"Erreur inattendue : {e}")
         return pd.DataFrame()
 
+
 st.set_page_config(page_title="Alertes Débit Élevé", layout="wide")
-st.title("Alertes Débit Élevé des Copropriétaires") 
+st.title("Alertes Débit Élevé des Copropriétaires")
 
 alertes_df, sommealertes_df = recup_alertes(DB_PATH)
 suivi_alerte = recup_suivi_alertes(DB_PATH)
 
 date_releve = suivi_alerte["date_releve"].iat[0] if not suivi_alerte.empty else "N/A"
-date_dernier_releve = suivi_alerte["date_releve"].iat[1] if len(suivi_alerte) >=2 else "N/A"
+date_dernier_releve = (
+    suivi_alerte["date_releve"].iat[1] if len(suivi_alerte) >= 2 else "N/A"
+)
 
 nombre_alerte = suivi_alerte["nombre_alertes"].iat[0] if not suivi_alerte.empty else 0
-dernier_nombre_alerte = suivi_alerte["nombre_alertes"].iat[1] if len(suivi_alerte) >=2 else 0
+dernier_nombre_alerte = (
+    suivi_alerte["nombre_alertes"].iat[1] if len(suivi_alerte) >= 2 else 0
+)
 delta_nombre_alerte = nombre_alerte - dernier_nombre_alerte
 
 somme_alerte = suivi_alerte["total_debit"].iat[0] if not suivi_alerte.empty else 0
-dernier_somme_alerte = suivi_alerte["total_debit"].iat[1] if len(suivi_alerte) >=2 else 0
+dernier_somme_alerte = (
+    suivi_alerte["total_debit"].iat[1] if len(suivi_alerte) >= 2 else 0
+)
 delta_somme_alerte = somme_alerte - dernier_somme_alerte
 
 debits_df = recup_debits_proprietaires_alertes(DB_PATH)
 
-gauche,centre, droite = st.columns(3)
+gauche, centre, droite = st.columns(3)
 
 with st.container():
     with gauche:
-        st.metric("Date du dernier relevé", value=date_releve, delta=date_dernier_releve, delta_color="off")
-        style_metric_cards(background_color= "#292D34")
+        st.metric(
+            "Date du dernier relevé",
+            value=date_releve,
+            delta=date_dernier_releve,
+            delta_color="off",
+        )
+        style_metric_cards(background_color="#292D34")
     with centre:
-        st.metric("Nombre d'alertes", value=nombre_alerte, delta=delta_nombre_alerte, delta_color="inverse")
-        style_metric_cards(background_color= "#292D34")    
+        st.metric(
+            "Nombre d'alertes",
+            value=nombre_alerte,
+            delta=delta_nombre_alerte,
+            delta_color="inverse",
+        )
+        style_metric_cards(background_color="#292D34")
     with droite:
-        st.metric("Total débit en alerte", value=f"{somme_alerte:.0f} €", delta=f"{delta_somme_alerte:.0f} €", delta_color="inverse")
-        style_metric_cards(background_color= "#292D34")
+        st.metric(
+            "Total débit en alerte",
+            value=f"{somme_alerte:.0f} €",
+            delta=f"{delta_somme_alerte:.0f} €",
+            delta_color="inverse",
+        )
+        style_metric_cards(background_color="#292D34")
 
 if not alertes_df.empty:
-
     st.markdown("#### Détail des alertes")
+    alertes_affiche = appliquer_confidentialite(
+        alertes_df[
+            [
+                "Proprietaire",
+                "Code",
+                "Debit",
+                "TypeApt",
+                "FirstDetection",
+                "LastDetection",
+                "Occurence",
+            ]
+        ].sort_values(by="Debit", ascending=False)
+    )
     st.dataframe(
-        alertes_df[["Proprietaire", "Code", "Debit", "TypeApt", "FirstDetection", "LastDetection", "Occurence"]]
-        .sort_values(by="Debit", ascending=False),
+        alertes_affiche,
         column_config={
             "Proprietaire": "Propriétaire",
             "TypeApt": "Type Apt",
             "Debit": st.column_config.NumberColumn("Débit", format="%.2f €"),
             "FirstDetection": "Première détection",
             "LastDetection": "Dernière détection",
-            "Occurence": "Occurrences"
+            "Occurence": "Occurrences",
         },
-        hide_index=True
+        hide_index=True,
     )
 
     # graphique des débits par date pour les propriétaires ayant une alerte ---
@@ -136,14 +180,19 @@ if not alertes_df.empty:
         # Agréger le débit par date et par propriétaire
         try:
             agg = (
-                debits_df.groupby(["date", "Proprietaire"])
-                ["debit"].sum()
+                debits_df.groupby(["date", "Proprietaire"])["debit"]
+                .sum()
                 .reset_index()
                 .sort_values(["date", "Proprietaire"])
             )
             if not agg.empty:
-                fig2 = px.line(agg, x="date", y="debit", color="Proprietaire",
-                        title="Débit des copropriétaires en alerte")
+                fig2 = px.line(
+                    preparer_df_pour_graphe(agg, "Proprietaire"),
+                    x="date",
+                    y="debit",
+                    color="Proprietaire",
+                    title="Débit des copropriétaires en alerte",
+                )
                 fig2.update_layout(xaxis_title="Date", yaxis_title="Débit (€)")
                 st.plotly_chart(fig2, width="stretch")
         except Exception as e:
