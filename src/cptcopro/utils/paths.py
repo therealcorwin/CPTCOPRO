@@ -24,8 +24,20 @@ _LOG = logging.getLogger(__name__)
 _env_loaded = False
 
 
+def get_project_root_dir() -> Path:
+    """Retourne la racine du projet en mode dev, sinon le répertoire de l'exe.
+
+    En développement, les chemins de configuration utilisateur sont résolus
+    depuis la racine du dépôt. En bundle PyInstaller, ils sont résolus à côté
+    de l'exécutable.
+    """
+    if is_pyinstaller_bundle():
+        return get_app_dir()
+    return Path(__file__).parent.parent.parent.parent
+
+
 def init_env() -> bool:
-    """Charge le fichier .env depuis src/cptcopro/ ou à côté de l'exe.
+    """Charge le fichier .env depuis la racine du projet ou à côté de l'exe.
 
     Cette fonction doit être appelée explicitement avant d'utiliser
     les variables d'environnement (CPTCOPRO_DB_NAME, etc.).
@@ -37,22 +49,15 @@ def init_env() -> bool:
     if _env_loaded:
         return True
 
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        # Mode PyInstaller: chercher à côté de l'exe
-        env_path = Path(sys.executable).parent / ".env"
-        location = "exe directory"
-    else:
-        # Mode développement: src/cptcopro/.env
-        env_path = Path(__file__).parent.parent / ".env"
-        location = "src/cptcopro"
+    env_path = get_env_file_path()
 
-    if env_path.exists():
+    if env_path is not None and env_path.exists():
         load_dotenv(env_path)
-        _LOG.debug(f"Fichier .env chargé depuis {location}")
+        _LOG.debug(f"Fichier .env chargé depuis {env_path}")
         _env_loaded = True
         return True
 
-    _LOG.debug(f"Fichier .env non trouvé dans {location}")
+    _LOG.debug("Fichier .env non trouvé")
     return False
 
 
@@ -133,7 +138,8 @@ def get_db_path(db_name: str | None = None) -> Path:
             path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             _LOG.error(f"Cannot create DB directory '{path.parent}': {e}")
-            raise OSError(f"Cannot create DB directory '{path.parent}': {e}") from e
+            raise OSError(
+                f"Cannot create DB directory '{path.parent}': {e}") from e
         return path
 
     # Déterminer le nom de la BDD: paramètre > variable d'env > défaut
@@ -174,7 +180,8 @@ def get_log_path(log_name: str = "cptcopro.log") -> Path:
             path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             _LOG.error(f"Cannot create log directory '{path.parent}': {e}")
-            raise OSError(f"Cannot create log directory '{path.parent}': {e}") from e
+            raise OSError(
+                f"Cannot create log directory '{path.parent}': {e}") from e
         return path
 
     log_dir = get_data_dir() / "logs"
@@ -202,23 +209,37 @@ def get_env_file_path() -> Optional[Path]:
 
     Cherche dans l'ordre:
     1. Répertoire de l'exe (mode PyInstaller)
-    2. Répertoire bundle (_MEIPASS/cptcopro)
-    3. Répertoire src/cptcopro (mode dev)
+    2. Répertoire racine du projet (mode dev)
+    3. Répertoire bundle (_MEIPASS/cptcopro)
+    4. Répertoire src/cptcopro (compatibilité legacy)
+    5. Répertoire courant
 
     Returns:
         Chemin vers .env ou None si non trouvé
     """
-    # D'abord chercher à côté de l'exe (pour config utilisateur)
-    app_env = get_app_dir() / ".env"
-    if app_env.exists():
-        return app_env
+    if is_pyinstaller_bundle():
+        app_env = get_app_dir() / ".env"
+        if app_env.exists():
+            return app_env
 
-    # Ensuite dans le bundle (config par défaut)
+        bundle_env = get_bundle_dir() / ".env"
+        if bundle_env.exists():
+            return bundle_env
+
+        return None
+
+    project_env = get_project_root_dir() / ".env"
+    if project_env.exists():
+        return project_env
+
     bundle_env = get_bundle_dir() / ".env"
     if bundle_env.exists():
         return bundle_env
 
-    # Mode dev: chercher dans le répertoire courant ou parent
+    app_env = get_app_dir() / ".env"
+    if app_env.exists():
+        return app_env
+
     cwd_env = Path.cwd() / ".env"
     if cwd_env.exists():
         return cwd_env

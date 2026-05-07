@@ -9,6 +9,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from loguru import logger
 
+from cptcopro.utils.paths import get_env_file_path as resolve_env_file_path
+
 
 def get_app_base_path() -> Path:
     """
@@ -28,6 +30,9 @@ def get_env_file_path() -> Path:
     """
     Retourne le chemin du fichier .env.
     """
+    env_path = resolve_env_file_path()
+    if env_path is not None:
+        return env_path
     return get_app_base_path() / ".env"
 
 
@@ -42,10 +47,12 @@ def load_env_file() -> bool:
 
     if env_path.exists():
         load_dotenv(env_path)
-        logger.bind(type_log="ENV").info(f"Fichier .env chargé depuis: {env_path}")
+        logger.bind(type_log="ENV").info(
+            f"Fichier .env chargé depuis: {env_path}")
         return True
     else:
-        logger.bind(type_log="ENV").warning(f"Fichier .env non trouvé à: {env_path}")
+        logger.bind(type_log="ENV").warning(
+            f"Fichier .env non trouvé à: {env_path}")
         return False
 
 
@@ -101,7 +108,8 @@ def load_and_validate_env(required_vars: list[str] | None = None) -> dict[str, s
 
     # Vérifier l'existence du fichier
     if not env_path.exists():
-        var_examples = "\n".join(f"  - {var}=VOTRE_VALEUR" for var in required_vars)
+        var_examples = "\n".join(
+            f"  - {var}=VOTRE_VALEUR" for var in required_vars)
         error_msg = (
             f"Fichier .env introuvable!\n"
             f"Chemin attendu: {env_path}\n"
@@ -139,7 +147,8 @@ def get_credentials() -> tuple[str, str, str]:
         FileNotFoundError: Si le fichier .env n'existe pas.
         ValueError: Si des variables requises sont manquantes.
     """
-    required_vars = ["login_site_copro", "password_site_copro", "url_site_copro"]
+    required_vars = ["login_site_copro",
+                     "password_site_copro", "url_site_copro"]
     env_vars = load_and_validate_env(required_vars)
     return (
         env_vars["login_site_copro"],

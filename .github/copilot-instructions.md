@@ -1,73 +1,58 @@
 ## But rapide
 
-Ce dépôt extrait et stocke le "solde des copropriétaires" et la liste des lots depuis un extranet (Playwright), parse le HTML (selectolax) et écrit dans une base SQLite locale. Ce fichier donne aux agents IA l'essentiel pour être productifs rapidement.
+Ce dépôt récupère les charges et les lots depuis un extranet via Playwright, parse le HTML, puis persiste les données dans SQLite. Ce fichier doit rester un guide court: utiliser le code source et reports/call_graph.md pour les détails.
 
 ## Points d'entrée et architecture
 
 ### Orchestration principale
-- **Point d'entrée** : `src/cptcopro/main.py` — orchestre la récupération HTML parallèle, le parsing, l'affichage et la sauvegarde en base.
+- **Point d'entrée** : `src/cptcopro/main.py` — orchestre la récupération HTML, le parsing, la persistance SQLite et le lancement optionnel de Streamlit.
+- **Flux principal** : récupération HTML parallèle, parsing charges/lots, sauvegarde SQLite, mise à jour `suivi_alertes`, puis lancement optionnel de Streamlit.
 
 ### Parsing HTML (Playwright) - Architecture à 3 modules
-- **`src/cptcopro/Parsing_Commun.py`** : Orchestration parallèle et authentification
-  - `recup_all_html_parallel()` : Lance 2 navigateurs en parallèle (charges + lots)
-  - `_recup_html_generic()` : Fonction générique pour browser/login/navigation
-  - `login_and_open_menu()` : Connexion et ouverture du menu
-  - Délai de 800ms entre les connexions pour éviter les conflits serveur
-- **`src/cptcopro/Parsing_Charge_Copro.py`** : Navigation spécifique pour les charges
-  - `recup_charges_coproprietaires(page)` : Clique sur le lien solde et récupère le HTML
-- **`src/cptcopro/Parsing_Lots_Copro.py`** : Navigation spécifique pour les lots
-  - `recup_lots_coproprietaires(page)` : Clique sur le lien liste et récupère le HTML
+- **`src/cptcopro/Parsing/Commun.py`** : orchestration parallèle, authentification et logique commune de navigation.
+- **`src/cptcopro/Parsing/Charge_Copro.py`** : navigation spécifique vers la page des charges.
+- **`src/cptcopro/Parsing/Lots_Copro.py`** : navigation spécifique vers la page des lots.
 
 ### Traitement et parsing HTML (selectolax)
-- **`src/cptcopro/Traitement_Charge_Copro.py`** : Parsing des charges
-  - `recuperer_date_situation_copro()` : Extrait la date depuis `td#lzA1`
-  - `recuperer_situation_copro()` : Extrait le tableau depuis `table#ctzA1`
-  - `afficher_etat_coproprietaire()` : Affichage rich dans la console
-- **`src/cptcopro/Traitement_Lots_Copro.py`** : Parsing des lots
-  - `extraire_lignes_brutes()` : Extrait les lignes du HTML
-  - `consolider_proprietaires_lots()` : Associe propriétaires et lots (vérifie 64 copropriétaires)
-  - `afficher_avec_rich()` : Affichage rich dans la console
+- **`src/cptcopro/Traitement/Charge_Copro.py`** : extraction de la date et du tableau des charges.
+- **`src/cptcopro/Traitement/Lots_Copro.py`** : extraction et consolidation des propriétaires et lots.
 
 ### Persistance SQLite
-- **`src/cptcopro/Data_To_BDD.py`** : Opérations base de données
-  - Tables : `charge`, `alertes_debit_eleve`, `coproprietaires`, `suivi_alertes`, `config_alerte`
-  - `integrite_db()` : Création/vérification des tables et triggers
-  - `enregistrer_donnees_sqlite()` : INSERT des charges
-  - `enregistrer_coproprietaires()` : INSERT des copropriétaires
-  - `sauvegarder_nombre_alertes()` : Mise à jour de la table suivi_alertes
-  - `get_config_alertes()` / `update_config_alerte()` : Gestion des seuils d'alerte par type d'appartement
-- **`src/cptcopro/Dedoublonnage.py`** : Nettoyage des doublons
-  - `analyse_doublons()` : Détecte les doublons par (nom_proprietaire, date)
-  - `suppression_doublons()` : Supprime les doublons détectés
-  - `rapport_doublon()` : Génère des rapports CSV dans `Rapports/`
+- **Package principal** : `src/cptcopro/Database/`
+- Modules à connaître : `Creation_BDD.py`, `Charges_To_BDD.py`, `Coproprietaires_To_BDD.py`, `Alertes_Config.py`, `Backup_DB.py`.
+- Tables clés : `charge`, `alertes_debit_eleve`, `coproprietaires`, `suivi_alertes`, `config_alerte`.
+- **`src/cptcopro/Database/Dedoublonnage.py`** existe encore, mais n'est plus dans le flux principal de `main.py`.
 
 ### Système d'alertes
-- **Table `config_alerte`** : Seuils configurables par type d'appartement (2p, 3p, 4p, 5p)
-  - `type_apt` : Type d'appartement (clé primaire)
-  - `charge_moyenne` : Charge moyenne pour ce type
-  - `taux` : Coefficient multiplicateur (ex: 1.33 = 33% au-dessus de la moyenne)
-  - `threshold` : Seuil d'alerte calculé (charge_moyenne × taux)
-- **Triggers dynamiques** : Les triggers consultent `config_alerte` via jointure avec `coproprietaires.type_apt`
-- **Page Streamlit** : `Pages/Config_Alertes.py` permet de visualiser/modifier les seuils
+- **Table `config_alerte`** : seuils configurables par type d'appartement.
+- **Triggers dynamiques** : s'appuient sur `config_alerte` et `coproprietaires.type_apt`.
+- **UI associée** : `src/cptcopro/Pages/Config_Alertes.py` permet de consulter et modifier les seuils.
 
 ### Utilitaires
-- **`src/cptcopro/utils/paths.py`** : Gestion des chemins portables (dev/PyInstaller)
-- **`src/cptcopro/utils/env_loader.py`** : Chargement du fichier `.env`
-- **`src/cptcopro/utils/browser_launcher.py`** : Lancement navigateur avec fallback (Edge→Chrome→Firefox)
-- **`src/cptcopro/utils/streamlit_launcher.py`** : Lancement de l'interface Streamlit
-- **`src/cptcopro/Backup_DB.py`** : Sauvegarde de la base dans `BACKUP/`
+- **`src/cptcopro/utils/paths.py`** : chemins portables et résolution du chemin de base.
+- **`src/cptcopro/utils/env_loader.py`** : chargement des variables d'environnement.
+- **`src/cptcopro/utils/browser_launcher.py`** : lancement navigateur avec fallback.
+- **`src/cptcopro/utils/streamlit_launcher.py`** : lancement Streamlit en subprocess ou in-process.
+- **Comportement des chemins** : en dev, les données persistantes vivent sous `src/cptcopro/` (`BDD/`, `logs/`, `Backup/`) ; en bundle PyInstaller, elles vivent à côté de l'exécutable.
 
 ### Interface utilisateur
-- **`src/cptcopro/Affichage_Stream.py`** : Application Streamlit pour visualiser les données
+- **`src/cptcopro/Affichage_Stream.py`** : navigation multi-pages Streamlit.
+- Pages principales : Dashboard, Liste Charge, Liste Copro, Courbe Charge, Alerte, Stat Alerte, Statistiques Avancées, Config Alertes, Recherche Copro.
 
 ## Dépendances et environnement
 
 - **Python requis** : `>=3.12,<3.14` (défini dans `pyproject.toml`)
-- **Dépendances principales** : `loguru`, `selectolax`, `pandas`, `plotly`, `rich`, `dotenv`, `playwright`, `streamlit`
+- **Dépendances principales** : `loguru`, `selectolax`, `pandas`, `plotly`, `rich`, `python-dotenv`, `playwright`, `streamlit`, `streamlit-extras`
 - **Variables d'environnement** (ou `.env`) nécessaires :
   - `login_site_copro` : Identifiant de connexion
   - `password_site_copro` : Mot de passe
   - `url_site_copro` : URL du site du syndic
+
+### Emplacement du `.env`
+
+- **Exécution normale** : le parsing lit les credentials depuis un `.env` à la racine du projet.
+- **PyInstaller** : le `.env` est attendu à côté de l'exécutable.
+- **Note pratique** : `utils.paths.init_env()` et `utils.env_loader` coexistent ; pour éviter les ambiguïtés, considérer la racine du projet comme emplacement de référence en développement.
 
 ### Exécution locale
 
@@ -87,17 +72,17 @@ python -m cptcopro.main
 - **Sélecteurs CSS** : date → `td#lzA1` ; tableau charges → `table#ctzA1`
 - **Codes d'erreur** : Les fonctions de parsing retournent des codes `KO_*` en cas d'échec
 - **Logging** : Chaque module utilise `logger.bind(type_log="NOM_MODULE")` pour classifier les logs
-- **Connexions SQLite** : Pattern `try/finally` simple, chaque fonction gère sa propre connexion
+- **Connexions SQLite** : helpers dédiés dans `Database/`, avec fermeture explicite ou context manager selon le module
 
 ## Variables d'environnement
 
 | Variable | Description | Défaut |
 |----------|-------------|--------|
+| `CPTCOPRO_DB_NAME` | Nom du fichier SQLite si `CPTCOPRO_DB_PATH` n'est pas défini | `coproprietaires.sqlite` |
 | `CPTCOPRO_DB_PATH` | Chemin de la base de données | `src/cptcopro/coproprietaires.sqlite` |
-| `CPTCOPRO_LOG_LEVEL` | Niveau de log | `INFO` |
 | `CPTCOPRO_LOG_FILE` | Fichier de log | `logs/app.log` |
 
-> Note : Les anciennes variables `CTPCOPRO_*` (avec faute de frappe) restent supportées pour compatibilité.
+> Note : `CPTCOPRO_LOG_LEVEL` est documenté historiquement mais n'est pas utilisé par le code actuel.
 
 ## CLI
 
@@ -108,8 +93,21 @@ Options:
   --no-headless     Lance Playwright en mode visible (debug)
   --db-path PATH    Surcharge le chemin de la base de données
   --no-serve        Ne pas lancer Streamlit après le traitement
+  --serve-port N    Port Streamlit (défaut: 8501)
+  --serve-host HOST Host Streamlit (défaut: 127.0.0.1)
+  --serve-python P  Interpréteur Python pour lancer Streamlit
+  --streamlit-no-browser
+  --streamlit-no-console
+  --streamlit-use-cmd-start
+  --streamlit-log-file FILE
   --show-console    Afficher les données dans la console (rich)
 ```
+
+## Limitations et comportements utiles
+
+- Le dédoublonnage existe encore dans `Database/Dedoublonnage.py`, mais n'est plus appelé par `main.py`.
+- Les erreurs de parsing remontent sous forme de codes `KO_*` centralisés dans `src/cptcopro/Parsing/constants.py`.
+- Le détail du flux d'appel et des pages Streamlit est maintenu dans `reports/call_graph.md`.
 
 ## Fichiers à consulter rapidement
 
@@ -117,8 +115,10 @@ Options:
 |---------|------|
 | `pyproject.toml` | Dépendances, version Python |
 | `src/cptcopro/main.py` | Orchestration principale |
-| `src/cptcopro/Parsing_Commun.py` | Authentification, parsing parallèle |
-| `src/cptcopro/Traitement_Charge_Copro.py` | Parsing HTML des charges |
-| `src/cptcopro/Traitement_Lots_Copro.py` | Parsing HTML des lots |
-| `src/cptcopro/Data_To_BDD.py` | Opérations SQLite |
+| `src/cptcopro/Parsing/Commun.py` | Authentification, parsing parallèle |
+| `src/cptcopro/Traitement/Charge_Copro.py` | Parsing HTML des charges |
+| `src/cptcopro/Traitement/Lots_Copro.py` | Parsing HTML des lots |
+| `src/cptcopro/Database/__init__.py` | API publique du package Database |
+| `src/cptcopro/utils/paths.py` | Résolution des chemins DB/logs/backup |
+| `src/cptcopro/Parsing/constants.py` | Codes d'erreur et timings Playwright |
 | `reports/call_graph.md` | Graphe des appels de fonctions |

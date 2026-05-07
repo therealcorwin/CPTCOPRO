@@ -11,6 +11,7 @@ from cptcopro.utils.paths import (
     is_pyinstaller_bundle,
     get_app_dir,
     get_bundle_dir,
+    get_project_root_dir,
     get_data_dir,
     get_db_path,
     get_log_path,
@@ -94,6 +95,27 @@ class TestGetDataDir:
         assert data_dir.is_dir()
 
 
+class TestGetProjectRootDir:
+    """Tests pour get_project_root_dir()."""
+
+    def test_returns_project_root_in_dev_mode(self):
+        """En mode dev, retourne la racine du projet."""
+        project_root = get_project_root_dir()
+        assert isinstance(project_root, Path)
+        assert (project_root / "pyproject.toml").exists()
+
+    def test_returns_exe_dir_in_pyinstaller_mode(self, tmp_path):
+        """En mode PyInstaller, retourne le répertoire de l'exe."""
+        fake_exe = tmp_path / "dist" / "my_app.exe"
+        fake_exe.parent.mkdir(parents=True)
+
+        with patch.object(sys, "frozen", True, create=True):
+            with patch.object(sys, "_MEIPASS", str(tmp_path / "_meipass"), create=True):
+                with patch.object(sys, "executable", str(fake_exe)):
+                    project_root = get_project_root_dir()
+                    assert project_root == fake_exe.parent
+
+
 class TestGetDbPath:
     """Tests pour get_db_path()."""
 
@@ -174,12 +196,13 @@ class TestGetEnvFilePath:
         monkeypatch.chdir(tmp_path)
 
         # Mock pour éviter de chercher dans les vrais répertoires
-        with patch("cptcopro.utils.paths.get_app_dir", return_value=tmp_path / "app"):
-            with patch(
-                "cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"
-            ):
-                result = get_env_file_path()
-                assert result is None
+        with patch("cptcopro.utils.paths.get_project_root_dir", return_value=tmp_path / "root"):
+            with patch("cptcopro.utils.paths.get_app_dir", return_value=tmp_path / "app"):
+                with patch(
+                    "cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"
+                ):
+                    result = get_env_file_path()
+                    assert result is None
 
     def test_finds_env_in_app_dir(self, tmp_path, monkeypatch):
         """Trouve .env dans le répertoire app."""
@@ -187,8 +210,27 @@ class TestGetEnvFilePath:
         env_file.write_text("TEST=value")
 
         with patch("cptcopro.utils.paths.get_app_dir", return_value=tmp_path):
-            result = get_env_file_path()
-            assert result == env_file
+            with patch("cptcopro.utils.paths.get_project_root_dir", return_value=tmp_path / "root"):
+                with patch(
+                    "cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"
+                ):
+                    result = get_env_file_path()
+                    assert result == env_file
+
+    def test_finds_env_in_project_root_first(self, tmp_path):
+        """Privilégie la racine du projet en mode dev."""
+        root_dir = tmp_path / "root"
+        root_dir.mkdir()
+        env_file = root_dir / ".env"
+        env_file.write_text("TEST=value")
+
+        with patch("cptcopro.utils.paths.get_project_root_dir", return_value=root_dir):
+            with patch("cptcopro.utils.paths.get_app_dir", return_value=tmp_path / "app"):
+                with patch(
+                    "cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"
+                ):
+                    result = get_env_file_path()
+                    assert result == env_file
 
 
 class TestGetStreamlitConfigDir:
