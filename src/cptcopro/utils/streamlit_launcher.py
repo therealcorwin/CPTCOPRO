@@ -35,23 +35,89 @@ _LOG_FILE_HANDLES: Dict[int, Any] = {}
 _LOG = logging.getLogger(__name__)
 
 
+def _list_existing_streamlit_pids(app_path: str) -> list[int]:
+    """Retourne les PID des processus Streamlit CPTCOPRO déjà actifs."""
+    app_name = os.path.basename(app_path)
+    if os.name == "nt":
+        command = (
+            "Get-CimInstance Win32_Process | "
+            "Where-Object { $_.CommandLine -and $_.CommandLine -match 'streamlit run' "
+            f"-and $_.CommandLine -like '*{app_name}*' }} | "
+            "Select-Object -ExpandProperty ProcessId"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        pids = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.isdigit():
+                pids.append(int(line))
+        return pids
+
+    result = subprocess.run(
+        ["pgrep", "-af", "streamlit"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    pids = []
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        pid_str, cmdline = parts
+        if pid_str.isdigit() and app_name in cmdline and "streamlit run" in cmdline:
+            pids.append(int(pid_str))
+    return pids
+
+
+def _stop_existing_streamlit_instances(app_path: str) -> None:
+    """Ferme les anciennes instances Streamlit de CPTCOPRO avant un nouveau lancement."""
+    pids = _list_existing_streamlit_pids(app_path)
+    if not pids:
+        return
+
+    for pid in pids:
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=15,
+                    check=False,
+                )
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except Exception as exc:
+            _LOG.warning(
+                "Impossible d'arrêter le Streamlit existant pid=%s: %s", pid, exc)
+
+    _LOG.info("Anciennes instances Streamlit arrêtées: %s", pids)
+
+
 def _load_streamlit_config_toml(config_toml_path: str) -> dict:
     """Load and parse a Streamlit config.toml file.
-    
+
     Args:
         config_toml_path: Path to the config.toml file.
-        
+
     Returns:
         Parsed config dict, or empty dict on error.
     """
     if not os.path.isfile(config_toml_path):
         return {}
-    
+
     try:
         import tomllib
     except ImportError:
         import tomli as tomllib  # type: ignore[import-not-found]
-    
+
     try:
         with open(config_toml_path, "rb") as f:
             config_data = tomllib.load(f)
@@ -74,7 +140,8 @@ def _get_bundled_app_path(app_path: str) -> str:
         base_path = sys._MEIPASS
         # The app should be in cptcopro/ directory
         if "Affichage_Stream.py" in app_path:
-            bundled_path = os.path.join(base_path, "cptcopro", "Affichage_Stream.py")
+            bundled_path = os.path.join(
+                base_path, "cptcopro", "Affichage_Stream.py")
             if os.path.exists(bundled_path):
                 return bundled_path
         # Fallback: try the path as-is relative to _MEIPASS
@@ -91,10 +158,10 @@ def start_streamlit_inprocess(
     open_browser: bool = True,
 ) -> None:
     """Start Streamlit in-process (for PyInstaller bundles).
-    
+
     This function runs Streamlit directly in the main thread to avoid
     the "signal only works in main thread" error.
-    
+
     Note: This function blocks and does not return until Streamlit exits.
     """
     # Set environment variables BEFORE importing streamlit modules
@@ -103,24 +170,25 @@ def start_streamlit_inprocess(
     os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
     os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
     os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "none"
-    
+
     from streamlit.web import bootstrap
     import streamlit.config as st_config
-    
+
     # Get the correct path for the bundled app
     resolved_path = _get_bundled_app_path(app_path)
-    
+
     if not os.path.exists(resolved_path):
         raise FileNotFoundError(
             f"Fichier Streamlit non trouvé: {resolved_path}\n"
             f"Chemin original: {app_path}\n"
             f"MEIPASS: {getattr(sys, '_MEIPASS', 'N/A')}"
         )
-    
+
     # Configure Streamlit config directory for PyInstaller bundle
     if is_pyinstaller_bundle():
         base_path = sys._MEIPASS
-        streamlit_config_dir = os.path.join(base_path, "cptcopro", ".streamlit")
+        streamlit_config_dir = os.path.join(
+            base_path, "cptcopro", ".streamlit")
         config_toml_path = os.path.join(streamlit_config_dir, "config.toml")
         if os.path.isdir(streamlit_config_dir):
             _LOG.info(f"Streamlit config directory: {streamlit_config_dir}")
@@ -135,9 +203,9 @@ def start_streamlit_inprocess(
             if "browser" in config_data:
                 for key, value in config_data["browser"].items():
                     st_config.set_option(f"browser.{key}", value)
-    
+
     _LOG.info(f"Lancement Streamlit in-process: {resolved_path}")
-    
+
     # Find a free port if the requested one is in use
     used_port = port
     try:
@@ -146,8 +214,9 @@ def start_streamlit_inprocess(
             probe.bind((host, port))
     except OSError:
         used_port = _find_free_port(port, host=host, max_tries=50)
-        _LOG.warning("Port %d indisponible, utilisation du port %d", port, used_port)
-    
+        _LOG.warning(
+            "Port %d indisponible, utilisation du port %d", port, used_port)
+
     # CRITICAL: Force production mode by directly setting the config option
     # This prevents Streamlit from trying to connect to Node dev server on port 3000
     try:
@@ -155,14 +224,13 @@ def start_streamlit_inprocess(
         _LOG.info("Forced global.developmentMode = False")
     except Exception as e:
         _LOG.warning(f"Could not set developmentMode directly: {e}")
-    
+
     os.environ["STREAMLIT_SERVER_PORT"] = str(used_port)
     os.environ["STREAMLIT_SERVER_ADDRESS"] = host
 
-    
     # Don't open browser manually - let Streamlit handle it via headless setting
     # This prevents duplicate tabs from opening
-    
+
     # Use bootstrap.run() which is designed to be called from main thread
     # This avoids the "signal only works in main thread" error
     # headless=True means Streamlit won't open browser, headless=False means it will
@@ -170,27 +238,29 @@ def start_streamlit_inprocess(
         "global.developmentMode": False,
         "server.port": used_port,
         "server.address": host,
-        "server.headless": not open_browser,  # If open_browser=True, headless=False (Streamlit opens browser)
+        # If open_browser=True, headless=False (Streamlit opens browser)
+        "server.headless": not open_browser,
         "server.fileWatcherType": "none",
         "server.runOnSave": False,
         "browser.gatherUsageStats": False,
         "browser.serverAddress": host,
         "browser.serverPort": used_port,
         "runner.fastReruns": False,
- 
+
     }
-    
+
     # Load theme options from config.toml if in PyInstaller bundle
     if is_pyinstaller_bundle():
         base_path = sys._MEIPASS
-        config_toml_path = os.path.join(base_path, "cptcopro", ".streamlit", "config.toml")
+        config_toml_path = os.path.join(
+            base_path, "cptcopro", ".streamlit", "config.toml")
         config_data = _load_streamlit_config_toml(config_toml_path)
         # Add theme settings to flag_options
         if "theme" in config_data:
             for key, value in config_data["theme"].items():
                 flag_options[f"theme.{key}"] = value
                 _LOG.info(f"Added to flag_options: theme.{key} = {value}")
-    
+
     try:
         bootstrap.run(resolved_path, False, [], flag_options)
     except SystemExit:
@@ -215,7 +285,8 @@ def _find_free_port(start_port: int, host: str = "127.0.0.1", max_tries: int = 2
                 return p
             except OSError:
                 continue
-    raise RuntimeError(f"Aucun port libre trouvé à partir de {start_port} (essais={max_tries})")
+    raise RuntimeError(
+        f"Aucun port libre trouvé à partir de {start_port} (essais={max_tries})")
 
 
 def start_streamlit(
@@ -236,7 +307,7 @@ def start_streamlit(
 
     By default `show_console=True` opens a visible Windows console. When
     `show_console` is True on Windows, a new console window is created.    
-    
+
     Start Streamlit and return the Popen object.
 
     By default `show_console=True` opens a visible Windows console. When
@@ -247,6 +318,8 @@ def start_streamlit(
     - `stdout`/`stderr`: where to redirect output (default: DEVNULL)
       (ignored when `show_console=True`).
     """
+    _stop_existing_streamlit_instances(app_path)
+
     python_exe = python_executable or sys.executable
     # Verify that `streamlit` is importable in the selected Python executable.
     # We run a small Python snippet that exits 0 if streamlit is available, 1 otherwise.
@@ -288,7 +361,8 @@ def start_streamlit(
     except OSError:
         try:
             used_port = _find_free_port(port, host=host, max_tries=50)
-            _LOG.warning("Port %d indisponible, utilisation du port %d à la place", port, used_port)
+            _LOG.warning(
+                "Port %d indisponible, utilisation du port %d à la place", port, used_port)
         except RuntimeError as re:
             # unable to find free port - re-raise as runtime error for caller
             raise RuntimeError(str(re))
@@ -341,7 +415,8 @@ def start_streamlit(
                 # console is closed by the user.
                 if log_path:
                     # Ensure parent dir exists
-                    os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(log_path) else None
+                    os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(
+                        log_path) else None
                     redirected = f'{cmdline} > "{log_path}" 2>&1'
                 else:
                     redirected = cmdline
@@ -361,7 +436,8 @@ def start_streamlit(
                     "/k",
                     debug_wrapper,
                 ]
-                proc = subprocess.Popen(start_cmd, stdout=use_stdout, stderr=use_stderr)
+                proc = subprocess.Popen(
+                    start_cmd, stdout=use_stdout, stderr=use_stderr)
                 try:
                     _PROC_CREATION_FLAGS[proc.pid] = "CMD_START"
                 except Exception:
@@ -395,7 +471,8 @@ def start_streamlit(
             # destinations. If a log_path was provided, open it and pass the
             # file handle so we capture Streamlit output.
             if log_path:
-                os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(log_path) else None
+                os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(
+                    log_path) else None
                 log_f = open(log_path, "a", encoding="utf-8", buffering=1)
                 proc = subprocess.Popen(
                     cmd,
@@ -418,7 +495,8 @@ def start_streamlit(
                 pass
         else:
             if log_path:
-                os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(log_path) else None
+                os.makedirs(os.path.dirname(log_path), exist_ok=True) if os.path.dirname(
+                    log_path) else None
                 log_f = open(log_path, "a", encoding="utf-8", buffering=1)
                 proc = subprocess.Popen(
                     cmd, start_new_session=True, stdout=log_f, stderr=log_f
@@ -518,15 +596,18 @@ def _parse_cli_args() -> dict:
     parser = argparse.ArgumentParser(
         description="Lance Streamlit (par défaut ouvre une console). Utilisez --no-console pour ne PAS ouvrir la console."
     )
-    parser.add_argument("--app-path", default="src/cptcopro/Affichage_Stream.py")
+    parser.add_argument(
+        "--app-path", default="src/cptcopro/Affichage_Stream.py")
     parser.add_argument("--port", type=int, default=8501)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--no-console", dest="no_console", action="store_true",
                         help="Ne pas ouvrir de console visible (redirige stdout/stderr).")
     parser.add_argument("--no-browser", dest="no_browser", action="store_true",
                         help="Ne pas ouvrir automatiquement le navigateur web.")
-    parser.add_argument("--cols", type=int, default=None, help="Colonnes console (Windows)")
-    parser.add_argument("--lines", type=int, default=None, help="Lignes console (Windows)")
+    parser.add_argument("--cols", type=int, default=None,
+                        help="Colonnes console (Windows)")
+    parser.add_argument("--lines", type=int, default=None,
+                        help="Lignes console (Windows)")
     parser.add_argument("--use-cmd-start", dest="use_cmd_start", action="store_true",
                         help="Sur Windows, utilise `cmd /c start` pour forcer une nouvelle fenêtre (fallback).")
     parser.add_argument("--log-file", dest="log_file", default=None,

@@ -229,3 +229,44 @@ def test_default_threshold_for_unknown_type(tmp_path):
         )
     finally:
         conn.close()
+
+
+def test_older_insert_does_not_clear_newer_alert(tmp_path):
+    """Test qu'une charge plus ancienne insérée après la plus récente ne supprime pas l'alerte active."""
+    db = tmp_path / "triggers_test6.db"
+    setup_db(db)
+    conn = sqlite3.connect(str(db))
+    cur = conn.cursor()
+    try:
+        setup_coproprietaire(conn, "C600", "3p")
+
+        cur.execute(
+            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
+            ("C600", "Owner F", 3000.0, 0.0, "2026-01-02"),
+        )
+        id_latest = cur.lastrowid
+        conn.commit()
+
+        cur.execute(
+            "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = ?",
+            ("C600",),
+        )
+        row = cur.fetchone()
+        assert row is not None and row[0] == id_latest
+
+        cur.execute(
+            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
+            ("C600", "Owner F", 1000.0, 0.0, "2026-01-01"),
+        )
+        conn.commit()
+
+        cur.execute(
+            "SELECT id_origin, debit FROM alertes_debit_eleve WHERE code_proprietaire = ?",
+            ("C600",),
+        )
+        row = cur.fetchone()
+        assert row is not None, "L'alerte ne doit pas disparaître si la ligne insérée est plus ancienne"
+        assert row[0] == id_latest
+        assert row[1] == 3000.0
+    finally:
+        conn.close()

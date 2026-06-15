@@ -23,8 +23,18 @@ except ImportError:
     )
 
 
+def _get_db_cache_key(db_path: Path) -> int:
+    try:
+        return db_path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 @st.cache_data()
-def recup_alertes(db_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def recup_alertes(
+    db_path: Path, db_cache_key: int
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    del db_cache_key
     query = "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, debit as Debit, type_alerte AS TypeApt, first_detection AS FirstDetection, last_detection AS LastDetection, occurence AS Occurence FROM alertes_debit_eleve"
     query2 = "select SUM(debit) as TotalDebit FROM alertes_debit_eleve"
     try:
@@ -83,7 +93,7 @@ def get_delta(col):
 
 
 suivi_alerte = recup_suivi_alertes(DB_PATH)
-alertes_df, total_debit_df = recup_alertes(DB_PATH)
+alertes_df, total_debit_df = recup_alertes(DB_PATH, _get_db_cache_key(DB_PATH))
 
 # Section statistiques par type d'appartement
 if not suivi_alerte.empty:
@@ -137,10 +147,12 @@ if not alertes_df.empty:
     types_disponibles = ["Tous"] + sorted(
         alertes_df["TypeApt"].dropna().unique().tolist()
     )
-    type_selectionne = st.selectbox("Filtrer par type d'appartement", types_disponibles)
+    type_selectionne = st.selectbox(
+        "Filtrer par type d'appartement", types_disponibles)
 
     if type_selectionne != "Tous":
-        alertes_filtrees = alertes_df[alertes_df["TypeApt"] == type_selectionne]
+        alertes_filtrees = alertes_df[alertes_df["TypeApt"]
+                                      == type_selectionne]
     else:
         alertes_filtrees = alertes_df
 

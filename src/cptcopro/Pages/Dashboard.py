@@ -17,8 +17,16 @@ except Exception as e:
     DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
 
 
+def _get_db_cache_key(db_path: Path) -> int:
+    try:
+        return db_path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 @st.cache_data()
-def chargement_somme_debit_global(DB_PATH: Path) -> pd.DataFrame:
+def chargement_somme_debit_global(DB_PATH: Path, db_cache_key: int) -> pd.DataFrame:
+    del db_cache_key
     query = "SELECT sum(debit) AS 'debit global', date FROM vw_charge_coproprietaires GROUP BY date"
     conn = sqlite3.connect(str(DB_PATH))
     try:
@@ -27,7 +35,8 @@ def chargement_somme_debit_global(DB_PATH: Path) -> pd.DataFrame:
         conn.close()
     # Convertir la colonne date en datetime
     if "date" in debit_global.columns:
-        debit_global["date"] = pd.to_datetime(debit_global["date"], errors="coerce")
+        debit_global["date"] = pd.to_datetime(
+            debit_global["date"], errors="coerce")
     # Convertir la colonne debit global en numérique, en remplaçant les erreurs par NaN puis en remplissant les NaN par 0
     if "debit global" in debit_global.columns:
         debit_global["debit global"] = pd.to_numeric(
@@ -39,12 +48,13 @@ def chargement_somme_debit_global(DB_PATH: Path) -> pd.DataFrame:
 
 
 @st.cache_data()
-def suivi_nbre_alertes(db_path: Path) -> tuple[int, int]:
+def suivi_nbre_alertes(db_path: Path, db_cache_key: int) -> tuple[int, int]:
     """Récupère les deux derniers relevés d'alertes pour calculer le delta.
 
     Returns:
         Tuple (nombre_alertes_actuel, nombre_alertes_precedent)
     """
+    del db_cache_key
     query = (
         "SELECT nombre_alertes FROM suivi_alertes ORDER BY date_releve DESC LIMIT 2;"
     )
@@ -78,8 +88,9 @@ def suivi_nbre_alertes(db_path: Path) -> tuple[int, int]:
 
 
 loguru.logger.info("Starting Streamlit app for coproprietaires display")
-Charge_globale = chargement_somme_debit_global(DB_PATH)
-nbre_alerte, nbre_alerte_precedent = suivi_nbre_alertes(DB_PATH)
+db_cache_key = _get_db_cache_key(DB_PATH)
+Charge_globale = chargement_somme_debit_global(DB_PATH, db_cache_key)
+nbre_alerte, nbre_alerte_precedent = suivi_nbre_alertes(DB_PATH, db_cache_key)
 delta_alerte = nbre_alerte - nbre_alerte_precedent
 if Charge_globale.empty:
     st.error("Aucune donnée disponible à afficher.")
@@ -92,7 +103,8 @@ gauche, centre, droite = st.columns(3)
 with st.container():
     with gauche:
         st.space("small")
-        date_dernier_releve = Charge_globale["date"].iat[-1].strftime("%d/%m/%Y")
+        date_dernier_releve = Charge_globale["date"].iat[-1].strftime(
+            "%d/%m/%Y")
         date_avant_dernier_releve = (
             Charge_globale["date"].iat[-2].strftime("%d/%m/%Y")
             if len(Charge_globale) >= 2

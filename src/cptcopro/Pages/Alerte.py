@@ -23,8 +23,18 @@ except ImportError:
     )
 
 
+def _get_db_cache_key(db_path: Path) -> int:
+    try:
+        return db_path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 @st.cache_data()
-def recup_alertes(db_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def recup_alertes(
+    db_path: Path, db_cache_key: int
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    del db_cache_key
     query = "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, debit as Debit, type_alerte AS TypeApt, first_detection AS FirstDetection, last_detection AS LastDetection, occurence AS Occurence FROM alertes_debit_eleve"
     query2 = "select SUM(debit) as TotalDebit FROM alertes_debit_eleve"
     try:
@@ -96,7 +106,8 @@ def recup_suivi_alertes(db_path: Path) -> pd.DataFrame:
 st.set_page_config(page_title="Alertes Débit Élevé", layout="wide")
 st.title("Alertes Débit Élevé des Copropriétaires")
 
-alertes_df, sommealertes_df = recup_alertes(DB_PATH)
+db_cache_key = _get_db_cache_key(DB_PATH)
+alertes_df, sommealertes_df = recup_alertes(DB_PATH, db_cache_key)
 suivi_alerte = recup_suivi_alertes(DB_PATH)
 
 date_releve = suivi_alerte["date_releve"].iat[0] if not suivi_alerte.empty else "N/A"

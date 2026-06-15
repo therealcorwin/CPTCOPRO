@@ -18,6 +18,75 @@ from .Verif_Prerequis_BDD import verif_repertoire_db
 logger = logger.bind(type_log="BDD")
 
 
+ALERT_TRIGGERS_SQL = """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_alertes_code_proprietaire ON alertes_debit_eleve(code_proprietaire);
+
+    DROP TRIGGER IF EXISTS alerte_debit_eleve_insert;
+    CREATE TRIGGER alerte_debit_eleve_insert
+    AFTER INSERT ON charge
+    FOR EACH ROW
+    WHEN NEW.date = (SELECT MAX(c.date) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+      AND NEW.debit > COALESCE(
+          (SELECT ca.threshold FROM config_alerte ca
+           JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
+           WHERE cp.code_proprietaire = NEW.code_proprietaire),
+          (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
+          2000.0)
+    BEGIN
+        INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, first_detection, last_detection, occurence)
+        VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit,
+            COALESCE((SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = NEW.code_proprietaire), 'na'),
+            CURRENT_DATE, CURRENT_DATE, 1)
+        ON CONFLICT(code_proprietaire) DO UPDATE SET
+            id_origin = excluded.id_origin, nom_proprietaire = excluded.nom_proprietaire,
+            debit = excluded.debit, type_alerte = excluded.type_alerte,
+            last_detection = CURRENT_DATE, occurence = COALESCE(occurence, 0) + 1;
+    END;
+
+    DROP TRIGGER IF EXISTS alerte_debit_eleve_insert_clear;
+    CREATE TRIGGER alerte_debit_eleve_insert_clear
+    AFTER INSERT ON charge
+    FOR EACH ROW
+    WHEN NEW.date = (SELECT MAX(c.date) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
+      AND NEW.debit <= COALESCE(
+          (SELECT ca.threshold FROM config_alerte ca
+           JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
+           WHERE cp.code_proprietaire = NEW.code_proprietaire),
+          (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
+          2000.0)
+    BEGIN
+        DELETE FROM alertes_debit_eleve WHERE code_proprietaire = NEW.code_proprietaire;
+    END;
+
+    DROP TRIGGER IF EXISTS alerte_debit_eleve_delete;
+    CREATE TRIGGER alerte_debit_eleve_delete
+    AFTER DELETE ON charge
+    FOR EACH ROW
+    WHEN NOT EXISTS (
+        SELECT 1
+        FROM charge c
+        WHERE c.code_proprietaire = OLD.code_proprietaire
+          AND c.date > OLD.date
+    )
+    BEGIN
+        DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
+        INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, first_detection, last_detection, occurence)
+        SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit,
+            COALESCE((SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = c.code_proprietaire), 'na'),
+            CURRENT_DATE, CURRENT_DATE, 1
+        FROM charge c
+        WHERE c.code_proprietaire = OLD.code_proprietaire
+          AND c.date = (SELECT MAX(c2.date) FROM charge c2 WHERE c2.code_proprietaire = OLD.code_proprietaire)
+          AND c.debit > COALESCE(
+              (SELECT ca.threshold FROM config_alerte ca
+               JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
+               WHERE cp.code_proprietaire = OLD.code_proprietaire),
+              (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
+              2000.0);
+    END;
+"""
+
+
 def verif_presence_db(db_path: str) -> None:
     """
     Vérifie la présence de la base de données SQLite.
@@ -102,65 +171,7 @@ def verif_presence_db(db_path: str) -> None:
             logger.info("Seuils d'alerte par défaut initialisés.")
 
             # Index et triggers
-            cur.executescript("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_alertes_code_proprietaire ON alertes_debit_eleve(code_proprietaire);
-
-                CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert
-                AFTER INSERT ON charge
-                FOR EACH ROW
-                WHEN NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
-                  AND NEW.debit > COALESCE(
-                      (SELECT ca.threshold FROM config_alerte ca 
-                       JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
-                       WHERE cp.code_proprietaire = NEW.code_proprietaire),
-                      (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
-                      2000.0)
-                BEGIN
-                    INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, first_detection, last_detection, occurence)
-                    VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit,
-                        COALESCE((SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = NEW.code_proprietaire), 'na'),
-                        CURRENT_DATE, CURRENT_DATE, 1)
-                    ON CONFLICT(code_proprietaire) DO UPDATE SET
-                        id_origin = excluded.id_origin, nom_proprietaire = excluded.nom_proprietaire,
-                        debit = excluded.debit, type_alerte = excluded.type_alerte,
-                        last_detection = CURRENT_DATE, occurence = COALESCE(occurence, 0) + 1;
-                END;
-
-                CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert_clear
-                AFTER INSERT ON charge
-                FOR EACH ROW
-                WHEN NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
-                  AND NEW.debit <= COALESCE(
-                      (SELECT ca.threshold FROM config_alerte ca 
-                       JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
-                       WHERE cp.code_proprietaire = NEW.code_proprietaire),
-                      (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
-                      2000.0)
-                BEGIN
-                    DELETE FROM alertes_debit_eleve WHERE code_proprietaire = NEW.code_proprietaire;
-                END;
-
-                CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_delete
-                AFTER DELETE ON charge
-                FOR EACH ROW
-                WHEN OLD.id >= COALESCE((SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire), 0)
-                BEGIN
-                    DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
-                    INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, first_detection, last_detection, occurence)
-                    SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit,
-                        COALESCE((SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = c.code_proprietaire), 'na'),
-                        CURRENT_DATE, CURRENT_DATE, 1
-                    FROM charge c
-                    WHERE c.code_proprietaire = OLD.code_proprietaire
-                      AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
-                      AND c.debit > COALESCE(
-                          (SELECT ca.threshold FROM config_alerte ca 
-                           JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
-                           WHERE cp.code_proprietaire = OLD.code_proprietaire),
-                          (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
-                          2000.0);
-                END;
-            """)
+            cur.executescript(ALERT_TRIGGERS_SQL)
             logger.info("Triggers 'alerte_debit_eleve' créés.")
 
             # Table coproprietaires
@@ -216,7 +227,8 @@ def verif_presence_db(db_path: str) -> None:
             conn.close()
             logger.success(f"Base de données '{db_path}' créée avec succès.")
         except Exception as e:
-            logger.error(f"Erreur lors de la création de la base de données : {e}")
+            logger.error(
+                f"Erreur lors de la création de la base de données : {e}")
             raise
     else:
         logger.info(f"La base de données '{db_path}' existe déjà.")
@@ -276,7 +288,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             logger.info("Table 'charge' créée.")
 
         # Table alertes_debit_eleve
-        logger.info("Vérification de la présence de la table 'alertes_debit_eleve'.")
+        logger.info(
+            "Vérification de la présence de la table 'alertes_debit_eleve'.")
         cur.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='alertes_debit_eleve';"
         )
@@ -284,7 +297,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             has_alertes = True
             logger.info("Table 'alertes_debit_eleve' existe.")
         else:
-            logger.warning("Table 'alertes_debit_eleve' manquante, création en cours.")
+            logger.warning(
+                "Table 'alertes_debit_eleve' manquante, création en cours.")
             has_alertes = False
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS alertes_debit_eleve (
@@ -312,7 +326,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             has_config_alerte = True
             logger.info("Table 'config_alerte' existe.")
         else:
-            logger.warning("Table 'config_alerte' manquante, création en cours.")
+            logger.warning(
+                "Table 'config_alerte' manquante, création en cours.")
             has_config_alerte = False
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS config_alerte (
@@ -347,7 +362,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             logger.info("Table 'config_alerte' créée avec seuils par défaut.")
 
         # Trigger alerte_debit_eleve
-        logger.info("Vérification de la présence du trigger 'alerte_debit_eleve'.")
+        logger.info(
+            "Vérification et mise à jour des triggers 'alerte_debit_eleve'.")
         cur.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger' AND name='alerte_debit_eleve_insert';"
         )
@@ -355,71 +371,16 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             has_trigger = True
             logger.info("Trigger 'alerte_debit_eleve' existe.")
         else:
-            logger.warning("Trigger 'alerte_debit_eleve' manquant, création en cours.")
+            logger.warning(
+                "Trigger 'alerte_debit_eleve' manquant, création en cours.")
             has_trigger = False
-            cur.executescript("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_alertes_code_proprietaire ON alertes_debit_eleve(code_proprietaire);
-                
-                CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert
-                AFTER INSERT ON charge
-                FOR EACH ROW
-                WHEN NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
-                  AND NEW.debit > COALESCE(
-                      (SELECT ca.threshold FROM config_alerte ca 
-                       JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
-                       WHERE cp.code_proprietaire = NEW.code_proprietaire),
-                      (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
-                      2000.0)
-                BEGIN
-                    INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, first_detection, last_detection, occurence)
-                    VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit,
-                        COALESCE((SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = NEW.code_proprietaire), 'na'),
-                        CURRENT_DATE, CURRENT_DATE, 1)
-                    ON CONFLICT(code_proprietaire) DO UPDATE SET
-                        id_origin = excluded.id_origin, nom_proprietaire = excluded.nom_proprietaire,
-                        debit = excluded.debit, type_alerte = excluded.type_alerte,
-                        last_detection = CURRENT_DATE, occurence = COALESCE(occurence, 0) + 1;
-                END;
-                
-                CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_insert_clear
-                AFTER INSERT ON charge
-                FOR EACH ROW
-                WHEN NEW.id = (SELECT MAX(id) FROM charge c WHERE c.code_proprietaire = NEW.code_proprietaire)
-                  AND NEW.debit <= COALESCE(
-                      (SELECT ca.threshold FROM config_alerte ca 
-                       JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
-                       WHERE cp.code_proprietaire = NEW.code_proprietaire),
-                      (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
-                      2000.0)
-                BEGIN
-                    DELETE FROM alertes_debit_eleve WHERE code_proprietaire = NEW.code_proprietaire;
-                END;
-                
-                CREATE TRIGGER IF NOT EXISTS alerte_debit_eleve_delete
-                AFTER DELETE ON charge
-                FOR EACH ROW
-                WHEN OLD.id >= COALESCE((SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire), 0)
-                BEGIN
-                    DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
-                    INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, first_detection, last_detection, occurence)
-                    SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit,
-                        COALESCE((SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = c.code_proprietaire), 'na'),
-                        CURRENT_DATE, CURRENT_DATE, 1
-                    FROM charge c
-                    WHERE c.code_proprietaire = OLD.code_proprietaire
-                      AND c.id = (SELECT MAX(id) FROM charge WHERE code_proprietaire = OLD.code_proprietaire)
-                      AND c.debit > COALESCE(
-                          (SELECT ca.threshold FROM config_alerte ca 
-                           JOIN coproprietaires cp ON LOWER(cp.type_apt) = LOWER(ca.type_apt)
-                           WHERE cp.code_proprietaire = OLD.code_proprietaire),
-                          (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
-                          2000.0);
-                END;
-            """)
             created.append("alerte_debit_eleve")
 
+        cur.executescript(ALERT_TRIGGERS_SQL)
+
         # Table coproprietaires
-        logger.info("Vérification de la présence de la table 'coproprietaires'.")
+        logger.info(
+            "Vérification de la présence de la table 'coproprietaires'.")
         cur.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='coproprietaires';"
         )
@@ -427,7 +388,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             has_coproprietaires = True
             logger.info("Table 'coproprietaires' existe.")
         else:
-            logger.warning("Table 'coproprietaires' manquante, création en cours.")
+            logger.warning(
+                "Table 'coproprietaires' manquante, création en cours.")
             has_coproprietaires = False
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS coproprietaires (
@@ -464,7 +426,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             """)
             logger.success("View 'vw_charge_coproprietaires' créée/assurée.")
         except Exception as e:
-            logger.error(f"Impossible de créer la vue vw_charge_coproprietaires : {e}")
+            logger.error(
+                f"Impossible de créer la vue vw_charge_coproprietaires : {e}")
 
         # Table suivi_alertes
         logger.info("Vérification de la présence de la table 'suivi_alertes'.")
@@ -475,7 +438,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             has_nombre_alertes = True
             logger.info("Table 'suivi_alertes' existe.")
         else:
-            logger.warning("Table 'suivi_alertes' manquante, création en cours.")
+            logger.warning(
+                "Table 'suivi_alertes' manquante, création en cours.")
             has_nombre_alertes = False
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS suivi_alertes (
@@ -499,7 +463,8 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
 
     except Exception as e:
         conn.rollback()
-        logger.error(f"Erreur lors de la vérification/création des composants DB : {e}")
+        logger.error(
+            f"Erreur lors de la vérification/création des composants DB : {e}")
         raise
     finally:
         conn.close()
