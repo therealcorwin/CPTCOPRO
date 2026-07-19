@@ -24,13 +24,14 @@ import cptcopro.Traitement.Charge_Copro as tp
 import cptcopro.Traitement.Lots_Copro as tlc
 import cptcopro.Database as dtb
 import cptcopro.utils.streamlit_launcher as usl
-from cptcopro.utils.paths import get_db_path, get_log_path, init_env
+from cptcopro.utils.paths import get_db_path, get_log_path
+from cptcopro.utils.env_loader import validate_startup_env
 from loguru import logger
 import time
 import atexit
 
-# Charger les variables d'environnement avant toute utilisation
-init_env()
+# Charger et valider les variables d'environnement avant toute utilisation
+validate_startup_env()
 
 # Configurer les logs avec le bon chemin
 LOG_PATH = str(get_log_path("app.log"))
@@ -57,15 +58,7 @@ logger = logger.bind(type_log="MAIN")
 
 # Utiliser le chemin de DB portable
 DB_PATH = str(get_db_path())
-"""
-## Charger le contenu du fichier HTML
-with open(
-    "src\\cptcopro\\Solde_copro3.htm",
-    "r",
-    encoding="utf-8",
- ) as file:
-    html_content = file.read()
-"""
+
 # dtb.verif_repertoire_db(DB_PATH)
 # dtb.verif_presence_db(DB_PATH)
 # dtb.integrite_db(DB_PATH)
@@ -201,7 +194,8 @@ def main() -> None:
     parser_charges = HTMLParser(html_charge)
     logger.success("Parsing des charges des copropriétaires terminé.")
 
-    logger.info("Récupération de la date de suivi des copropriétaires en cours...")
+    logger.info(
+        "Récupération de la date de suivi des copropriétaires en cours...")
     date_suivi_copro = tp.recuperer_date_situation_copro(parser_charges)
     if not date_suivi_copro:
         logger.error("Date de situation introuvable, arrêt du traitement.")
@@ -210,19 +204,24 @@ def main() -> None:
         f"Date de situation des copropriétaires récupérée : {date_suivi_copro}"
     )
 
-    logger.info("Récupération des données des charges des copropriétaires en cours...")
-    data_charges = tp.recuperer_situation_copro(parser_charges, date_suivi_copro)
+    logger.info(
+        "Récupération des données des charges des copropriétaires en cours...")
+    data_charges = tp.recuperer_situation_copro(
+        parser_charges, date_suivi_copro)
     logger.success(
         f"Données des charges des copropriétaires récupérées : {len(data_charges)} entrées."
     )
 
     logger.info("Parsing des lots des copropriétaires en cours...")
     lots_coproprietaires = tlc.extraire_lignes_brutes(html_copro)
-    logger.success(f"{len(lots_coproprietaires)} lots de copropriétaires extraits.")
+    logger.success(
+        f"{len(lots_coproprietaires)} lots de copropriétaires extraits.")
 
     logger.info("Consolidation des lots des copropriétaires en cours...")
-    data_coproprietaires = tlc.consolider_proprietaires_lots(lots_coproprietaires)
-    logger.success(f"{len(data_coproprietaires)} copropriétaires/groupes consolidés.")
+    data_coproprietaires = tlc.consolider_proprietaires_lots(
+        lots_coproprietaires)
+    logger.success(
+        f"{len(data_coproprietaires)} copropriétaires/groupes consolidés.")
 
     if not data_charges and not data_coproprietaires:
         logger.warning(
@@ -262,7 +261,8 @@ def main() -> None:
         try:
             # Check if running from PyInstaller bundle
             if usl.is_pyinstaller_bundle():
-                logger.info("Lancement de Streamlit in-process (mode PyInstaller)...")
+                logger.info(
+                    "Lancement de Streamlit in-process (mode PyInstaller)...")
                 # start_streamlit_inprocess is BLOCKING - it runs Streamlit in the main thread
                 # This is required to avoid "signal only works in main thread" error
                 # The function only returns when Streamlit exits
@@ -276,7 +276,8 @@ def main() -> None:
                 logger.info("Streamlit terminé")
                 return  # Exit the application
             else:
-                logger.info("Lancement de Streamlit via utils.streamlit_launcher...")
+                logger.info(
+                    "Lancement de Streamlit via utils.streamlit_launcher...")
                 proc = usl.start_streamlit(
                     app_path="src/cptcopro/Affichage_Stream.py",
                     python_executable=args.serve_python,

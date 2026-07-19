@@ -12,6 +12,32 @@ from loguru import logger
 from cptcopro.utils.paths import get_env_file_path as resolve_env_file_path
 
 
+REQUIRED_CORE_ENV_VARS = [
+    "login_site_copro",
+    "password_site_copro",
+    "url_site_copro",
+    "url_situation_copro",
+]
+
+REQUIRED_PCLOUD_ENV_VARS = [
+    "pcloud_APP_KEY",
+    "pcloud_APP_SECRET",
+]
+
+REQUIRED_PCLOUD_BACKUP_ENV_VARS = [
+    "pcloud_location_id",
+    "pcloud_backup_folder",
+    "pcloud_backup_folder_id",
+    "pcloud_backup_file",
+]
+
+REQUIRED_STARTUP_ENV_VARS = [
+    *REQUIRED_CORE_ENV_VARS,
+    *REQUIRED_PCLOUD_ENV_VARS,
+    *REQUIRED_PCLOUD_BACKUP_ENV_VARS,
+]
+
+
 def get_app_base_path() -> Path:
     """
     Retourne le chemin de base de l'application.
@@ -97,12 +123,7 @@ def load_and_validate_env(required_vars: list[str] | None = None) -> dict[str, s
         ValueError: Si des variables requises sont manquantes.
     """
     if required_vars is None:
-        required_vars = [
-            "login_site_copro",
-            "password_site_copro",
-            "url_site_copro",
-            "url_situation_copro",
-        ]
+        required_vars = REQUIRED_CORE_ENV_VARS
 
     env_path = get_env_file_path()
 
@@ -136,22 +157,108 @@ def load_and_validate_env(required_vars: list[str] | None = None) -> dict[str, s
     return {var: os.environ[var] for var in required_vars}
 
 
-def get_credentials() -> tuple[str, str, str]:
+def get_credentials() -> dict[str, str]:
     """
     Charge et retourne les credentials du site copro.
 
     Returns:
-        Tuple (login, password, url)
+        Dictionnaire avec les clés:
+        - login_site_copro
+        - password_site_copro
+        - url_site_copro
 
     Raises:
         FileNotFoundError: Si le fichier .env n'existe pas.
         ValueError: Si des variables requises sont manquantes.
     """
-    required_vars = ["login_site_copro",
-                     "password_site_copro", "url_site_copro"]
+    required_vars = [
+        "login_site_copro",
+        "password_site_copro",
+        "url_site_copro",
+    ]
     env_vars = load_and_validate_env(required_vars)
-    return (
-        env_vars["login_site_copro"],
-        env_vars["password_site_copro"],
-        env_vars["url_site_copro"],
+
+    return {
+        "login_site_copro": env_vars["login_site_copro"],
+        "password_site_copro": env_vars["password_site_copro"],
+        "url_site_copro": env_vars["url_site_copro"],
+    }
+
+
+def get_pcloud_credentials() -> dict[str, str]:
+    """
+    Charge et retourne les credentials OAuth2 pCloud.
+
+    Returns:
+        Dictionnaire avec les clés:
+        - pcloud_APP_KEY
+        - pcloud_APP_SECRET
+
+    Raises:
+        FileNotFoundError: Si le fichier .env n'existe pas.
+        ValueError: Si des variables requises sont manquantes.
+    """
+    required_vars = REQUIRED_PCLOUD_ENV_VARS
+    env_vars = load_and_validate_env(required_vars)
+
+    return {
+        "pcloud_APP_KEY": env_vars["pcloud_APP_KEY"],
+        "pcloud_APP_SECRET": env_vars["pcloud_APP_SECRET"],
+    }
+
+
+def get_pcloud_backup_config() -> dict[str, str | int]:
+    """
+    Charge et retourne la configuration de backup pCloud.
+
+    Variables requises:
+        - pcloud_location_id
+        - pcloud_backup_folder
+        - pcloud_backup_folder_id
+        - pcloud_backup_file
+
+    Returns:
+        Dictionnaire avec les clés:
+        - pcloud_location_id (int)
+        - pcloud_backup_folder (str)
+        - pcloud_backup_folder_id (str)
+        - pcloud_backup_file (str)
+
+    Raises:
+        FileNotFoundError: Si le fichier .env n'existe pas.
+        ValueError: Si des variables requises sont manquantes ou invalides.
+    """
+    required_vars = REQUIRED_PCLOUD_BACKUP_ENV_VARS
+    env_vars = load_and_validate_env(required_vars)
+
+    try:
+        location_id = int(env_vars["pcloud_location_id"])
+    except ValueError as exc:
+        raise ValueError(
+            "La variable pcloud_location_id doit etre un entier."
+        ) from exc
+
+    return {
+        "pcloud_location_id": location_id,
+        "pcloud_backup_folder": env_vars["pcloud_backup_folder"],
+        "pcloud_backup_folder_id": env_vars["pcloud_backup_folder_id"],
+        "pcloud_backup_file": env_vars["pcloud_backup_file"],
+    }
+
+
+def validate_startup_env() -> dict[str, str]:
+    """
+    Valide l'ensemble des variables d'environnement requises au lancement.
+
+    Returns:
+        Dictionnaire contenant toutes les variables requises au demarrage.
+
+    Raises:
+        FileNotFoundError: Si le fichier .env n'existe pas.
+        ValueError: Si des variables requises sont manquantes.
+    """
+    env_vars = load_and_validate_env(REQUIRED_STARTUP_ENV_VARS)
+    logger.bind(type_log="ENV").info(
+        "Validation des variables d'environnement de demarrage reussie"
     )
+    return env_vars

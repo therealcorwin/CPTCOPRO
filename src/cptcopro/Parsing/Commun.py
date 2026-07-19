@@ -39,10 +39,10 @@ logger.remove()
 logger = logger.bind(type_log="PARSING_COMMUN")
 
 # Variables globales pour le cache des credentials
-_credentials_cache: tuple[str, str, str] | None = None
+_credentials_cache: dict[str, str] | None = None
 
 
-def _get_cached_credentials() -> tuple[str, str, str]:
+def _get_cached_credentials() -> dict[str, str]:
     """Récupère les credentials de manière lazy avec cache."""
     global _credentials_cache
     if _credentials_cache is None:
@@ -183,12 +183,14 @@ async def _recup_html_generic(
     async with async_playwright() as p:
         browser = await launch_browser(p, headless=headless)
         if browser is None:
-            logger.error(f"Impossible d'ouvrir le navigateur pour {section_name}")
+            logger.error(
+                f"Impossible d'ouvrir le navigateur pour {section_name}")
             return ERROR_OPEN_BROWSER
 
         try:
             page = await browser.new_page()
-            logger.info(f"[{section_name}] Navigateur démarré, connexion en cours...")
+            logger.info(
+                f"[{section_name}] Navigateur démarré, connexion en cours...")
 
             error = await login_and_open_menu(page, login, password, url)
             if error:
@@ -253,8 +255,12 @@ async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
     """
     import asyncio
 
-    login, password, url = _get_cached_credentials()
-    logger.info("Démarrage de la récupération parallèle avec 2 navigateurs séparés")
+    credentials = _get_cached_credentials()
+    login = credentials["login_site_copro"]
+    password = credentials["password_site_copro"]
+    url = credentials["url_site_copro"]
+    logger.info(
+        "Démarrage de la récupération parallèle avec 2 navigateurs séparés")
 
     async def _fetch_charges_delayed():
         """Lance les charges avec un délai pour éviter collision de login."""

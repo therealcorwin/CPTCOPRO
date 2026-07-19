@@ -15,7 +15,7 @@ logger.remove()
 logger = logger.bind(type_log="BACKUP")
 
 
-def backup_db(db_path) -> None:
+def backup_db(db_path) -> str | None:
     """
     Sauvegarde la base de données SQLite dans un dossier 'BACKUP' du répertoire de l'application.
     Le fichier de sauvegarde est nommé au format 'backup_bdd-DD-MM-YY-HH-MM-SS'. Toutes les étapes et événements sont enregistrés dans le fichier 'backup.txt' via loguru.
@@ -37,20 +37,23 @@ def backup_db(db_path) -> None:
 
     # Vérification et création du dossier backup
     if not os.path.exists(backup_dir):
-        logger.warning(f"Le répertoire '{backup_dir}' n'existe pas. Création en cours...")
+        logger.warning(
+            f"Le répertoire '{backup_dir}' n'existe pas. Création en cours...")
         try:
             os.makedirs(backup_dir)
             logger.success(f"Répertoire '{backup_dir}' créé.")
         except Exception as e:
-            logger.error(f"Erreur lors de la création du répertoire '{backup_dir}' : {e}")
-            return
+            logger.error(
+                f"Erreur lors de la création du répertoire '{backup_dir}' : {e}")
+            return None
     else:
         logger.info(f"Répertoire '{backup_dir}' déjà existant.")
 
     # Vérification de l'existence de la base de données
     if not os.path.exists(db_path):
-        logger.error(f"Base de données '{db_path}' introuvable. Sauvegarde annulée.")
-        return
+        logger.error(
+            f"Base de données '{db_path}' introuvable. Sauvegarde annulée.")
+        return None
 
     # Vérifier s'il y a une connexion persistante en cours
     try:
@@ -59,7 +62,8 @@ def backup_db(db_path) -> None:
         conn.close()
         logger.info("Connexion à la base de données fermée avant sauvegarde.")
     except Exception as e:
-        logger.error(f"Erreur lors de la fermeture de la connexion à la base : {e}")
+        logger.error(
+            f"Erreur lors de la fermeture de la connexion à la base : {e}")
 
     # Sauvegarde de la base de données
     try:
@@ -67,7 +71,9 @@ def backup_db(db_path) -> None:
         shutil.copy2(db_path, backup_path)
         logger.info(f"Base de données sauvegardée sous '{backup_path}'.")
     except Exception as e:
-        logger.error(f"Erreur lors de la sauvegarde de la base de données : {e}")
-        return
+        logger.error(
+            f"Erreur lors de la sauvegarde de la base de données : {e}")
+        return None
 
     logger.info("Sauvegarde terminée avec succès.")
+    return backup_path

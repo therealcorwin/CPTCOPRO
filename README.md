@@ -63,7 +63,7 @@ poetry run pytest -v
 | Variable | Description | Défaut |
 | ---------- | ----------- | -------- |
 | `CPTCOPRO_DB_NAME` | Nom du fichier SQLite si `CPTCOPRO_DB_PATH` n'est pas défini | `coproprietaires.sqlite` |
-| `CPTCOPRO_DB_PATH` | Chemin de la base de données | `src/cptcopro/coproprietaires.sqlite` |
+| `CPTCOPRO_DB_PATH` | Chemin de la base de données | `src/cptcopro/BDD/coproprietaires.sqlite` |
 | `CPTCOPRO_LOG_FILE` | Fichier de log | `logs/app.log` |
 
 `CPTCOPRO_LOG_LEVEL` n'est pas utilisé par le code actuel.
@@ -90,4 +90,3 @@ Voir [`reports/call_graph.md`](reports/call_graph.md) pour le graphe complet des
 - Les données persistantes vivent sous `src/cptcopro/BDD`, `src/cptcopro/logs` et `src/cptcopro/Backup` en développement.
 - Consulter `reports/call_graph.md` pour la vue détaillée des flux applicatifs.
 - Consulter `.github/copilot-instructions.md` pour le guide agent condensé et les conventions utiles au dépôt.
-

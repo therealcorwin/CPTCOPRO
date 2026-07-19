@@ -10,8 +10,12 @@ Pour une vue plus compacte du depot, voir README.md et .github/copilot-instructi
 
 ```mermaid
 flowchart TB
+    subgraph ENV[Bootstrap environnement]
+        env_start[validate_startup_env]
+    end
+
     subgraph ENTRY[Point d'entree]
-        main[main.py main()]
+        main["main.py main()"]
     end
 
     subgraph PARSING[Parsing]
@@ -49,6 +53,8 @@ flowchart TB
         ui_app[Affichage_Stream.py]
     end
 
+    env_start --> main
+
     main --> p_all
     p_all --> p_get
     p_all --> p_hc
@@ -84,11 +90,15 @@ flowchart TB
 ```mermaid
 sequenceDiagram
     participant M as main.py
+    participant E as env_loader
     participant P as Parsing.Commun
     participant TC as Traitement.Charge_Copro
     participant TL as Traitement.Lots_Copro
     participant DB as Database
     participant SL as streamlit_launcher
+
+    M->>E: validate_startup_env()
+    E-->>M: env valide / erreur explicite
 
     M->>P: recup_all_html_parallel(headless)
     P->>P: _get_cached_credentials()
@@ -204,6 +214,7 @@ flowchart LR
 | Module | Responsabilite | Fonctions principales |
 | --- | --- | --- |
 | main.py | Orchestration, CLI, execution | main |
+| utils/env_loader.py | Chargement et validation centralisee du .env | load_env_file, check_env_file_exists, validate_required_env_vars, load_and_validate_env, get_credentials, get_pcloud_credentials, get_pcloud_backup_config, validate_startup_env |
 | Parsing/Commun.py | Orchestration parallele et login | recup_all_html_parallel, recup_html_charges, recup_html_lots, \_recup_html_generic, login_and_open_menu |
 | Parsing/Charge_Copro.py | Navigation charge | recup_charges_coproprietaires |
 | Parsing/Lots_Copro.py | Navigation lots | recup_lots_coproprietaires |
@@ -242,6 +253,8 @@ flowchart LR
 ## Notes importantes
 
 - La fonction privee _recup_html_generic est le coeur DRY de la collecte HTML.
+- validate_startup_env est le point d'entree unique pour verifier les variables requises au demarrage.
+- init_env reste utilise dans certains points d'entree secondaires, mais le flux principal de main.py repose sur validate_startup_env.
 - Le flux principal n'appelle plus le dedoublonnage.
 - Raison: index UNIQUE et INSERT OR REPLACE dans la persistance des charges.
 - Les pages Streamlit utilisent majoritairement @st.cache_data sur les fonctions de chargement.
@@ -252,11 +265,12 @@ flowchart LR
 Verifier en priorite ces fichiers lors des evolutions:
 
 1. src/cptcopro/main.py
-2. src/cptcopro/Parsing/Commun.py
-3. src/cptcopro/Parsing/constants.py
-4. src/cptcopro/Affichage_Stream.py
-5. src/cptcopro/Database/__init__.py
-6. src/cptcopro/Pages/*.py
+2. src/cptcopro/utils/env_loader.py
+3. src/cptcopro/Parsing/Commun.py
+4. src/cptcopro/Parsing/constants.py
+5. src/cptcopro/Affichage_Stream.py
+6. src/cptcopro/Database/__init__.py
+7. src/cptcopro/Pages/*.py
 
 ## Checklist avant merge
 

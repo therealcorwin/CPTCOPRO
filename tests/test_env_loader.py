@@ -16,6 +16,7 @@ from cptcopro.utils.env_loader import (
     validate_required_env_vars,
     load_and_validate_env,
     get_credentials,
+    validate_startup_env,
 )
 
 
@@ -82,7 +83,8 @@ class TestValidateRequiredEnvVars:
     def test_some_vars_missing(self):
         """Retourne (False, [missing]) si des variables manquent."""
         with patch.dict(os.environ, {"VAR1": "val1"}, clear=True):
-            success, missing = validate_required_env_vars(["VAR1", "VAR2", "VAR3"])
+            success, missing = validate_required_env_vars(
+                ["VAR1", "VAR2", "VAR3"])
             assert success is False
             assert "VAR2" in missing
             assert "VAR3" in missing
@@ -276,8 +278,8 @@ class TestLoadAndValidateEnv:
 class TestGetCredentials:
     """Tests pour get_credentials()."""
 
-    def test_returns_tuple_when_valid(self, tmp_path):
-        """Retourne un tuple (login, password, url) quand valide.
+    def test_returns_dict_when_valid(self, tmp_path):
+        """Retourne un dict credentials quand valide.
 
         Ce test vérifie que get_credentials() charge réellement le fichier .env.
         """
@@ -289,7 +291,8 @@ class TestGetCredentials:
         )
 
         # Nettoyer les variables existantes pour s'assurer qu'elles viennent du fichier
-        vars_to_clean = ["login_site_copro", "password_site_copro", "url_site_copro"]
+        vars_to_clean = ["login_site_copro",
+                         "password_site_copro", "url_site_copro"]
         original_values = {var: os.environ.get(var) for var in vars_to_clean}
 
         try:
@@ -300,12 +303,12 @@ class TestGetCredentials:
             with patch(
                 "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
             ):
-                login, password, url = get_credentials()
+                result = get_credentials()
 
                 # Vérifier que les valeurs viennent bien du fichier .env
-                assert login == "creds_user"
-                assert password == "creds_pass"
-                assert url == "https://creds.site.com"
+                assert result["login_site_copro"] == "creds_user"
+                assert result["password_site_copro"] == "creds_pass"
+                assert result["url_site_copro"] == "https://creds.site.com"
         finally:
             # Restaurer les valeurs originales
             for var, value in original_values.items():
@@ -323,3 +326,103 @@ class TestGetCredentials:
         ):
             with pytest.raises(FileNotFoundError):
                 get_credentials()
+
+
+class TestValidateStartupEnv:
+    """Tests pour validate_startup_env()."""
+
+    def test_returns_env_dict_when_valid(self, tmp_path):
+        """Retourne un dict complet quand toutes les variables de démarrage sont présentes."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "login_site_copro=user\n"
+            "password_site_copro=pass\n"
+            "url_site_copro=https://site\n"
+            "url_situation_copro=https://situation\n"
+            "pcloud_APP_KEY=key\n"
+            "pcloud_APP_SECRET=secret\n"
+            "pcloud_location_id=2\n"
+            "pcloud_backup_folder=Backup\n"
+            "pcloud_backup_folder_id=123\n"
+            "pcloud_backup_file=backup.sqlite\n"
+        )
+
+        vars_to_clean = [
+            "login_site_copro",
+            "password_site_copro",
+            "url_site_copro",
+            "url_situation_copro",
+            "pcloud_APP_KEY",
+            "pcloud_APP_SECRET",
+            "pcloud_location_id",
+            "pcloud_backup_folder",
+            "pcloud_backup_folder_id",
+            "pcloud_backup_file",
+        ]
+        original_values = {var: os.environ.get(var) for var in vars_to_clean}
+
+        try:
+            for var in vars_to_clean:
+                os.environ.pop(var, None)
+
+            with patch(
+                "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
+            ):
+                result = validate_startup_env()
+
+                assert result["login_site_copro"] == "user"
+                assert result["pcloud_APP_SECRET"] == "secret"
+                assert result["pcloud_backup_file"] == "backup.sqlite"
+        finally:
+            for var, value in original_values.items():
+                if value is not None:
+                    os.environ[var] = value
+                else:
+                    os.environ.pop(var, None)
+
+    def test_raises_value_error_when_startup_vars_missing(self, tmp_path):
+        """Lève ValueError si une variable obligatoire de démarrage manque."""
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "login_site_copro=user\n"
+            "password_site_copro=pass\n"
+            "url_site_copro=https://site\n"
+            "url_situation_copro=https://situation\n"
+            "pcloud_APP_KEY=key\n"
+            "pcloud_APP_SECRET=secret\n"
+            "pcloud_location_id=2\n"
+            "pcloud_backup_folder=Backup\n"
+            "pcloud_backup_folder_id=123\n"
+            # pcloud_backup_file volontairement absent
+        )
+
+        vars_to_clean = [
+            "login_site_copro",
+            "password_site_copro",
+            "url_site_copro",
+            "url_situation_copro",
+            "pcloud_APP_KEY",
+            "pcloud_APP_SECRET",
+            "pcloud_location_id",
+            "pcloud_backup_folder",
+            "pcloud_backup_folder_id",
+            "pcloud_backup_file",
+        ]
+        original_values = {var: os.environ.get(var) for var in vars_to_clean}
+
+        try:
+            for var in vars_to_clean:
+                os.environ.pop(var, None)
+
+            with patch(
+                "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
+            ):
+                with pytest.raises(ValueError) as exc_info:
+                    validate_startup_env()
+                assert "pcloud_backup_file" in str(exc_info.value)
+        finally:
+            for var, value in original_values.items():
+                if value is not None:
+                    os.environ[var] = value
+                else:
+                    os.environ.pop(var, None)

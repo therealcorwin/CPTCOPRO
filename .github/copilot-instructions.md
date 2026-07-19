@@ -79,7 +79,7 @@ python -m cptcopro.main
 | Variable | Description | Défaut |
 |----------|-------------|--------|
 | `CPTCOPRO_DB_NAME` | Nom du fichier SQLite si `CPTCOPRO_DB_PATH` n'est pas défini | `coproprietaires.sqlite` |
-| `CPTCOPRO_DB_PATH` | Chemin de la base de données | `src/cptcopro/coproprietaires.sqlite` |
+| `CPTCOPRO_DB_PATH` | Chemin de la base de données | `src/cptcopro/BDD/coproprietaires.sqlite` |
 | `CPTCOPRO_LOG_FILE` | Fichier de log | `logs/app.log` |
 
 > Note : `CPTCOPRO_LOG_LEVEL` est documenté historiquement mais n'est pas utilisé par le code actuel.
