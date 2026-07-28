@@ -24,7 +24,7 @@ def _get_db_cache_key(db_path: Path) -> int:
         return 0
 
 
-@st.cache_data()
+@st.cache_data(ttl=300, show_spinner=False)
 def chargement_somme_debit_global(DB_PATH: Path, db_cache_key: int) -> pd.DataFrame:
     del db_cache_key
     query = "SELECT sum(debit) AS 'debit global', date FROM vw_charge_coproprietaires GROUP BY date"
@@ -47,7 +47,7 @@ def chargement_somme_debit_global(DB_PATH: Path, db_cache_key: int) -> pd.DataFr
     return debit_global
 
 
-@st.cache_data()
+@st.cache_data(ttl=300, show_spinner=False)
 def suivi_nbre_alertes(db_path: Path, db_cache_key: int) -> tuple[int, int]:
     """Récupère les deux derniers relevés d'alertes pour calculer le delta.
 
@@ -98,7 +98,7 @@ if Charge_globale.empty:
 
 st.image(Path(__file__).parent / "Assets" / "gb2.png", width=1000)
 
-gauche, centre, droite = st.columns(3)
+gauche, centre, droite = st.columns(3, gap=24)
 
 with st.container():
     with gauche:
@@ -132,7 +132,6 @@ with st.container():
         charge_N = f"{Charge_globale['debit global'].iat[-1]:.2f}"
         # Vérifier qu'il existe au moins 2 lignes avant d'accéder à iat[-2]
         if len(Charge_globale) >= 2:
-            charge_N_1 = f"{Charge_globale['debit global'].iat[-2]:.2f}"
             delta_val = (
                 Charge_globale["debit global"].iat[-1]
                 - Charge_globale["debit global"].iat[-2]
@@ -140,7 +139,6 @@ with st.container():
             delta_charge = f"{delta_val:.2f}"
         else:
             # Valeur de repli : aucune valeur précédente -> ne pas afficher de delta
-            charge_N_1 = None
             delta_charge = None
         st.metric(
             "CHARGE GLOBALE",
@@ -162,8 +160,3 @@ chart = px.line(
 st.plotly_chart(chart, width="stretch")
 with st.expander("Table des données"):
     st.dataframe(Charge_globale.sort_values(by="date", ascending=False))
-
-if st.button("rerun"):
-    st.rerun()
-else:
-    st.stop()

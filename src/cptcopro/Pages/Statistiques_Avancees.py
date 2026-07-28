@@ -28,14 +28,22 @@ except ImportError:
     from cptcopro.utils.privacy import appliquer_confidentialite, is_privacy_enabled
 
 
+def _get_db_cache_key(db_path: Path) -> int:
+    try:
+        return db_path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 # ============================================================================
 # Fonctions de chargement des données
 # ============================================================================
 
 
-@st.cache_data
-def load_charges(db_path: Path) -> pd.DataFrame:
+@st.cache_data(ttl=300, show_spinner=False)
+def load_charges(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     """Charge toutes les charges depuis la vue."""
+    del db_cache_key
     with sqlite3.connect(str(db_path)) as conn:
         df = pd.read_sql_query(
             """SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, 
@@ -51,9 +59,10 @@ def load_charges(db_path: Path) -> pd.DataFrame:
     return df
 
 
-@st.cache_data
-def load_alertes(db_path: Path) -> pd.DataFrame:
+@st.cache_data(ttl=300, show_spinner=False)
+def load_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     """Charge les alertes actives."""
+    del db_cache_key
     with sqlite3.connect(str(db_path)) as conn:
         df = pd.read_sql_query(
             """SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, 
@@ -67,9 +76,10 @@ def load_alertes(db_path: Path) -> pd.DataFrame:
     return df
 
 
-@st.cache_data
-def load_config_alertes(db_path: Path) -> pd.DataFrame:
+@st.cache_data(ttl=300, show_spinner=False)
+def load_config_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     """Charge la configuration des seuils d'alerte."""
+    del db_cache_key
     with sqlite3.connect(str(db_path)) as conn:
         df = pd.read_sql_query(
             "SELECT type_apt, charge_moyenne, taux, threshold FROM config_alerte",
@@ -78,9 +88,10 @@ def load_config_alertes(db_path: Path) -> pd.DataFrame:
     return df
 
 
-@st.cache_data
-def load_coproprietaires(db_path: Path) -> pd.DataFrame:
+@st.cache_data(ttl=300, show_spinner=False)
+def load_coproprietaires(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     """Charge la liste des copropriétaires."""
+    del db_cache_key
     with sqlite3.connect(str(db_path)) as conn:
         df = pd.read_sql_query(
             "SELECT nom_proprietaire, code_proprietaire, type_apt FROM coproprietaires",
@@ -93,7 +104,6 @@ def load_coproprietaires(db_path: Path) -> pd.DataFrame:
 # Configuration de la page
 # ============================================================================
 
-st.set_page_config(page_title="Statistiques Avancées", layout="wide")
 st.title("📊 Statistiques Avancées")
 st.markdown("Analyses statistiques complémentaires des données de copropriété.")
 
@@ -102,10 +112,11 @@ if is_privacy_enabled():
     st.info("🔒 Mode confidentiel actif - données anonymisées")
 
 # Chargement des données
-charges_df = load_charges(DB_PATH)
-alertes_df = load_alertes(DB_PATH)
-config_df = load_config_alertes(DB_PATH)
-copro_df = load_coproprietaires(DB_PATH)
+db_cache_key = _get_db_cache_key(DB_PATH)
+charges_df = load_charges(DB_PATH, db_cache_key)
+alertes_df = load_alertes(DB_PATH, db_cache_key)
+config_df = load_config_alertes(DB_PATH, db_cache_key)
+copro_df = load_coproprietaires(DB_PATH, db_cache_key)
 
 if charges_df.empty:
     st.warning("Aucune donnée de charges disponible.")
@@ -404,6 +415,7 @@ pct_risque = st.slider(
     max_value=99,
     value=80,
     help="Les propriétaires au-dessus de ce pourcentage sont considérés à risque",
+    key="stats_avancees_pct_risque",
 )
 
 # Filtrer les propriétaires à risque (pas encore en alerte mais proches)

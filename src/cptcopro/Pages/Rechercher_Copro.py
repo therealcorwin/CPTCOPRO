@@ -26,6 +26,13 @@ except Exception as e:
     )
 
 
+def _get_db_cache_key(db_path: Path) -> int:
+    try:
+        return db_path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 def _on_select_all_change(multi_key: str, opts: list, sel_key: str):
     """Callback réutilisable pour la checkbox 'Sélectionner tout'.
     Met à jour la session_state du multiselect quand la checkbox change.
@@ -40,9 +47,10 @@ def _on_select_all_change(multi_key: str, opts: list, sel_key: str):
         logger.error("_on_select_all_change erreur: {}", e)
 
 
-@st.cache_data
-def load_all_charges_data(db_path: Path) -> pd.DataFrame:
+@st.cache_data(ttl=300, show_spinner=False)
+def load_all_charges_data(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     """Charge toutes les données de charges depuis la vue vw_charge_coproprietaires."""
+    del db_cache_key
     sql = "SELECT nom_proprietaire, code_proprietaire, num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires"
     expected_cols = [
         "proprietaire",
@@ -107,31 +115,61 @@ def _on_multiselect_change(multi_key: str, opts: list, sel_key: str):
         logger.error("_on_multiselect_change erreur: {}", e)
 
 
-st.set_page_config(page_title="Recherche Info Copropriétaires", layout="wide")
+def _normaliser_num_apt_serie(serie: pd.Series) -> pd.Series:
+    """Normalise num_apt en chaîne sans espaces ni zéros initiaux superflus."""
+    values = serie.astype("string").str.strip()
+    return values.str.replace(r"^0+(\d+)$", r"\1", regex=True)
+
+
 st.title("Recherche Info Copropriétaires")
 
 st.divider()
-charges_df = load_all_charges_data(DB_PATH)
+db_cache_key = _get_db_cache_key(DB_PATH)
+charges_df = load_all_charges_data(DB_PATH, db_cache_key)
 proprietaires_df = (
     charges_df[["proprietaire", "code"]].drop_duplicates().reset_index(drop=True)
 )
 
 st.subheader("Recherche informations sur les copropriétaires")
 proprietaire_input = st.text_input(
-    "Entrez le nom du copropriétaire à rechercher :"
+    "Entrez le nom du copropriétaire à rechercher :", key="recherche_input_nom"
 ).strip()
 
+numero_options = [""] + [str(i) for i in range(1, 65)]
+numero_input = st.selectbox(
+    "Ou recherchez par numéro d'appartement (1 à 64) :",
+    options=numero_options,
+    key="recherche_numero_appartement",
+)
+
 proprietaires_selection: List[str] = []
-if proprietaire_input:
+if proprietaire_input or numero_input:
     # Filtrer la liste de noms de copropriétaires
-    options = [
+    options_nom = [
         p
         for p in proprietaires_df["proprietaire"].values
         if proprietaire_input.lower() in p.lower()
-    ]
+    ] if proprietaire_input else proprietaires_df["proprietaire"].tolist()
+
+    if numero_input:
+        num_apt_norm = _normaliser_num_apt_serie(charges_df["num_apt"])
+        proprietaires_numero = charges_df.loc[
+            num_apt_norm == str(int(numero_input)), "proprietaire"
+        ].dropna().unique().tolist()
+        options = [p for p in options_nom if p in proprietaires_numero]
+    else:
+        options = options_nom
 
     if options:
-        st.markdown(f"### Résultats pour '{proprietaire_input}':")
+        if proprietaire_input and numero_input:
+            st.markdown(
+                f"### Résultats pour nom contenant '{proprietaire_input}' et appartement n°{numero_input}:"
+            )
+        elif proprietaire_input:
+            st.markdown(f"### Résultats pour '{proprietaire_input}':")
+        else:
+            st.markdown(f"### Résultats pour appartement n°{numero_input}:")
+
         # Afficher les informations uniques pour les propriétaires trouvés
         info_df = charges_df[charges_df["proprietaire"].isin(options)]
         info_df = (
@@ -184,9 +222,18 @@ if proprietaire_input:
         else:
             proprietaires_selection = options
     else:
-        st.warning(f"Aucun copropriétaire trouvé avec le nom '{proprietaire_input}'.")
+        if proprietaire_input and numero_input:
+            st.warning(
+                f"Aucun copropriétaire trouvé pour '{proprietaire_input}' avec le numéro d'appartement {numero_input}."
+            )
+        elif proprietaire_input:
+            st.warning(f"Aucun copropriétaire trouvé avec le nom '{proprietaire_input}'.")
+        else:
+            st.warning(
+                f"Aucun copropriétaire trouvé pour le numéro d'appartement {numero_input}."
+            )
 else:
-    st.info("Veuillez entrer un nom de copropriétaire pour rechercher.")
+    st.info("Veuillez entrer un nom de copropriétaire ou sélectionner un numéro d'appartement.")
 
 st.divider()
 st.subheader("Suivi des charges pour le(s) copropriétaire(s) sélectionné(s)")

@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from cptcopro.Database import integrite_db, enregistrer_coproprietaires
+from cptcopro.Database.Coproprietaires_To_BDD import CollecteCoproprietairesInvalideError
 
 
 def read_all_coproprietaires(db_path: str):
@@ -71,3 +72,55 @@ def test_enregistrer_coproprietaires_without_integrite_db_raises(tmp_path: Path)
     with pytest.raises(sqlite3.OperationalError):
         # Should raise because table coproprietaires does not exist
         enregistrer_coproprietaires([{"proprietaire": "X", "code": "X001", "num_apt": "1", "type_apt": "Apt"}], db_path)
+
+
+def test_enregistrer_coproprietaires_refuse_lot_invalide_and_preserve_existing_data(tmp_path: Path):
+    db_file = tmp_path / "test_copro_quality_gate.db"
+    db_path = str(db_file)
+
+    integrite_db(db_path)
+
+    baseline = [
+        {"proprietaire": "Alice Dupont", "code": "A001", "num_apt": "101", "type_apt": "3p"},
+        {"proprietaire": "Bob Martin", "code": "B002", "num_apt": "102", "type_apt": "4p"},
+    ]
+    enregistrer_coproprietaires(baseline, db_path)
+    before_rows = read_all_coproprietaires(db_path)
+
+    # Une seule association invalide doit faire échouer toute la collecte.
+    invalid_payload = [
+        {"proprietaire": "Alice Dupont", "code": "A001", "num_apt": "101", "type_apt": "3p"},
+        {"proprietaire": "Bob Martin", "code": "B002", "num_apt": "", "type_apt": "4p"},
+    ]
+
+    with pytest.raises(CollecteCoproprietairesInvalideError):
+        enregistrer_coproprietaires(invalid_payload, db_path)
+
+    after_rows = read_all_coproprietaires(db_path)
+    assert after_rows == before_rows
+
+
+def test_enregistrer_coproprietaires_refuse_changed_lot_set(tmp_path: Path):
+    db_file = tmp_path / "test_copro_lot_set.db"
+    db_path = str(db_file)
+
+    integrite_db(db_path)
+
+    baseline = [
+        {"proprietaire": "Alice Dupont", "code": "A001", "num_apt": "101", "type_apt": "3p"},
+        {"proprietaire": "Bob Martin", "code": "B002", "num_apt": "102", "type_apt": "4p"},
+    ]
+    enregistrer_coproprietaires(baseline, db_path)
+    before_rows = read_all_coproprietaires(db_path)
+
+    # Les noms peuvent changer, mais pas le set (num_lot, type_apt).
+    changed_lot_payload = [
+        {"proprietaire": "Alice Nouveau", "code": "A001", "num_apt": "101", "type_apt": "3p"},
+        {"proprietaire": "Bob Nouveau", "code": "B002", "num_apt": "999", "type_apt": "4p"},
+    ]
+
+    with pytest.raises(CollecteCoproprietairesInvalideError):
+        enregistrer_coproprietaires(changed_lot_payload, db_path)
+
+    after_rows = read_all_coproprietaires(db_path)
+    assert after_rows == before_rows

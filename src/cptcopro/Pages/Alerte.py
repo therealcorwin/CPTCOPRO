@@ -30,7 +30,7 @@ def _get_db_cache_key(db_path: Path) -> int:
         return 0
 
 
-@st.cache_data()
+@st.cache_data(ttl=300, show_spinner=False)
 def recup_alertes(
     db_path: Path, db_cache_key: int
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -53,10 +53,12 @@ def recup_alertes(
         return pd.DataFrame(), pd.DataFrame()
 
 
-def recup_debits_proprietaires_alertes(db_path: Path) -> pd.DataFrame:
+@st.cache_data(ttl=300, show_spinner=False)
+def recup_debits_proprietaires_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     """Récupère les débits par date pour les propriétaires en alerte.
     Renvoie un DataFrame avec les colonnes ['Code', 'Proprietaire', 'date', 'debit'].
     """
+    del db_cache_key
     query = (
         "SELECT c.code_proprietaire AS Code, c.nom_proprietaire AS Proprietaire, c.date, c.debit "
         "FROM vw_charge_coproprietaires c "
@@ -80,7 +82,8 @@ def recup_debits_proprietaires_alertes(db_path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def recup_suivi_alertes(db_path: Path) -> pd.DataFrame:
+@st.cache_data(ttl=300, show_spinner=False)
+def recup_suivi_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     query = """
         SELECT date_releve, nombre_alertes, total_debit,
                nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
@@ -103,12 +106,11 @@ def recup_suivi_alertes(db_path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-st.set_page_config(page_title="Alertes Débit Élevé", layout="wide")
 st.title("Alertes Débit Élevé des Copropriétaires")
 
 db_cache_key = _get_db_cache_key(DB_PATH)
 alertes_df, sommealertes_df = recup_alertes(DB_PATH, db_cache_key)
-suivi_alerte = recup_suivi_alertes(DB_PATH)
+suivi_alerte = recup_suivi_alertes(DB_PATH, db_cache_key)
 
 date_releve = suivi_alerte["date_releve"].iat[0] if not suivi_alerte.empty else "N/A"
 date_dernier_releve = (
@@ -127,9 +129,9 @@ dernier_somme_alerte = (
 )
 delta_somme_alerte = somme_alerte - dernier_somme_alerte
 
-debits_df = recup_debits_proprietaires_alertes(DB_PATH)
+debits_df = recup_debits_proprietaires_alertes(DB_PATH, db_cache_key)
 
-gauche, centre, droite = st.columns(3)
+gauche, centre, droite = st.columns(3, gap=24)
 
 with st.container():
     with gauche:

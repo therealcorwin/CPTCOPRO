@@ -242,6 +242,9 @@ def main() -> None:
         logger.info("Traitement terminé et données sauvegardées.")
     except Exception as exc:
         logger.error(f"Erreur lors des opérations BDD/backup : {exc}")
+        raise RuntimeError(
+            "ECHEC_CRITIQUE_COLLECTE_COPROPRIETAIRES: données lots invalides, base non écrasée."
+        ) from exc
 
     # Note: Le dédoublonnage n'est plus nécessaire grâce à l'index UNIQUE
     # et INSERT OR REPLACE dans enregistrer_donnees_sqlite()

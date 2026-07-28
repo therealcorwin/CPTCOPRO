@@ -228,6 +228,16 @@ def start_streamlit_inprocess(
     os.environ["STREAMLIT_SERVER_PORT"] = str(used_port)
     os.environ["STREAMLIT_SERVER_ADDRESS"] = host
 
+    run_on_save = (
+        os.getenv("CPTCOPRO_STREAMLIT_RUN_ON_SAVE", "false").strip().lower()
+        == "true"
+    )
+    fast_reruns = (
+        os.getenv("CPTCOPRO_STREAMLIT_FAST_RERUNS", "true").strip().lower()
+        == "true"
+    )
+    file_watcher_type = os.getenv("CPTCOPRO_STREAMLIT_FILE_WATCHER", "none").strip()
+
     # Don't open browser manually - let Streamlit handle it via headless setting
     # This prevents duplicate tabs from opening
 
@@ -240,12 +250,12 @@ def start_streamlit_inprocess(
         "server.address": host,
         # If open_browser=True, headless=False (Streamlit opens browser)
         "server.headless": not open_browser,
-        "server.fileWatcherType": "none",
-        "server.runOnSave": False,
+        "server.fileWatcherType": file_watcher_type,
+        "server.runOnSave": run_on_save,
         "browser.gatherUsageStats": False,
         "browser.serverAddress": host,
         "browser.serverPort": used_port,
-        "runner.fastReruns": False,
+        "runner.fastReruns": fast_reruns,
 
     }
 

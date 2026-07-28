@@ -100,7 +100,8 @@ menus = st.navigation(
         ],
         "Liste des Copropriétaires": [Liste_Copro_page],
         "Recherche Info Copropriétaires": [Recherche_Copro_page],
-    }
+    },
+    expanded=True,
 )
 
 # --- SHARED ON ALL PAGES ---

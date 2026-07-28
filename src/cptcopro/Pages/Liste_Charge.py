@@ -17,9 +17,17 @@ except ImportError:
     from cptcopro.utils.privacy import appliquer_confidentialite, is_privacy_enabled
 
 
-@st.cache_data
-def load_charges(db_path: Path) -> pd.DataFrame:
+def _get_db_cache_key(db_path: Path) -> int:
+    try:
+        return db_path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_charges(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     """Charger la vue `vw_charge_coproprietaires` depuis SQLite et normaliser la colonne date."""
+    del db_cache_key
     with sqlite3.connect(db_path) as conn:
         df = pd.read_sql_query(
             "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires",
@@ -30,36 +38,48 @@ def load_charges(db_path: Path) -> pd.DataFrame:
     return df
 
 
-st.set_page_config(page_title="Suivi de charge détaillé", layout="wide")
 st.title("Suivi de charge détaillé des copropriétaires")
 
 # Debug: afficher l'état de confidentialité
 if is_privacy_enabled():
     st.info("🔒 Mode confidentiel actif - données anonymisées")
 
-df = load_charges(DB_PATH)
+db_cache_key = _get_db_cache_key(DB_PATH)
+df = load_charges(DB_PATH, db_cache_key)
 st.divider()
-gauche, centre, droite = st.columns(3)
+gauche, centre, droite, droite2 = st.columns(4, gap=24)
 with gauche:
     proprietaires = st.multiselect(
         "Filtrer par copropriétaire",
         options=df["proprietaire"].unique(),
         default=df["proprietaire"].unique(),
+        key="liste_charge_proprietaires",
     )
 with centre:
     code = st.multiselect(
-        "Filtrer par code", options=df["code"].unique(), default=df["code"].unique()
+        "Filtrer par code",
+        options=df["code"].unique(),
+        default=df["code"].unique(),
+        key="liste_charge_codes",
     )
 with droite:
     type_apt = st.multiselect(
         "Filtrer par type d'appartement",
         options=df["type_apt"].unique(),
         default=df["type_apt"].unique(),
+        key="liste_charge_types",
+    )
+with droite2:
+    num_apt = st.multiselect(
+        "Filtrer par numéro d'appartement",
+        options=df["num_apt"].unique(),
+        default=df["num_apt"].unique(),
+        key="liste_charge_num_apt",
     )
 date_min = df["date"].min()
 date_max = df["date"].max()
 date_range = st.date_input(
-    "Sélectionner une plage de dates", value=[date_min, date_max]
+    "Sélectionner une plage de dates", value=[date_min, date_max], key="liste_charge_dates"
 )
 loguru.logger.info("Starting Streamlit app for coproprietaires display")
 
@@ -109,6 +129,7 @@ mask = (
     df["proprietaire"].isin(proprietaires)
     & df["code"].isin(code)
     & df["type_apt"].isin(type_apt)
+    & df["num_apt"].isin(num_apt)
     & (df["date"] >= start_date)
     & (df["date"] <= end_date)
 )
@@ -116,4 +137,4 @@ filtered_df = df.loc[mask].copy()
 filtered_df = filtered_df.sort_values(
     ["date", "proprietaire"], ascending=[False, True]
 )  # tri par défaut
-st.dataframe(appliquer_confidentialite(filtered_df))
+st.dataframe(appliquer_confidentialite(filtered_df), width="stretch")

@@ -74,10 +74,19 @@ except ImportError:
             conn.close()
 
 
-def load_config() -> pd.DataFrame:
-    """Charge la configuration des alertes depuis la base de données."""
+def _get_db_cache_key(db_path: Path) -> int:
     try:
-        config = get_config_alertes(str(DB_PATH))
+        return db_path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_config(db_path: Path, db_cache_key: int) -> pd.DataFrame:
+    """Charge la configuration des alertes depuis la base de données."""
+    del db_cache_key
+    try:
+        config = get_config_alertes(str(db_path))
         if config:
             df = pd.DataFrame(config)
             # Renommer les colonnes pour l'affichage
@@ -114,8 +123,6 @@ def save_config(
         return False
 
 
-# Configuration de la page
-st.set_page_config(page_title="Configuration Alertes", layout="wide")
 st.title("⚙️ Configuration des Seuils d'Alerte")
 
 st.markdown("""
@@ -127,7 +134,8 @@ configuré pour son type d'appartement.
 """)
 
 # Charger la configuration actuelle
-config_df = load_config()
+db_cache_key = _get_db_cache_key(DB_PATH)
+config_df = load_config(DB_PATH, db_cache_key)
 
 if config_df.empty:
     st.warning(
@@ -182,6 +190,7 @@ else:
             "Type d'appartement",
             options=types_disponibles,
             format_func=lambda x: f"{x.upper()}" if x != "default" else "Par défaut",
+            key="config_alertes_type_selectionne",
         )
 
     # Récupérer les valeurs actuelles pour le type sélectionné
@@ -220,6 +229,7 @@ else:
                 value=current_charge,
                 step=50.0,
                 help="Charge moyenne observée pour ce type d'appartement",
+                key="config_alertes_charge_moyenne",
             )
 
         with col_b:
@@ -230,6 +240,7 @@ else:
                 value=current_taux,
                 step=0.05,
                 help="Coefficient multiplicateur (ex: 1.33 = 33% au-dessus de la moyenne)",
+                key="config_alertes_taux",
             )
 
         with col_c:
@@ -242,6 +253,7 @@ else:
                 value=calculated_threshold,
                 step=50.0,
                 help="Seuil au-delà duquel une alerte est déclenchée",
+                key="config_alertes_threshold",
             )
 
         # Aperçu du calcul
@@ -256,6 +268,7 @@ else:
         if submitted:
             success = save_config(type_selectionne, new_charge, new_taux, new_threshold)
             if success:
+                load_config.clear()
                 st.success(
                     f"✅ Configuration pour '{type_selectionne.upper()}' mise à jour avec succès!"
                 )

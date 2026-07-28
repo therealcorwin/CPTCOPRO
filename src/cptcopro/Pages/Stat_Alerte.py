@@ -30,7 +30,7 @@ def _get_db_cache_key(db_path: Path) -> int:
         return 0
 
 
-@st.cache_data()
+@st.cache_data(ttl=300, show_spinner=False)
 def recup_alertes(
     db_path: Path, db_cache_key: int
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -53,7 +53,9 @@ def recup_alertes(
         return pd.DataFrame(), pd.DataFrame()
 
 
-def recup_suivi_alertes(db_path: Path) -> pd.DataFrame:
+@st.cache_data(ttl=300, show_spinner=False)
+def recup_suivi_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
+    del db_cache_key
     query = """
         SELECT date_releve, nombre_alertes, total_debit,
                nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
@@ -92,13 +94,14 @@ def get_delta(col):
     return 0
 
 
-suivi_alerte = recup_suivi_alertes(DB_PATH)
-alertes_df, total_debit_df = recup_alertes(DB_PATH, _get_db_cache_key(DB_PATH))
+db_cache_key = _get_db_cache_key(DB_PATH)
+suivi_alerte = recup_suivi_alertes(DB_PATH, db_cache_key)
+alertes_df, total_debit_df = recup_alertes(DB_PATH, db_cache_key)
 
 # Section statistiques par type d'appartement
 if not suivi_alerte.empty:
     st.markdown("#### Répartition par type d'appartement")
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5 = st.columns(5, gap=24)
 
     with col1:
         st.metric(
@@ -148,7 +151,8 @@ if not alertes_df.empty:
         alertes_df["TypeApt"].dropna().unique().tolist()
     )
     type_selectionne = st.selectbox(
-        "Filtrer par type d'appartement", types_disponibles)
+        "Filtrer par type d'appartement", types_disponibles, key="stat_alerte_filtre_type"
+    )
 
     if type_selectionne != "Tous":
         alertes_filtrees = alertes_df[alertes_df["TypeApt"]

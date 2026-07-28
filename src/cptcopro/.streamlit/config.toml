@@ -6,6 +6,10 @@ linkColor="darkOrchid"
 [server]
 runOnSave = true
 fileWatcherType = "none"
+maxWidgetStateSize = 25
+
+[client]
+disableDataExport = true
 
 [browser]
 gatherUsageStats = false

@@ -23,9 +23,17 @@ except ImportError:
     )
 
 
-@st.cache_data
-def load_data(db_path):
+def _get_db_cache_key(db_path: Path) -> int:
+    try:
+        return db_path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_data(db_path: Path, db_cache_key: int):
     """Charge les données depuis la base de données et les met en cache."""
+    del db_cache_key
     with sqlite3.connect(db_path) as conn:
         df = pd.read_sql_query(
             "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires",
@@ -36,11 +44,11 @@ def load_data(db_path):
     return df
 
 
-st.set_page_config(page_title="Analyse des débits des Copropriétaires", layout="wide")
 st.title("Analyse des débits des Copropriétaires")
 
 loguru.logger.info("Démarrage de la page d'analyse des débits.")
-df = load_data(DB_PATH)
+db_cache_key = _get_db_cache_key(DB_PATH)
+df = load_data(DB_PATH, db_cache_key)
 
 # --- Filtres ---
 st.sidebar.header("Filtres")
@@ -54,12 +62,14 @@ selected_proprietaires = st.sidebar.multiselect(
     "Sélectionner un ou plusieurs propriétaires",
     options=all_owners_sorted,
     default=top_10_debit_owners,
+    key="courbe_charge_proprietaires",
 )
 date_range = st.sidebar.date_input(
     "Sélectionner une plage de dates",
     value=(df["date"].min(), df["date"].max()),
     min_value=df["date"].min(),
     max_value=df["date"].max(),
+    key="courbe_charge_dates",
 )
 # Si start_date = end_date, Streamlit retourne un single date au lieu d'un tuple# Pour eviter une erreur on verifie le type
 if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
@@ -79,15 +89,18 @@ else:
         & (df["date"] == end_date)
     ]
 
-fig = px.line(
-    preparer_df_pour_graphe(filtered_df, "proprietaire"),
-    x="date",
-    y="debit",
-    color="proprietaire",
-    title="Évolution des débits par propriétaire",
-    markers=False,
-)
-st.plotly_chart(fig, width="stretch")
+if filtered_df.empty:
+    st.warning("Aucune donnée pour les filtres sélectionnés.")
+else:
+    fig = px.line(
+        preparer_df_pour_graphe(filtered_df, "proprietaire"),
+        x="date",
+        y="debit",
+        color="proprietaire",
+        title="Évolution des débits par propriétaire",
+        markers=False,
+    )
+    st.plotly_chart(fig, width="stretch")
 # --- Affichage des données brutes ---
 with st.expander("Afficher les données filtrées"):
     st.dataframe(
