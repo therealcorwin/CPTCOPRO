@@ -11,6 +11,21 @@ from loguru import logger
 logger = logger.bind(type_log="BDD")
 
 
+def _normaliser_lignes_charge(data: List[Any]) -> list[tuple[Any, Any, Any, Any, Any]]:
+    """Normalise la collecte charges en ignorant les anciennes entrées d'en-tête.
+
+    Historique: le code supprimait systématiquement `data[0:3]`.
+    Désormais on accepte:
+    - une liste directement composée de tuples charges,
+    - une liste mixte contenant des lignes d'en-tête (str) puis des tuples.
+    """
+    lignes: list[tuple[Any, Any, Any, Any, Any]] = []
+    for row in data:
+        if isinstance(row, (tuple, list)) and len(row) >= 5:
+            lignes.append((row[0], row[1], row[2], row[3], row[4]))
+    return lignes
+
+
 def enregistrer_donnees_sqlite(data: List[Any], db_path: str) -> None:
     """
     Enregistre les données extraites dans une base de données SQLite.
@@ -34,16 +49,15 @@ def enregistrer_donnees_sqlite(data: List[Any], db_path: str) -> None:
         return
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
+    lignes = _normaliser_lignes_charge(data)
     try:
         # Insertion des données avec INSERT OR REPLACE
         # Si une entrée avec le même (code_proprietaire, date) existe, elle est mise à jour
-        # Ignorer les trois premiers éléments de data (en-têtes) avec data[3:]
-        # data[3:] contient des tuples (code_proprietaire, nom_proprietaire, debit, credit, date)
         cur.executemany(
             """INSERT OR REPLACE INTO charge 
                (code_proprietaire, nom_proprietaire, debit, credit, date, last_check) 
                VALUES (?, ?, ?, ?, ?, CURRENT_DATE)""",
-            data[3:],
+            lignes,
         )
         conn.commit()
     except Exception as e:
@@ -51,9 +65,5 @@ def enregistrer_donnees_sqlite(data: List[Any], db_path: str) -> None:
         raise
     finally:
         conn.close()
-    # Log le nombre de lignes traitées (on ignore les 3 premiers éléments d'en-tête)
-    try:
-        processed_count = len(data[3:])
-    except Exception:
-        processed_count = 0
+    processed_count = len(lignes)
     logger.info(f"{processed_count} enregistrements traités (insérés ou mis à jour).")

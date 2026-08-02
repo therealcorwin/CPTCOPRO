@@ -6,6 +6,7 @@ La connexion et l'orchestration sont gérées par Parsing.Commun.
 """
 from playwright.async_api import Page
 from loguru import logger
+from .constants import TIMEOUT_PAGE_LOAD
 
 logger.remove()
 logger = logger.bind(type_log="PARSING_CHARGES")
@@ -30,11 +31,23 @@ async def recup_charges_coproprietaires(page: Page) -> str:
         return "KO_CLICK_SOLDE_COPRO"
     
     try:
-        await page.wait_for_load_state("networkidle")
+        # `networkidle` peut rester bloqué selon le site (requêtes de fond persistantes).
+        # On applique un timeout explicite puis on bascule sur un état plus tolérant.
+        await page.wait_for_load_state("networkidle", timeout=TIMEOUT_PAGE_LOAD)
         logger.info("Attente de la fin du chargement après affichage du solde")
     except Exception as e:
-        logger.error(f"Erreur lors de l'attente du chargement final : {e}")
-        return "KO_WAIT_FOR_FINAL_LOAD"
+        logger.warning(
+            "networkidle non atteint dans le délai, fallback domcontentloaded: {}",
+            e,
+        )
+        try:
+            await page.wait_for_load_state(
+                "domcontentloaded", timeout=TIMEOUT_PAGE_LOAD
+            )
+            logger.info("Fallback domcontentloaded atteint")
+        except Exception as e2:
+            logger.error(f"Erreur lors de l'attente du chargement final : {e2}")
+            return "KO_WAIT_FOR_FINAL_LOAD"
     
     try:
         html_content = await page.content()

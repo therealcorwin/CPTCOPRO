@@ -33,14 +33,27 @@ ALERT_TRIGGERS_SQL = """
           (SELECT threshold FROM config_alerte WHERE type_apt = 'default'),
           2000.0)
     BEGIN
-        INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, first_detection, last_detection, occurence)
+        INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, date_origin, first_detection, last_detection, occurence)
         VALUES (NEW.id, NEW.nom_proprietaire, NEW.code_proprietaire, NEW.debit,
             COALESCE((SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = NEW.code_proprietaire), 'na'),
+            NEW.date,
             CURRENT_DATE, CURRENT_DATE, 1)
         ON CONFLICT(code_proprietaire) DO UPDATE SET
             id_origin = excluded.id_origin, nom_proprietaire = excluded.nom_proprietaire,
             debit = excluded.debit, type_alerte = excluded.type_alerte,
-            last_detection = CURRENT_DATE, occurence = COALESCE(occurence, 0) + 1;
+            date_origin = excluded.date_origin,
+            last_detection = CASE
+                WHEN DATE(COALESCE(excluded.date_origin, '0001-01-01'))
+                     > DATE(COALESCE(alertes_debit_eleve.date_origin, excluded.date_origin, '0001-01-01'))
+                THEN CURRENT_DATE
+                ELSE alertes_debit_eleve.last_detection
+            END,
+            occurence = CASE
+                WHEN DATE(COALESCE(excluded.date_origin, '0001-01-01'))
+                     > DATE(COALESCE(alertes_debit_eleve.date_origin, excluded.date_origin, '0001-01-01'))
+                THEN COALESCE(alertes_debit_eleve.occurence, 0) + 1
+                ELSE COALESCE(alertes_debit_eleve.occurence, 1)
+            END;
     END;
 
     DROP TRIGGER IF EXISTS alerte_debit_eleve_insert_clear;
@@ -70,9 +83,10 @@ ALERT_TRIGGERS_SQL = """
     )
     BEGIN
         DELETE FROM alertes_debit_eleve WHERE code_proprietaire = OLD.code_proprietaire;
-        INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, first_detection, last_detection, occurence)
+        INSERT INTO alertes_debit_eleve (id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, date_origin, first_detection, last_detection, occurence)
         SELECT c.id, c.nom_proprietaire, c.code_proprietaire, c.debit,
             COALESCE((SELECT LOWER(cp.type_apt) FROM coproprietaires cp WHERE cp.code_proprietaire = c.code_proprietaire), 'na'),
+            c.date,
             CURRENT_DATE, CURRENT_DATE, 1
         FROM charge c
         WHERE c.code_proprietaire = OLD.code_proprietaire
@@ -126,6 +140,7 @@ def verif_presence_db(db_path: str) -> None:
                     code_proprietaire TEXT,
                     debit REAL NOT NULL,
                     type_alerte text NOT NULL,
+                    date_origin DATE,
                     last_detection DATE DEFAULT CURRENT_DATE,
                     first_detection DATE DEFAULT CURRENT_DATE,
                     occurence INTEGER NOT NULL,
@@ -296,6 +311,12 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         if cur.fetchone():
             has_alertes = True
             logger.info("Table 'alertes_debit_eleve' existe.")
+            cur.execute("PRAGMA table_info(alertes_debit_eleve)")
+            colonnes_alertes = {row[1] for row in cur.fetchall()}
+            if "date_origin" not in colonnes_alertes:
+                cur.execute("ALTER TABLE alertes_debit_eleve ADD COLUMN date_origin DATE")
+                created.append("alertes_debit_eleve.date_origin")
+                logger.info("Colonne 'date_origin' ajoutée à 'alertes_debit_eleve'.")
         else:
             logger.warning(
                 "Table 'alertes_debit_eleve' manquante, création en cours.")
@@ -308,6 +329,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     code_proprietaire TEXT,
                     debit REAL NOT NULL,
                     type_alerte text NOT NULL,
+                    date_origin DATE,
                     last_detection DATE DEFAULT CURRENT_DATE,
                     first_detection DATE DEFAULT CURRENT_DATE,
                     occurence INTEGER NOT NULL,

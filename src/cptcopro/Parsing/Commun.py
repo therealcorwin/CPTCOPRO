@@ -9,6 +9,9 @@ Les navigations spécifiques sont déléguées à :
 - Parsing.Lots_Copro : navigation pour les lots
 """
 
+import asyncio
+from contextlib import suppress
+
 from playwright.async_api import Page, async_playwright
 from loguru import logger
 
@@ -35,11 +38,30 @@ from .constants import (
     MAX_RETRY_MENU,
 )
 
+PARALLEL_TASK_TIMEOUT_S = 180
+BROWSER_CLOSE_TIMEOUT_S = 8
+PAGE_CLOSE_TIMEOUT_S = 5
+TARGET_CLOSED_SNIPPET = "Target page, context or browser has been closed"
+
 logger.remove()
 logger = logger.bind(type_log="PARSING_COMMUN")
 
 # Variables globales pour le cache des credentials
 _credentials_cache: dict[str, str] | None = None
+
+
+def _is_expected_target_closed(exc: Exception) -> bool:
+    """Détecte l'erreur Playwright attendue lors des fermetures/cancel."""
+    return TARGET_CLOSED_SNIPPET in str(exc)
+
+
+def _is_expected_target_closed_context(context: dict) -> bool:
+    """Détecte les contextes asyncio correspondant à une fermeture Playwright attendue."""
+    exc = context.get("exception")
+    if isinstance(exc, Exception) and _is_expected_target_closed(exc):
+        return True
+    message = str(context.get("message") or "")
+    return TARGET_CLOSED_SNIPPET in message
 
 
 def _get_cached_credentials() -> dict[str, str]:
@@ -187,6 +209,7 @@ async def _recup_html_generic(
                 f"Impossible d'ouvrir le navigateur pour {section_name}")
             return ERROR_OPEN_BROWSER
 
+        page = None
         try:
             page = await browser.new_page()
             logger.info(
@@ -195,25 +218,52 @@ async def _recup_html_generic(
             error = await login_and_open_menu(page, login, password, url)
             if error:
                 logger.error(f"[{section_name}] Erreur login: {error}")
-                await browser.close()
                 return error
 
             logger.success(
                 f"[{section_name}] Connexion réussie, navigation en cours..."
             )
             html = await fetch_func(page)
-
-            await browser.close()
-            logger.info(f"[{section_name}] Navigateur fermé")
             return html
 
         except Exception as e:
             logger.error(f"[{section_name}] Exception: {e}")
-            try:
-                await browser.close()
-            except Exception:
-                pass
             return f"KO_{section_name.upper()}_EXCEPTION"
+        finally:
+            if page is not None:
+                try:
+                    await asyncio.wait_for(page.close(), timeout=PAGE_CLOSE_TIMEOUT_S)
+                except Exception as e:
+                    if _is_expected_target_closed(e):
+                        logger.debug(
+                            "[{}] Fermeture page: cible déjà fermée (normal)",
+                            section_name,
+                        )
+                    else:
+                        logger.warning(
+                            "[{}] Fermeture page non bloquante ({}): {}",
+                            section_name,
+                            PAGE_CLOSE_TIMEOUT_S,
+                            e,
+                        )
+            try:
+                await asyncio.wait_for(
+                    browser.close(), timeout=BROWSER_CLOSE_TIMEOUT_S
+                )
+                logger.info(f"[{section_name}] Navigateur fermé")
+            except Exception as e:
+                if _is_expected_target_closed(e):
+                    logger.debug(
+                        "[{}] Fermeture navigateur: cible déjà fermée (normal)",
+                        section_name,
+                    )
+                else:
+                    logger.warning(
+                        "[{}] Fermeture navigateur non bloquante ({}): {}",
+                        section_name,
+                        BROWSER_CLOSE_TIMEOUT_S,
+                        e,
+                    )
 
 
 async def recup_html_charges(
@@ -253,8 +303,6 @@ async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
     Returns:
         Tuple (html_charges, html_lots). En cas d'erreur, les valeurs sont des codes KO_*.
     """
-    import asyncio
-
     credentials = _get_cached_credentials()
     login = credentials["login_site_copro"]
     password = credentials["password_site_copro"]
@@ -268,12 +316,61 @@ async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
         await asyncio.sleep(DELAY_PARALLEL_LOGIN)
         return await recup_html_charges(headless, login, password, url)
 
+    async def _fetch_with_timeout(section: str, coro):
+        """Encadre chaque collecte d'un timeout global pour éviter un blocage silencieux."""
+        task = asyncio.create_task(coro, name=f"fetch-{section}")
+        try:
+            return await asyncio.wait_for(task, timeout=PARALLEL_TASK_TIMEOUT_S)
+        except asyncio.CancelledError:
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+            raise
+        except asyncio.TimeoutError:
+            logger.error(
+                "[{}] Timeout global dépassé ({}s)",
+                section,
+                PARALLEL_TASK_TIMEOUT_S,
+            )
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
+            return f"KO_{section.upper()}_TIMEOUT"
+
+    loop = asyncio.get_running_loop()
+    previous_exception_handler = loop.get_exception_handler()
+
+    def _loop_exception_handler(current_loop, context):
+        if _is_expected_target_closed_context(context):
+            logger.debug("Exception Playwright attendue ignorée pendant l'arrêt")
+            return
+        if previous_exception_handler is not None:
+            previous_exception_handler(current_loop, context)
+            return
+        current_loop.default_exception_handler(context)
+
+    # Conserver ce handler jusqu'à la destruction de la boucle asyncio.run().
+    # Restaurer trop tôt laisse passer des erreurs TargetClosed tardives.
+    loop.set_exception_handler(_loop_exception_handler)
+
     # Lancer les deux récupérations en parallèle (lots d'abord, charges avec délai)
-    results = await asyncio.gather(
-        _fetch_charges_delayed(),
-        recup_html_lots(headless, login, password, url),
-        return_exceptions=True,
+    charges_task = asyncio.create_task(
+        _fetch_with_timeout("charges", _fetch_charges_delayed()),
+        name="charges-wrapper",
     )
+    lots_task = asyncio.create_task(
+        _fetch_with_timeout("lots", recup_html_lots(headless, login, password, url)),
+        name="lots-wrapper",
+    )
+
+    try:
+        results = await asyncio.gather(charges_task, lots_task, return_exceptions=True)
+    finally:
+        pending_tasks = [t for t in (charges_task, lots_task) if not t.done()]
+        for task in pending_tasks:
+            task.cancel()
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
 
     # Gérer les résultats
     if isinstance(results[0], Exception):

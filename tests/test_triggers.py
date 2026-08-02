@@ -270,3 +270,79 @@ def test_older_insert_does_not_clear_newer_alert(tmp_path):
         assert row[1] == 3000.0
     finally:
         conn.close()
+
+
+def test_occurrence_not_incremented_on_same_data_rerun(tmp_path):
+    """Le champ occurence ne doit pas augmenter si on rejoue la même donnée (même date)."""
+    db = tmp_path / "triggers_test7.db"
+    setup_db(db)
+    conn = sqlite3.connect(str(db))
+    cur = conn.cursor()
+    try:
+        setup_coproprietaire(conn, "C700", "3p")
+
+        cur.execute(
+            "INSERT OR REPLACE INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
+            ("C700", "Owner G", 3000.0, 0.0, "2026-02-01"),
+        )
+        conn.commit()
+
+        cur.execute(
+            "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = ?",
+            ("C700",),
+        )
+        occ1 = cur.fetchone()[0]
+        assert occ1 == 1
+
+        # Même données métier (même date): ne doit pas incrémenter occurence.
+        cur.execute(
+            "INSERT OR REPLACE INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
+            ("C700", "Owner G", 3000.0, 0.0, "2026-02-01"),
+        )
+        conn.commit()
+
+        cur.execute(
+            "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = ?",
+            ("C700",),
+        )
+        occ2 = cur.fetchone()[0]
+        assert occ2 == 1
+    finally:
+        conn.close()
+
+
+def test_occurrence_incremented_only_with_newer_data(tmp_path):
+    """Le champ occurence doit augmenter uniquement quand une date plus récente arrive."""
+    db = tmp_path / "triggers_test8.db"
+    setup_db(db)
+    conn = sqlite3.connect(str(db))
+    cur = conn.cursor()
+    try:
+        setup_coproprietaire(conn, "C800", "3p")
+
+        cur.execute(
+            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
+            ("C800", "Owner H", 3000.0, 0.0, "2026-03-01"),
+        )
+        conn.commit()
+
+        cur.execute(
+            "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = ?",
+            ("C800",),
+        )
+        assert cur.fetchone()[0] == 1
+
+        # Nouvelle donnée plus récente: incrément attendu.
+        cur.execute(
+            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
+            ("C800", "Owner H", 3200.0, 0.0, "2026-03-02"),
+        )
+        conn.commit()
+
+        cur.execute(
+            "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = ?",
+            ("C800",),
+        )
+        assert cur.fetchone()[0] == 2
+    finally:
+        conn.close()
