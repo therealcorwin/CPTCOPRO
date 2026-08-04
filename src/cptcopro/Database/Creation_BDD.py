@@ -127,6 +127,7 @@ def creer_base_db(db_path: str) -> None:
         db_path (str): Chemin vers la base de données SQLite.
     """
     logger.info("Création de la base de données SQLite...")
+    conn = None
     try:
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
@@ -254,12 +255,19 @@ def creer_base_db(db_path: str) -> None:
         logger.success("Table 'suivi_alertes' vérifiée/créée.")
 
         conn.commit()
-        conn.close()
         logger.success(f"Base de données '{db_path}' créée avec succès.")
     except Exception as e:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except sqlite3.Error as rollback_error:
+                logger.warning(f"Rollback impossible lors de la création DB : {rollback_error}")
         logger.error(
             f"Erreur lors de la création de la base de données : {e}")
         raise
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def integrite_db(db_path: str) -> Dict[str, Any]:
@@ -271,11 +279,13 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
     """
     verif_repertoire_db(db_path)
     created = []
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
+    conn = None
     has_config_alerte = False
 
     try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+
         # Table charge
         logger.info("Vérification de la présence de la table 'charge'.")
         cur.execute(
@@ -497,12 +507,17 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             created.append("suivi_alertes")
 
     except Exception as e:
-        conn.rollback()
+        if conn is not None:
+            try:
+                conn.rollback()
+            except sqlite3.Error as rollback_error:
+                logger.warning(f"Rollback impossible lors de la vérification DB : {rollback_error}")
         logger.error(
             f"Erreur lors de la vérification/création des composants DB : {e}")
         raise
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
     return {
         "charge": has_charge,
