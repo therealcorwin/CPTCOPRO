@@ -12,7 +12,7 @@ Ce package contient les modules pour :
 
 from .constants import DEFAULT_ALERT_THRESHOLDS, DEFAULT_THRESHOLD_FALLBACK
 from .Verif_Prerequis_BDD import verif_repertoire_db
-from .Creation_BDD import verif_presence_db, integrite_db
+from .Creation_BDD import verif_presence_db, creer_base_db, integrite_db
 from .Charges_To_BDD import enregistrer_donnees_sqlite
 from .Coproprietaires_To_BDD import enregistrer_coproprietaires
 from .Alertes_Config import (
@@ -32,6 +32,7 @@ __all__ = [
     "verif_repertoire_db",
     # Creation_BDD
     "verif_presence_db",
+    "creer_base_db",
     "integrite_db",
     # Charges_To_BDD
     "enregistrer_donnees_sqlite",

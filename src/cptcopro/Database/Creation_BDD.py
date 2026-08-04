@@ -101,152 +101,165 @@ ALERT_TRIGGERS_SQL = """
 """
 
 
-def verif_presence_db(db_path: str) -> None:
+def verif_presence_db(db_path: str) -> bool:
     """
-    Vérifie la présence de la base de données SQLite.
-    Si elle n'existe pas, la crée avec toutes les tables et triggers.
+    Vérifie la présence du fichier de base de données SQLite.
+
+    Args:
+        db_path (str): Chemin vers la base de données SQLite.
+
+    Returns:
+        bool: True si la base existe, sinon False.
+    """
+    db_exists = os.path.exists(db_path)
+    if db_exists:
+        logger.info(f"La base de données '{db_path}' existe déjà.")
+    else:
+        logger.warning(f"La base de données '{db_path}' n'existe pas.")
+    return db_exists
+
+
+def creer_base_db(db_path: str) -> None:
+    """
+    Crée la base de données SQLite avec toutes les tables, vues et triggers.
 
     Args:
         db_path (str): Chemin vers la base de données SQLite.
     """
-    if not os.path.exists(db_path):
-        logger.warning(f"La base de données '{db_path}' n'existe pas.")
-        logger.info("Création de la base de données SQLite...")
-        try:
-            conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
+    logger.info("Création de la base de données SQLite...")
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
 
-            # Table charge
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS charge (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    nom_proprietaire TEXT,
-                    code_proprietaire TEXT,
-                    debit REAL,
-                    credit REAL,
-                    date DATE,
-                    last_check DATE DEFAULT CURRENT_DATE,
-                    UNIQUE(code_proprietaire, date)
-                )
-            """)
-            logger.info("Table 'charge' vérifiée/créée.")
+        # Table charge
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS charge (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom_proprietaire TEXT,
+                code_proprietaire TEXT,
+                debit REAL,
+                credit REAL,
+                date DATE,
+                last_check DATE DEFAULT CURRENT_DATE,
+                UNIQUE(code_proprietaire, date)
+            )
+        """)
+        logger.info("Table 'charge' vérifiée/créée.")
 
-            # Table alertes_debit_eleve
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS alertes_debit_eleve (
-                    alerte_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    id_origin INTEGER NOT NULL,
-                    nom_proprietaire TEXT,
-                    code_proprietaire TEXT,
-                    debit REAL NOT NULL,
-                    type_alerte text NOT NULL,
-                    date_origin DATE,
-                    last_detection DATE DEFAULT CURRENT_DATE,
-                    first_detection DATE DEFAULT CURRENT_DATE,
-                    occurence INTEGER NOT NULL,
-                    FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
-                );
-            """)
-            logger.success("Table 'alertes_debit_eleve' vérifiée/créée.")
+        # Table alertes_debit_eleve
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS alertes_debit_eleve (
+                alerte_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_origin INTEGER NOT NULL,
+                nom_proprietaire TEXT,
+                code_proprietaire TEXT,
+                debit REAL NOT NULL,
+                type_alerte text NOT NULL,
+                date_origin DATE,
+                last_detection DATE DEFAULT CURRENT_DATE,
+                first_detection DATE DEFAULT CURRENT_DATE,
+                occurence INTEGER NOT NULL,
+                FOREIGN KEY(id_origin) REFERENCES charge(id) ON DELETE CASCADE
+            );
+        """)
+        logger.success("Table 'alertes_debit_eleve' vérifiée/créée.")
 
-            # Table config_alerte
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS config_alerte (
-                    type_apt TEXT PRIMARY KEY,
-                    charge_moyenne REAL NOT NULL,
-                    taux REAL NOT NULL DEFAULT 1.33,
-                    threshold REAL NOT NULL,
-                    last_update DATE DEFAULT CURRENT_DATE
-                );
-            """)
-            logger.success("Table 'config_alerte' vérifiée/créée.")
+        # Table config_alerte
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS config_alerte (
+                type_apt TEXT PRIMARY KEY,
+                charge_moyenne REAL NOT NULL,
+                taux REAL NOT NULL DEFAULT 1.33,
+                threshold REAL NOT NULL,
+                last_update DATE DEFAULT CURRENT_DATE
+            );
+        """)
+        logger.success("Table 'config_alerte' vérifiée/créée.")
 
-            # Initialiser les seuils par défaut
-            for type_apt, config in DEFAULT_ALERT_THRESHOLDS.items():
-                cur.execute(
-                    """
-                    INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
-                    VALUES (?, ?, ?, ?, CURRENT_DATE)
-                """,
-                    (
-                        type_apt,
-                        config["charge_moyenne"],
-                        config["taux"],
-                        config["threshold"],
-                    ),
-                )
-
+        # Initialiser les seuils par défaut
+        for type_apt, config in DEFAULT_ALERT_THRESHOLDS.items():
             cur.execute(
                 """
                 INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
-                VALUES ('default', ?, 1.0, ?, CURRENT_DATE)
+                VALUES (?, ?, ?, ?, CURRENT_DATE)
             """,
-                (DEFAULT_THRESHOLD_FALLBACK, DEFAULT_THRESHOLD_FALLBACK),
+                (
+                    type_apt,
+                    config["charge_moyenne"],
+                    config["taux"],
+                    config["threshold"],
+                ),
             )
-            logger.info("Seuils d'alerte par défaut initialisés.")
 
-            # Index et triggers
-            cur.executescript(ALERT_TRIGGERS_SQL)
-            logger.info("Triggers 'alerte_debit_eleve' créés.")
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO config_alerte (type_apt, charge_moyenne, taux, threshold, last_update)
+            VALUES ('default', ?, 1.0, ?, CURRENT_DATE)
+        """,
+            (DEFAULT_THRESHOLD_FALLBACK, DEFAULT_THRESHOLD_FALLBACK),
+        )
+        logger.info("Seuils d'alerte par défaut initialisés.")
 
-            # Table coproprietaires
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS coproprietaires (
-                    nom_proprietaire TEXT,
-                    code_proprietaire TEXT PRIMARY KEY,
-                    num_apt TEXT DEFAULT 'NA',
-                    type_apt TEXT DEFAULT 'NA',
-                    last_check DATE DEFAULT CURRENT_DATE
-                )
-            """)
-            logger.success("Table 'coproprietaires' vérifiée/créée.")
+        # Index et triggers
+        cur.executescript(ALERT_TRIGGERS_SQL)
+        logger.info("Triggers 'alerte_debit_eleve' créés.")
 
-            # Vue
-            cur.executescript("""
-                CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
-                SELECT
-                    (SELECT COUNT(*) FROM charge c2 WHERE c2.id <= c.id) AS id,
-                    c.nom_proprietaire AS nom_proprietaire,
-                    c.code_proprietaire AS code_proprietaire,
-                    c.debit AS debit,
-                    c.credit AS credit,
-                    COALESCE(cp.num_apt, 'NA') AS num_apt,
-                    COALESCE(cp.type_apt, 'NA') AS type_apt,
-                    c.date AS date
-                FROM charge c
-                LEFT JOIN coproprietaires cp ON c.code_proprietaire = cp.code_proprietaire;
-            """)
-            logger.success("View 'vw_charge_coproprietaires' créée.")
+        # Table coproprietaires
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS coproprietaires (
+                nom_proprietaire TEXT,
+                code_proprietaire TEXT PRIMARY KEY,
+                num_apt TEXT DEFAULT 'NA',
+                type_apt TEXT DEFAULT 'NA',
+                last_check DATE DEFAULT CURRENT_DATE
+            )
+        """)
+        logger.success("Table 'coproprietaires' vérifiée/créée.")
 
-            # Table suivi_alertes
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS suivi_alertes (
-                    date_releve DATE PRIMARY KEY,
-                    nombre_alertes INTEGER NOT NULL,
-                    total_debit REAL NOT NULL,
-                    nb_2p INTEGER DEFAULT 0,
-                    nb_3p INTEGER DEFAULT 0,
-                    nb_4p INTEGER DEFAULT 0,
-                    nb_5p INTEGER DEFAULT 0,
-                    nb_na INTEGER DEFAULT 0,
-                    debit_2p REAL DEFAULT 0,
-                    debit_3p REAL DEFAULT 0,
-                    debit_4p REAL DEFAULT 0,
-                    debit_5p REAL DEFAULT 0,
-                    debit_na REAL DEFAULT 0
-                )
-            """)
-            logger.success("Table 'suivi_alertes' vérifiée/créée.")
+        # Vue
+        cur.executescript("""
+            CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
+            SELECT
+                (SELECT COUNT(*) FROM charge c2 WHERE c2.id <= c.id) AS id,
+                c.nom_proprietaire AS nom_proprietaire,
+                c.code_proprietaire AS code_proprietaire,
+                c.debit AS debit,
+                c.credit AS credit,
+                COALESCE(cp.num_apt, 'NA') AS num_apt,
+                COALESCE(cp.type_apt, 'NA') AS type_apt,
+                c.date AS date
+            FROM charge c
+            LEFT JOIN coproprietaires cp ON c.code_proprietaire = cp.code_proprietaire;
+        """)
+        logger.success("View 'vw_charge_coproprietaires' créée.")
 
-            conn.commit()
-            conn.close()
-            logger.success(f"Base de données '{db_path}' créée avec succès.")
-        except Exception as e:
-            logger.error(
-                f"Erreur lors de la création de la base de données : {e}")
-            raise
-    else:
-        logger.info(f"La base de données '{db_path}' existe déjà.")
+        # Table suivi_alertes
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS suivi_alertes (
+                date_releve DATE PRIMARY KEY,
+                nombre_alertes INTEGER NOT NULL,
+                total_debit REAL NOT NULL,
+                nb_2p INTEGER DEFAULT 0,
+                nb_3p INTEGER DEFAULT 0,
+                nb_4p INTEGER DEFAULT 0,
+                nb_5p INTEGER DEFAULT 0,
+                nb_na INTEGER DEFAULT 0,
+                debit_2p REAL DEFAULT 0,
+                debit_3p REAL DEFAULT 0,
+                debit_4p REAL DEFAULT 0,
+                debit_5p REAL DEFAULT 0,
+                debit_na REAL DEFAULT 0
+            )
+        """)
+        logger.success("Table 'suivi_alertes' vérifiée/créée.")
+
+        conn.commit()
+        conn.close()
+        logger.success(f"Base de données '{db_path}' créée avec succès.")
+    except Exception as e:
+        logger.error(
+            f"Erreur lors de la création de la base de données : {e}")
+        raise
 
 
 def integrite_db(db_path: str) -> Dict[str, Any]:

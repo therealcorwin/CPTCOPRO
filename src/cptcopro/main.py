@@ -273,7 +273,8 @@ def main() -> None:
     try:
         # Ensure path type compatibility: modules expect a string path
         dtb.verif_repertoire_db(DB_PATH)
-        dtb.verif_presence_db(DB_PATH)
+        if not dtb.verif_presence_db(DB_PATH):
+            dtb.creer_base_db(DB_PATH)
         dtb.integrite_db(DB_PATH)
         dtb.backup_db(DB_PATH)
         dtb.enregistrer_donnees_sqlite(data_charges, DB_PATH)
