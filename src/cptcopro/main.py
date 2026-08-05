@@ -16,21 +16,13 @@ Options:
     --show-console    Afficher les données dans la console (rich)
 """
 
-import asyncio
 import sys
-from selectolax.parser import HTMLParser
 import cptcopro.Database.Backup_DB_Pcloud as bckp_pcloud
 import pathlib
-import cptcopro.Parsing.Commun as pc
-import cptcopro.Traitement.Charge_Copro as tp
-import cptcopro.Traitement.Lots_Copro as tlc
-import cptcopro.Database as dtb
-import cptcopro.utils.streamlit_launcher as usl
 from cptcopro.utils.paths import get_db_path, get_log_path
 from cptcopro.utils.env_loader import validate_startup_env
+from cptcopro.pipeline import CptcoproPipeline, PipelineRuntimeOptions
 from loguru import logger
-import time
-import atexit
 
 # Charger et valider les variables d'environnement avant toute utilisation
 validate_startup_env()
@@ -213,141 +205,21 @@ def main() -> None:
 
     logger.info("Démarrage du script principal")
 
-    # Récupération parallèle des deux HTML (charges et lots)
-    logger.info("Récupération parallèle du HTML (charges + lots) en cours...")
-    html_charge, html_copro = asyncio.run(
-        pc.recup_all_html_parallel(headless=not args.no_headless)
+    options = PipelineRuntimeOptions(
+        no_headless=args.no_headless,
+        db_path=DB_PATH,
+        no_serve=args.no_serve,
+        show_console=args.show_console,
+        serve_port=args.serve_port,
+        serve_host=args.serve_host,
+        serve_python=args.serve_python,
+        streamlit_no_browser=args.streamlit_no_browser,
+        streamlit_no_console=args.streamlit_no_console,
+        streamlit_use_cmd_start=args.streamlit_use_cmd_start,
+        streamlit_log_file=args.streamlit_log_file,
     )
 
-    if not html_charge or html_charge.startswith("KO_"):
-        logger.error(f"Erreur récupération HTML charges: {html_charge}")
-        return
-    logger.success("HTML des charges des copropriétaires récupéré.")
-
-    if not html_copro or html_copro.startswith("KO_"):
-        logger.error(f"Erreur récupération HTML lots: {html_copro}")
-        return
-    logger.success("HTML des lots des copropriétaires récupéré.")
-
-    logger.info("Parsing des charges des copropriétaires en cours...")
-    parser_charges = HTMLParser(html_charge)
-    logger.success("Parsing des charges des copropriétaires terminé.")
-
-    logger.info(
-        "Récupération de la date de suivi des copropriétaires en cours...")
-    date_suivi_copro = tp.recuperer_date_situation_copro(parser_charges)
-    if not date_suivi_copro:
-        logger.error("Date de situation introuvable, arrêt du traitement.")
-        return
-    logger.success(
-        f"Date de situation des copropriétaires récupérée : {date_suivi_copro}"
-    )
-
-    logger.info(
-        "Récupération des données des charges des copropriétaires en cours...")
-    data_charges = tp.recuperer_situation_copro(
-        parser_charges, date_suivi_copro)
-    logger.success(
-        f"Données des charges des copropriétaires récupérées : {len(data_charges)} entrées."
-    )
-
-    logger.info("Parsing des lots des copropriétaires en cours...")
-    lots_coproprietaires = tlc.extraire_lignes_brutes(html_copro)
-    logger.success(
-        f"{len(lots_coproprietaires)} lots de copropriétaires extraits.")
-
-    logger.info("Consolidation des lots des copropriétaires en cours...")
-    data_coproprietaires = tlc.consolider_proprietaires_lots(
-        lots_coproprietaires)
-    logger.success(
-        f"{len(data_coproprietaires)} copropriétaires/groupes consolidés.")
-
-    if not data_charges and not data_coproprietaires:
-        logger.warning(
-            "Aucune donnée extraite pour les charges et/ou les lots. Arrêt du traitement."
-        )
-        return
-    elif args.show_console:
-        tp.afficher_etat_coproprietaire(data_charges, date_suivi_copro)
-        tlc.afficher_avec_rich(data_coproprietaires)
-    try:
-        # Ensure path type compatibility: modules expect a string path
-        dtb.verif_repertoire_db(DB_PATH)
-        if not dtb.verif_presence_db(DB_PATH):
-            dtb.creer_base_db(DB_PATH)
-        dtb.integrite_db(DB_PATH)
-        dtb.backup_db(DB_PATH)
-        dtb.enregistrer_donnees_sqlite(data_charges, DB_PATH)
-        dtb.enregistrer_coproprietaires(data_coproprietaires, DB_PATH)
-        logger.info("Traitement terminé et données sauvegardées.")
-    except Exception as exc:
-        logger.error(f"Erreur lors des opérations BDD/backup : {exc}")
-        raise RuntimeError(
-            "ECHEC_CRITIQUE_COLLECTE_COPROPRIETAIRES: données lots invalides, base non écrasée."
-        ) from exc
-
-    # Note: Le dédoublonnage n'est plus nécessaire grâce à l'index UNIQUE
-    # et INSERT OR REPLACE dans enregistrer_donnees_sqlite()
-
-    try:
-        logger.info("Mise à jour de la table 'suivi_alertes'...")
-        dtb.sauvegarder_nombre_alertes(DB_PATH)
-        logger.success("Table 'suivi_alertes' mise à jour.")
-    except Exception as exc:
-        logger.error(
-            f"Erreur lors de la mise à jour de la table 'suivi_alertes' : {exc}"
-        )
-
-    # Par défaut, lancer Streamlit après le traitement, sauf si demandé sinon
-    proc = None
-    if not args.no_serve:
-        try:
-            # Check if running from PyInstaller bundle
-            if usl.is_pyinstaller_bundle():
-                logger.info(
-                    "Lancement de Streamlit in-process (mode PyInstaller)...")
-                # start_streamlit_inprocess is BLOCKING - it runs Streamlit in the main thread
-                # This is required to avoid "signal only works in main thread" error
-                # The function only returns when Streamlit exits
-                usl.start_streamlit_inprocess(
-                    app_path="src/cptcopro/Affichage_Stream.py",
-                    port=args.serve_port,
-                    host=args.serve_host,
-                    open_browser=not args.streamlit_no_browser,
-                )
-                # If we get here, Streamlit has exited
-                logger.info("Streamlit terminé")
-                return  # Exit the application
-            else:
-                logger.info(
-                    "Lancement de Streamlit via utils.streamlit_launcher...")
-                proc = usl.start_streamlit(
-                    app_path="src/cptcopro/Affichage_Stream.py",
-                    python_executable=args.serve_python,
-                    port=args.serve_port,
-                    host=args.serve_host,
-                    show_console=not args.streamlit_no_console,
-                    open_browser=not args.streamlit_no_browser,
-                    use_cmd_start=args.streamlit_use_cmd_start,
-                    log_file=args.streamlit_log_file,
-                )
-                logger.info(f"Streamlit lancé (pid={proc.pid})")
-                # garantir arrêt propre même si main lève une exception
-                atexit.register(lambda p=proc: usl.stop_streamlit(p))
-        except Exception as exc:
-            logger.error(f"Impossible de lancer Streamlit : {exc}")
-
-    # This code only runs when NOT in PyInstaller bundle (subprocess mode)
-    if proc is not None:
-        try:
-            print("Application principale en cours... Ctrl-C pour interrompre.")
-            while True:
-                # exemple : simuler un travail principal
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("Interruption reçue, fermeture en cours...")
-        finally:
-            usl.stop_streamlit(proc)
+    CptcoproPipeline().run(options)
 
 
 if __name__ == "__main__":

@@ -14,10 +14,13 @@ Note:
     Le module vérifie qu'il y a exactement 64 copropriétaires.
 """
 import re
-from typing import Union
+from typing import Callable, Union
 from selectolax.parser import HTMLParser
 from rich.table import Table
 from rich.console import Console
+from loguru import logger
+
+logger = logger.bind(type_log="TRAITEMENT_LOTS")
 
 # patron d'identifiant des éléments ciblés
 PATRON_ID = re.compile(r"^A17_\d+_\d+$")
@@ -250,6 +253,82 @@ def consolider_proprietaires_lots(elements) -> list[dict]:
         _ajouter_entree_owner_sans_lot(consolide, current_owner)
 
     return consolide
+
+
+def compter_lots_types_vides(data_coproprietaires: list[dict]) -> int:
+    """Compte les entrées propriétaire/code avec lot/type vides (hors marqueurs NA)."""
+    anomalies = 0
+    for copro in data_coproprietaires:
+        nom = str(copro.get("nom_proprietaire") or copro.get("proprietaire") or "").strip()
+        code = str(copro.get("code_proprietaire") or copro.get("code") or "").strip()
+        num = str(copro.get("num_apt") or "").strip()
+        typ = str(copro.get("type_apt") or "").strip()
+
+        if not nom or not code:
+            continue
+        if num.upper() == "NA" and typ.upper() == "NA":
+            continue
+        if not num or not typ:
+            anomalies += 1
+    return anomalies
+
+
+def _collecter_depuis_html(html_lots: Union[HTMLParser, str]) -> tuple[list[tuple[str, str]], list[dict], int]:
+    """Extrait les lignes lots, consolide et calcule le nombre d'anomalies lot/type."""
+    lignes = extraire_lignes_brutes(html_lots)
+    consolide = consolider_proprietaires_lots(lignes)
+    anomalies = compter_lots_types_vides(consolide)
+    return lignes, consolide, anomalies
+
+
+def collecter_lots_coproprietaires_fiable(
+    html_lots_initial: Union[HTMLParser, str],
+    retry_html_provider: Callable[[], str] | None = None,
+) -> tuple[list[tuple[str, str]], list[dict]]:
+    """Collecte lots consolidée avec retry optionnel si anomalies lot/type vides.
+
+    Le retry n'est adopté que s'il améliore strictement le nombre d'anomalies.
+    """
+    lignes_init, consolide_init, anomalies_init = _collecter_depuis_html(html_lots_initial)
+
+    if anomalies_init <= 0 or retry_html_provider is None:
+        return lignes_init, consolide_init
+
+    logger.warning(
+        "Collecte lots potentiellement incomplète ({} anomalies lot/type vides). Nouvelle collecte lots en cours...",
+        anomalies_init,
+    )
+
+    try:
+        html_retry = retry_html_provider()
+    except Exception as exc:
+        logger.warning(
+            "Retry lots impossible (exception fournisseur retry: {}). Conservation de la collecte initiale.",
+            exc,
+        )
+        return lignes_init, consolide_init
+
+    if not html_retry or html_retry.startswith("KO_"):
+        logger.warning(
+            "Retry lots impossible (résultat={}). Conservation de la collecte initiale.",
+            html_retry,
+        )
+        return lignes_init, consolide_init
+
+    lignes_retry, consolide_retry, anomalies_retry = _collecter_depuis_html(html_retry)
+    if anomalies_retry < anomalies_init:
+        logger.info(
+            "Collecte lots améliorée après retry ({} -> {} anomalies).",
+            anomalies_init,
+            anomalies_retry,
+        )
+        return lignes_retry, consolide_retry
+
+    logger.warning(
+        "Retry lots sans amélioration ({} anomalies). Conservation de la collecte initiale.",
+        anomalies_init,
+    )
+    return lignes_init, consolide_init
 
 def extraire_info_lot(texte_lot: str):
     """

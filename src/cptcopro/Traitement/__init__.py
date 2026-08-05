@@ -13,6 +13,8 @@ from .Charge_Copro import (
 from .Lots_Copro import (
     extraire_lignes_brutes,
     consolider_proprietaires_lots,
+    collecter_lots_coproprietaires_fiable,
+    compter_lots_types_vides,
     afficher_avec_rich,
     detecter_proprietaire,
     est_ligne_lot,
@@ -30,6 +32,8 @@ __all__ = [
     # Lots_Copro
     "extraire_lignes_brutes",
     "consolider_proprietaires_lots",
+    "collecter_lots_coproprietaires_fiable",
+    "compter_lots_types_vides",
     "afficher_avec_rich",
     "detecter_proprietaire",
     "est_ligne_lot",

@@ -292,6 +292,17 @@ async def recup_html_lots(headless: bool, login: str, password: str, url: str) -
     )
 
 
+async def recup_html_lots_only(headless: bool = True) -> str:
+    """Récupère uniquement le HTML des lots avec credentials internes."""
+    credentials = _get_cached_credentials()
+    return await recup_html_lots(
+        headless=headless,
+        login=credentials["login_site_copro"],
+        password=credentials["password_site_copro"],
+        url=credentials["url_site_copro"],
+    )
+
+
 async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
     """
     Récupère les deux HTML (charges et lots) en parallèle avec 2 navigateurs séparés.
