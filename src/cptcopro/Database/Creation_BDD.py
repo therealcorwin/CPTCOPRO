@@ -340,6 +340,21 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 cur.execute("ALTER TABLE alertes_debit_eleve ADD COLUMN date_origin DATE")
                 created.append("alertes_debit_eleve.date_origin")
                 logger.info("Colonne 'date_origin' ajoutée à 'alertes_debit_eleve'.")
+            # Safety net permanent : corrige les type_alerte corrompus (vides ou NULL)
+            cur.execute("""
+                UPDATE alertes_debit_eleve
+                SET type_alerte = COALESCE(
+                    (SELECT LOWER(cp.type_apt) FROM coproprietaires cp
+                     WHERE cp.code_proprietaire = alertes_debit_eleve.code_proprietaire
+                       AND cp.type_apt != ''),
+                    'na'
+                )
+                WHERE type_alerte IS NULL OR type_alerte = ''
+            """)
+            fixed_types = cur.rowcount
+            if fixed_types:
+                created.append(f"alertes_debit_eleve.type_alerte({fixed_types} lignes)")
+                logger.info(f"{fixed_types} ligne(s) 'alertes_debit_eleve' avec type_alerte vide corrigée(s).")
         else:
             logger.warning(
                 "Table 'alertes_debit_eleve' manquante, création en cours.")
@@ -528,3 +543,26 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         "config_alerte": has_config_alerte,
         "created": created,
     }
+
+
+def purger_alertes_pour_rebuild(db_path: str) -> None:
+    """Vide alertes_debit_eleve et nettoie suivi_alertes des entrées sans charge correspondante."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("DELETE FROM alertes_debit_eleve")
+        # Supprimer les entrées suivi_alertes dont date_releve n'a pas de charge
+        # correspondante — artefacts de l'ancienne sémantique MAX(last_detection).
+        conn.execute("""
+            DELETE FROM suivi_alertes
+            WHERE NOT EXISTS (
+                SELECT 1 FROM charge WHERE date = suivi_alertes.date_releve
+            )
+        """)
+        conn.commit()
+        logger.info("Tables 'alertes_debit_eleve' et 'suivi_alertes' (entrées orphelines) purgées après restore pCloud.")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erreur lors de la purge des alertes : {e}")
+        raise
+    finally:
+        conn.close()

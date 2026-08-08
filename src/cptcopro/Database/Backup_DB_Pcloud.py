@@ -187,8 +187,17 @@ def assurer_repertoire_backup_bdd_copro(
 
 def deconnecter_pcloud(
     sdk: PCloudSDK | None = None,
+    token_file: Path | None = None,
 ) -> None:
     """Déconnecte le client pCloud et supprime le fichier de token local."""
+    token_path = token_file or pcloud_token_path
+
+    if sdk is None and tester_presence_token_pcloud(token_path):
+        try:
+            sdk = connecter_pcloud_via_token(token_path)
+        except Exception as exc:
+            logger.warning("Connexion pCloud impossible avant déconnexion: {}", exc)
+
     if sdk is not None:
         try:
             sdk.logout()
@@ -197,6 +206,13 @@ def deconnecter_pcloud(
             logger.warning("Déconnexion pCloud via l'API échouée (ignorée): {}", exc)
         except Exception as exc:
             logger.warning("Erreur inattendue lors de la déconnexion pCloud: {}", exc)
+
+    if token_path.exists():
+        try:
+            token_path.unlink()
+            logger.info("Token pCloud supprimé: {}", token_path)
+        except OSError as exc:
+            logger.warning("Impossible de supprimer le token pCloud '{}': {}", token_path, exc)
 
 
 def lister_fichiers_et_dossiers_pcloud(

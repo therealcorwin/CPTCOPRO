@@ -12,9 +12,9 @@ from loguru import logger
 logger = logger.bind(type_log="BROWSER")
 # Ordre de priorité des navigateurs
 BROWSER_CHANNELS = [
+    (None, "firefox", "Firefox"),
     ("msedge", "chromium", "Microsoft Edge"),
     ("chrome", "chromium", "Google Chrome"),
-    (None, "firefox", "Firefox"),  # Firefox n'a pas de channel, on utilise le browser type directement
 ]
 
 

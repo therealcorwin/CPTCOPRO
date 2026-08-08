@@ -4,7 +4,14 @@
 
 Ce document decrit les appels de fonctions reels du projet et sert de reference de maintenance.
 Il est aligne sur le code actuel de l'application.
+Il privilegie la lisibilite: un resume rapide, un deroule pas-a-pas, puis des diagrammes de soutien.
 Pour une vue plus compacte du depot, voir README.md et .github/copilot-instructions.md.
+
+## Comment lire ce document
+
+1. Le bloc "Vue d'ensemble" donne la carte rapide des modules appeles pendant un lancement normal.
+2. Le bloc "Flux d'execution reel" detaille l'ordre concret des appels dans `main.py`.
+3. Les tableaux de fin servent de reference courte pour les options CLI et les points d'entree a surveiller.
 
 ## Vue d'ensemble (runtime)
 
@@ -43,6 +50,10 @@ flowchart TB
         d_pre[verif_presence_db]
         d_int[integrite_db]
         d_bak[backup_db]
+        d_restore[telecharger_dernier_backup_pcloud]
+        d_up_pcloud[sauvegarder_bdd_pcloud]
+        d_token[tester_token_et_connecter_pcloud]
+        d_deco[deconnecter_pcloud]
         d_ins1[enregistrer_donnees_sqlite]
         d_ins2[enregistrer_coproprietaires]
         d_suivi[sauvegarder_nombre_alertes]
@@ -77,6 +88,10 @@ flowchart TB
     main --> d_pre
     main --> d_int
     main --> d_bak
+    main --> d_restore
+    main --> d_up_pcloud
+    main --> d_token
+    main --> d_deco
     main --> d_ins1
     main --> d_ins2
     main --> d_suivi
@@ -84,6 +99,29 @@ flowchart TB
     main -. no-serve=false .-> ui_start
     ui_start --> ui_app
 ```
+
+## Deroule du flux principal
+
+1. `validate_startup_env()` verifie les variables d'environnement avant tout autre traitement.
+2. `recup_all_html_parallel()` lance la recuperation parallele du HTML des charges et des lots.
+3. Le HTML des charges est parse pour extraire la date de situation, puis les lignes de charges.
+4. Le HTML des lots est parse pour reconstruire la liste consolidee des coproprietaires.
+5. Si `--show-console` est active, les donnees sont affichees dans la console avant toute ecriture.
+6. La base locale est preparee avec `verif_repertoire_db()`, `verif_presence_db()` et `integrite_db()`.
+7. Si la base locale manque, le programme tente une restauration pCloud avant de continuer.
+8. La base locale est ensuite mise a jour: backup local, ecriture des coproprietaires, ecriture des charges, recalcul des alertes.
+9. Si `--no-backup` n'est pas specifie, la base finale est sauvegardee sur pCloud.
+10. Si `--deco-pcloud` est actif, le token local est supprime en fin d'execution.
+11. Si `--no-serve` n'est pas specifie, Streamlit est lance apres la fin du traitement.
+
+## Cas pCloud
+
+| Situation | Action effectuee | Effet visible |
+| --- | --- | --- |
+| Base locale absente au demarrage | Connexion pCloud, puis telechargement du dernier backup | La base locale est restauree avant toute ecriture |
+| Execution normale, sans `--no-backup` | Connexion pCloud, puis `sauvegarder_bdd_pcloud()` apres les ecritures | Le dernier etat valide est archive sur pCloud |
+| Execution avec `--no-backup` | Aucun upload pCloud apres les ecritures | Seul le backup local reste actif |
+| Execution avec `--deco-pcloud` | `deconnecter_pcloud()` puis suppression du token local | La session pCloud est ferme et le token local disparait |
 
 ## Flux d'execution reel (main)
 
@@ -95,6 +133,7 @@ sequenceDiagram
     participant TC as Traitement.Charge_Copro
     participant TL as Traitement.Lots_Copro
     participant DB as Database
+    participant PC as Backup_DB_Pcloud
     participant SL as streamlit_launcher
 
     M->>E: validate_startup_env()
@@ -129,11 +168,27 @@ sequenceDiagram
 
     M->>DB: verif_repertoire_db()
     M->>DB: verif_presence_db()
+    opt base locale absente
+        M->>PC: tester_token_et_connecter_pcloud()
+        PC-->>M: client pCloud authentifie
+        M->>PC: telecharger_dernier_backup_pcloud()
+        PC-->>M: fichier SQLite restaure
+    end
     M->>DB: integrite_db()
     M->>DB: backup_db()
     M->>DB: enregistrer_donnees_sqlite()
     M->>DB: enregistrer_coproprietaires()
     M->>DB: sauvegarder_nombre_alertes()
+
+    opt --no-backup absent
+        M->>PC: tester_token_et_connecter_pcloud()
+        PC-->>M: client pCloud authentifie
+        M->>PC: sauvegarder_bdd_pcloud()
+    end
+
+    opt --deco-pcloud
+        M->>PC: deconnecter_pcloud()
+    end
 
     opt --no-serve absent
         alt PyInstaller bundle
@@ -213,21 +268,22 @@ flowchart LR
 
 | Module | Responsabilite | Fonctions principales |
 | --- | --- | --- |
-| main.py | Orchestration, CLI, execution | main |
-| utils/env_loader.py | Chargement et validation centralisee du .env | load_env_file, check_env_file_exists, validate_required_env_vars, load_and_validate_env, get_credentials, get_pcloud_credentials, get_pcloud_backup_config, validate_startup_env |
-| Parsing/Commun.py | Orchestration parallele et login | recup_all_html_parallel, recup_html_charges, recup_html_lots, \_recup_html_generic, login_and_open_menu |
-| Parsing/Charge_Copro.py | Navigation charge | recup_charges_coproprietaires |
-| Parsing/Lots_Copro.py | Navigation lots | recup_lots_coproprietaires |
-| Traitement/Charge_Copro.py | Parsing HTML charges | recuperer_date_situation_copro, recuperer_situation_copro, afficher_etat_coproprietaire |
-| Traitement/Lots_Copro.py | Parsing HTML lots | extraire_lignes_brutes, consolider_proprietaires_lots, afficher_avec_rich |
-| Database/Verif_Prerequis_BDD.py | Prerequis repertoires | verif_repertoire_db |
-| Database/Creation_BDD.py | Presence DB et integrite schema | verif_presence_db, integrite_db |
-| Database/Charges_To_BDD.py | Persist charges | enregistrer_donnees_sqlite |
-| Database/Coproprietaires_To_BDD.py | Persist coproprietaires | enregistrer_coproprietaires |
-| Database/Alertes_Config.py | Seuils et suivi alertes | get_config_alertes, update_config_alerte, get_threshold_for_type, init_config_alerte_if_missing, sauvegarder_nombre_alertes |
-| Database/Backup_DB.py | Sauvegarde sqlite | backup_db |
-| Database/Dedoublonnage.py | Outils dedoublonnage (hors flux principal) | analyse_doublons, rapport_doublon, suppression_doublons |
-| Affichage_Stream.py | Navigation multi-pages Streamlit | st.navigation, menus.run |
+| main.py | Orchestration CLI de bout en bout | Recupere le HTML, parse les donnees, gere la base locale, lance les backups, puis ouvre Streamlit si demande |
+| utils/env_loader.py | Chargement et validation des secrets | Verifie `.env`, charge les credentials COPRO et pCloud, bloque le demarrage si une variable manque |
+| Parsing/Commun.py | Orchestration de la collecte HTML | Coordonne les deux navigateurs, gere le login, applique les delais et remonte les codes KO_* |
+| Parsing/Charge_Copro.py | Navigation cote charges | Ouvre la bonne page et recupere le HTML des charges |
+| Parsing/Lots_Copro.py | Navigation cote lots | Ouvre la bonne page et recupere le HTML des lots |
+| Traitement/Charge_Copro.py | Extraction des charges | Lit la date de situation, reconstruit les lignes de charges, affiche l'etat copro si demande |
+| Traitement/Lots_Copro.py | Extraction des lots | Lit les lignes brutes puis consolide les coproprietaires et lots |
+| Database/Verif_Prerequis_BDD.py | Pre-requis repertoires | Verifie que les repertoires d'ecriture existent ou peuvent etre crees |
+| Database/Creation_BDD.py | Sante de la base | Verifie la presence de la base et l'integrite minimale du schema |
+| Database/Charges_To_BDD.py | Ecriture des charges | Insere ou remplace les charges dans SQLite |
+| Database/Coproprietaires_To_BDD.py | Ecriture des coproprietaires | Insere les coproprietaires avant les charges pour satisfaire les triggers |
+| Database/Alertes_Config.py | Alertes et seuils | Gere les seuils, le suivi des alertes et le recalcul du nombre d'alertes |
+| Database/Backup_DB.py | Backup local SQLite | Copie la base locale dans le repertoire de backup du projet |
+| Database/Backup_DB_Pcloud.py | Backup et restauration pCloud | Gere le token, la connexion, la restauration, l'upload et la deconnexion |
+| Database/Dedoublonnage.py | Outils hors flux principal | Conserve des aides historiques de dedoublonnage, non appellees par `main.py` |
+| Affichage_Stream.py | Interface Streamlit | Construit la navigation multi-pages et lance les pages |
 
 ## Constantes de timing (source de verite)
 
@@ -243,22 +299,26 @@ flowchart LR
 
 | Option | Effet sur le flux |
 | --- | --- |
-| --show-console | Active les affichages Rich apres parsing |
-| --no-serve | Desactive le lancement Streamlit |
-| --no-headless | Lance Playwright en mode visible |
-| --db-path | Surcharge le chemin SQLite |
-| --serve-host, --serve-port | Parametrent le lancement Streamlit |
-| --streamlit-\* | Controle ouverture navigateur/console et redirection log |
+| --show-console | Active les affichages Rich apres parsing, avant les ecritures |
+| --no-serve | Arrete le flux avant le lancement de Streamlit |
+| --no-headless | Lance Playwright en mode visible pour le debug |
+| --no-backup | Saute l'upload pCloud final, mais garde le backup local |
+| --deco-pcloud | Ferme la session pCloud et supprime le token local |
+| --db-path | Oriente toutes les lectures et ecritures vers une autre base SQLite |
+| --serve-host, --serve-port | Modifient l'adresse de lancement de Streamlit |
+| --streamlit-* | Reglent l'ouverture du navigateur, de la console et du log |
 
 ## Notes importantes
 
-- La fonction privee _recup_html_generic est le coeur DRY de la collecte HTML.
-- validate_startup_env est le point d'entree unique pour verifier les variables requises au demarrage.
-- init_env reste utilise dans certains points d'entree secondaires, mais le flux principal de main.py repose sur validate_startup_env.
+- `_recup_html_generic` reste le coeur DRY de la collecte HTML.
+- `validate_startup_env()` est le point d'entree unique pour verifier les variables requises au demarrage.
+- Le flux principal de `main.py` repose sur `validate_startup_env()`, pas sur un autre bootstrap.
 - Le flux principal n'appelle plus le dedoublonnage.
 - Raison: index UNIQUE et INSERT OR REPLACE dans la persistance des charges.
-- Les pages Streamlit utilisent majoritairement @st.cache_data sur les fonctions de chargement.
-- README.md donne la vue d'ensemble du projet; ce document decrit le detail des flux d'appel.
+- Le backup local est fait avant les ecritures, alors que le backup pCloud est fait apres les ecritures, sauf `--no-backup`.
+- `--deco-pcloud` se limite a la deconnexion pCloud et a la suppression du token local.
+- Les pages Streamlit utilisent majoritairement `@st.cache_data` sur les fonctions de chargement.
+- `README.md` donne la vue d'ensemble du projet; ce document decrit le detail des flux d'appel.
 
 ## Source of truth
 

@@ -230,3 +230,4 @@ trigger parametrable*
 CPTCOPRO.code-workspace
 -- Table de configuration (une seule lig.sql
 .pcloud_credentials
+src/cptcopro/BDD2/test.sqlite*

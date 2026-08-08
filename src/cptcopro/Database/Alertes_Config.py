@@ -33,7 +33,7 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
         cur.execute(
             """
             SELECT 
-                MAX(last_detection) AS date_releve,
+                MAX(date_origin) AS date_releve,
                 COUNT(*) AS nombre_alertes,
                 COALESCE(SUM(debit), 0) AS total_debit
             FROM alertes_debit_eleve
@@ -50,11 +50,11 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
         cur.execute(
             """
             SELECT 
-                LOWER(COALESCE(type_alerte, 'na')) AS type_apt,
+                LOWER(COALESCE(NULLIF(type_alerte, ''), 'na')) AS type_apt,
                 COUNT(*) AS nb,
                 COALESCE(SUM(debit), 0) AS total
             FROM alertes_debit_eleve
-            GROUP BY LOWER(COALESCE(type_alerte, 'na'))
+            GROUP BY LOWER(COALESCE(NULLIF(type_alerte, ''), 'na'))
             """
         )
         stats_par_type = {row[0]: (row[1], row[2]) for row in cur.fetchall()}

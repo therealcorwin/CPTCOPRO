@@ -13,6 +13,8 @@ Options:
     --no-headless     Lance Playwright en mode visible (debug)
     --db-path PATH    Surcharge le chemin de la base de données
     --no-serve        Ne pas lancer Streamlit après le traitement
+    --no-backup       Ne pas envoyer de backup sur pCloud après l'écriture
+    --deco-pcloud     Se déconnecter de pCloud et supprimer le token local
     --show-console    Afficher les données dans la console (rich)
 """
 
@@ -72,9 +74,9 @@ DB_PATH = str(get_db_path())
 #    try:
 #        pcloud_client = bckp_pcloud.connecter_pcloud_via_token()
 #        logger.success("Connexion à pCloud réussie via token existant.")
-#        #bckp_pcloud.sauvegarder_bdd_pcloud(pcloud_client, DB_PATH)
+#        bckp_pcloud.sauvegarder_bdd_pcloud(pcloud_client, DB_PATH)
 #        #bckp_pcloud.lister_fichiers_et_dossiers_pcloud(pcloud_client)
-#        bckp_pcloud.telecharger_dernier_backup_pcloud(pcloud_client, DB_PATH)
+#        #bckp_pcloud.telecharger_dernier_backup_pcloud(pcloud_client, DB_PATH)
 #    except Exception as e:
 #        logger.error(f"Échec de la connexion à pCloud via token : {e}")
 #        logger.info("Tentative de connexion via OAuth2...")
@@ -129,6 +131,8 @@ def main() -> None:
         --no-headless: Mode navigateur visible (debug)
         --db-path: Surcharge du chemin base de données
         --no-serve: Désactive le lancement automatique de Streamlit
+        --no-backup: Ignore la sauvegarde pCloud après l'écriture locale
+        --deco-pcloud: Déconnecte pCloud et supprime le token local
         --show-console: Affiche les données dans la console (rich)
 
     Returns:
@@ -204,6 +208,16 @@ def main() -> None:
         action="store_true",
         help="Afficher les données des copropriétaires dans la console (rich)",
     )
+    parser.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="Ne pas envoyer de backup sur pCloud après l'écriture",
+    )
+    parser.add_argument(
+        "--deco-pcloud",
+        action="store_true",
+        help="Se déconnecter de pCloud et supprimer le token local en fin d'exécution",
+    )
     args = parser.parse_args()
 
     # override DB_PATH si fourni
@@ -273,12 +287,58 @@ def main() -> None:
     try:
         # Ensure path type compatibility: modules expect a string path
         dtb.verif_repertoire_db(DB_PATH)
+        restored_from_pcloud = False
         if not dtb.verif_presence_db(DB_PATH):
-            dtb.creer_base_db(DB_PATH)
+            logger.warning(
+                f"Base locale absente ('{DB_PATH}'). Tentative de restauration depuis pCloud..."
+            )
+            pcloud_client = bckp_pcloud.tester_token_et_connecter_pcloud()
+            try:
+                restore_result = bckp_pcloud.telecharger_dernier_backup_pcloud(
+                    pcloud_client,
+                    local_db_name=pathlib.Path(DB_PATH).name,
+                    overwrite=True,
+                )
+            except RuntimeError as exc:
+                if "Aucun fichier de backup .sqlite" in str(exc):
+                    logger.warning(
+                        "Aucun backup pCloud trouvé. Création d'une nouvelle base locale..."
+                    )
+                    dtb.creer_base_db(DB_PATH)
+                else:
+                    raise
+            else:
+                restored_from_pcloud = True
+                restored_path = pathlib.Path(restore_result["local_path"])
+                target_path = pathlib.Path(DB_PATH)
+
+                # Garantir la restauration exactement au chemin demandé (ex: --db-path).
+                if restored_path.resolve() != target_path.resolve():
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    if target_path.exists():
+                        target_path.unlink()
+                    restored_path.replace(target_path)
+                    logger.info(
+                        f"Base restaurée déplacée vers le chemin cible '{target_path}'."
+                    )
+            #finally:
+                #bckp_pcloud.deconnecter_pcloud(sdk=pcloud_client)
         dtb.integrite_db(DB_PATH)
         dtb.backup_db(DB_PATH)
+        if restored_from_pcloud:
+            # Les alertes du backup peuvent avoir des type_alerte obsolètes ou
+            # provenir de charges plus récentes que l'extranet ne retourne.
+            # On les purge pour forcer la recomputation par les triggers.
+            dtb.purger_alertes_pour_rebuild(DB_PATH)
+            logger.info("Alertes purgées après restore pCloud (recomputation via triggers).")
+        # coproprietaires en premier : les triggers INSERT sur charge s'appuient dessus.
+        # L'échec de cette étape (lots invalides) ne doit pas empêcher la sauvegarde des charges.
+        try:
+            dtb.enregistrer_coproprietaires(data_coproprietaires, DB_PATH)
+        except Exception as exc_copro:
+            logger.error(f"Insertion copropriétaires échouée (lots invalides) : {exc_copro}")
+            logger.warning("Les charges seront quand même sauvegardées pour cette période.")
         dtb.enregistrer_donnees_sqlite(data_charges, DB_PATH)
-        dtb.enregistrer_coproprietaires(data_coproprietaires, DB_PATH)
         logger.info("Traitement terminé et données sauvegardées.")
     except Exception as exc:
         logger.error(f"Erreur lors des opérations BDD/backup : {exc}")
@@ -297,6 +357,25 @@ def main() -> None:
         logger.error(
             f"Erreur lors de la mise à jour de la table 'suivi_alertes' : {exc}"
         )
+
+    if args.no_backup:
+        logger.info("Sauvegarde pCloud ignorée via l'option --no-backup.")
+    else:
+        try:
+            logger.info("Sauvegarde pCloud de la base locale en cours...")
+            pcloud_client = bckp_pcloud.tester_token_et_connecter_pcloud()
+            bckp_pcloud.sauvegarder_bdd_pcloud(pcloud_client, pathlib.Path(DB_PATH))
+            logger.success("Sauvegarde pCloud terminée avec succès.")
+        except Exception as exc:
+            logger.error(f"Erreur lors de la sauvegarde pCloud : {exc}")
+
+    if args.deco_pcloud:
+        try:
+            logger.info("Déconnexion pCloud demandée via --deco-pcloud...")
+            bckp_pcloud.deconnecter_pcloud()
+            logger.success("Déconnexion pCloud terminée et token local supprimé.")
+        except Exception as exc:
+            logger.error(f"Erreur lors de la déconnexion pCloud : {exc}")
 
     # Par défaut, lancer Streamlit après le traitement, sauf si demandé sinon
     proc = None
