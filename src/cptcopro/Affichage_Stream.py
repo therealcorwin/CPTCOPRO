@@ -86,6 +86,21 @@ Recherche_Copro_page = st.Page(
     title="Recherche Info Copropriétaires",
     icon=":material/search:",
 )
+Relance_page = st.Page(
+    "Pages/Relance.py",
+    title="Relances et Notifications",
+    icon=":material/notifications:",
+)
+Relance_Config_page = st.Page(
+    "Pages/Relance_Config.py",
+    title="Configuration Relances",
+    icon=":material/settings:",
+)
+Relance_Admin_page = st.Page(
+    "Pages/Relance_Admin.py",
+    title="Administration Relances",
+    icon=":material/admin_panel_settings:",
+)
 
 # --- NAVIGATION SETUP [WITH SECTIONS]---
 menus = st.navigation(
@@ -97,6 +112,11 @@ menus = st.navigation(
             Stat_Alerte_page,
             Statistiques_Avancees_page,
             Config_Alertes_page,
+        ],
+        "Relances et Notifications": [
+            Relance_page,
+            Relance_Config_page,
+            Relance_Admin_page,
         ],
         "Liste des Copropriétaires": [Liste_Copro_page],
         "Recherche Info Copropriétaires": [Recherche_Copro_page],

@@ -254,6 +254,95 @@ def creer_base_db(db_path: str) -> None:
         """)
         logger.success("Table 'suivi_alertes' vérifiée/créée.")
 
+        # Table relance_config
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS relance_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                enabled INTEGER NOT NULL DEFAULT 1,
+                frequency_days INTEGER NOT NULL DEFAULT 14,
+                sender_name TEXT NOT NULL DEFAULT 'Syndic de copropriete',
+                sender_email TEXT DEFAULT '',
+                mailbox_imap_host TEXT DEFAULT '',
+                mailbox_imap_port INTEGER NOT NULL DEFAULT 993,
+                mailbox_imap_user TEXT DEFAULT '',
+                mailbox_drafts_folder TEXT NOT NULL DEFAULT 'Drafts',
+                mailbox_use_ssl INTEGER NOT NULL DEFAULT 1,
+                mailbox_password_env TEXT NOT NULL DEFAULT 'RELANCE_MAILBOX_PASSWORD',
+                llm_provider TEXT NOT NULL DEFAULT 'mistral',
+                llm_model TEXT NOT NULL DEFAULT 'mistral-small-latest',
+                llm_api_base TEXT NOT NULL DEFAULT 'https://api.mistral.ai/v1',
+                llm_api_key_env TEXT NOT NULL DEFAULT 'MISTRAL_API_KEY',
+                llm_temperature REAL NOT NULL DEFAULT 0.4,
+                tone_instruction TEXT NOT NULL DEFAULT 'courtois, professionnel et ferme',
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            INSERT OR IGNORE INTO relance_config (
+                id,
+                enabled,
+                frequency_days,
+                sender_name,
+                sender_email,
+                mailbox_imap_host,
+                mailbox_imap_port,
+                mailbox_imap_user,
+                mailbox_drafts_folder,
+                mailbox_use_ssl,
+                mailbox_password_env,
+                llm_provider,
+                llm_model,
+                llm_api_base,
+                llm_api_key_env,
+                llm_temperature,
+                tone_instruction,
+                updated_at
+            )
+            VALUES (1, 1, 14, 'Syndic de copropriete', '', '', 993, '', 'Drafts', 1,
+                    'RELANCE_MAILBOX_PASSWORD', 'mistral', 'mistral-small-latest',
+                    'https://api.mistral.ai/v1', 'MISTRAL_API_KEY', 0.4,
+                    'courtois, professionnel et ferme', CURRENT_TIMESTAMP)
+        """)
+        logger.success("Table 'relance_config' vérifiée/créée.")
+
+        # Table relance_destinataire
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS relance_destinataire (
+                code_proprietaire TEXT PRIMARY KEY,
+                email_to TEXT NOT NULL,
+                contact_name TEXT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(code_proprietaire) REFERENCES coproprietaires(code_proprietaire)
+            )
+        """)
+        logger.success("Table 'relance_destinataire' vérifiée/créée.")
+
+        # Table relance_draft
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS relance_draft (
+                draft_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code_proprietaire TEXT NOT NULL,
+                nom_proprietaire TEXT,
+                debit REAL,
+                email_to TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                body TEXT NOT NULL,
+                llm_provider TEXT,
+                llm_model TEXT,
+                status TEXT NOT NULL DEFAULT 'draft_local',
+                remote_draft_id TEXT,
+                error_message TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                validated_at DATETIME,
+                sent_at DATETIME,
+                FOREIGN KEY(code_proprietaire) REFERENCES coproprietaires(code_proprietaire)
+            )
+        """)
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_relance_draft_code_created ON relance_draft(code_proprietaire, created_at DESC)"
+        )
+        logger.success("Table 'relance_draft' vérifiée/créée.")
+
         conn.commit()
         logger.success(f"Base de données '{db_path}' créée avec succès.")
     except Exception as e:
@@ -521,6 +610,128 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             logger.success("Table 'suivi_alertes' vérifiée/créée.")
             created.append("suivi_alertes")
 
+        # Table relance_config
+        logger.info("Vérification de la présence de la table 'relance_config'.")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='relance_config';"
+        )
+        if cur.fetchone():
+            has_relance_config = True
+            logger.info("Table 'relance_config' existe.")
+        else:
+            has_relance_config = False
+            logger.warning("Table 'relance_config' manquante, création en cours.")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS relance_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    frequency_days INTEGER NOT NULL DEFAULT 14,
+                    sender_name TEXT NOT NULL DEFAULT 'Syndic de copropriete',
+                    sender_email TEXT DEFAULT '',
+                    mailbox_imap_host TEXT DEFAULT '',
+                    mailbox_imap_port INTEGER NOT NULL DEFAULT 993,
+                    mailbox_imap_user TEXT DEFAULT '',
+                    mailbox_drafts_folder TEXT NOT NULL DEFAULT 'Drafts',
+                    mailbox_use_ssl INTEGER NOT NULL DEFAULT 1,
+                    mailbox_password_env TEXT NOT NULL DEFAULT 'RELANCE_MAILBOX_PASSWORD',
+                    llm_provider TEXT NOT NULL DEFAULT 'mistral',
+                    llm_model TEXT NOT NULL DEFAULT 'mistral-small-latest',
+                    llm_api_base TEXT NOT NULL DEFAULT 'https://api.mistral.ai/v1',
+                    llm_api_key_env TEXT NOT NULL DEFAULT 'MISTRAL_API_KEY',
+                    llm_temperature REAL NOT NULL DEFAULT 0.4,
+                    tone_instruction TEXT NOT NULL DEFAULT 'courtois, professionnel et ferme',
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                INSERT OR IGNORE INTO relance_config (
+                    id,
+                    enabled,
+                    frequency_days,
+                    sender_name,
+                    sender_email,
+                    mailbox_imap_host,
+                    mailbox_imap_port,
+                    mailbox_imap_user,
+                    mailbox_drafts_folder,
+                    mailbox_use_ssl,
+                    mailbox_password_env,
+                    llm_provider,
+                    llm_model,
+                    llm_api_base,
+                    llm_api_key_env,
+                    llm_temperature,
+                    tone_instruction,
+                    updated_at
+                )
+                VALUES (1, 1, 14, 'Syndic de copropriete', '', '', 993, '', 'Drafts', 1,
+                        'RELANCE_MAILBOX_PASSWORD', 'mistral', 'mistral-small-latest',
+                        'https://api.mistral.ai/v1', 'MISTRAL_API_KEY', 0.4,
+                        'courtois, professionnel et ferme', CURRENT_TIMESTAMP)
+            """)
+            created.append("relance_config")
+
+        # Table relance_destinataire
+        logger.info("Vérification de la présence de la table 'relance_destinataire'.")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='relance_destinataire';"
+        )
+        if cur.fetchone():
+            has_relance_destinataire = True
+            logger.info("Table 'relance_destinataire' existe.")
+        else:
+            has_relance_destinataire = False
+            logger.warning("Table 'relance_destinataire' manquante, création en cours.")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS relance_destinataire (
+                    code_proprietaire TEXT PRIMARY KEY,
+                    email_to TEXT NOT NULL,
+                    contact_name TEXT,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(code_proprietaire) REFERENCES coproprietaires(code_proprietaire)
+                )
+            """)
+            created.append("relance_destinataire")
+
+        # Table relance_draft
+        logger.info("Vérification de la présence de la table 'relance_draft'.")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='relance_draft';"
+        )
+        if cur.fetchone():
+            has_relance_draft = True
+            logger.info("Table 'relance_draft' existe.")
+        else:
+            has_relance_draft = False
+            logger.warning("Table 'relance_draft' manquante, création en cours.")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS relance_draft (
+                    draft_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code_proprietaire TEXT NOT NULL,
+                    nom_proprietaire TEXT,
+                    debit REAL,
+                    email_to TEXT NOT NULL,
+                    subject TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    llm_provider TEXT,
+                    llm_model TEXT,
+                    status TEXT NOT NULL DEFAULT 'draft_local',
+                    remote_draft_id TEXT,
+                    error_message TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    validated_at DATETIME,
+                    sent_at DATETIME,
+                    FOREIGN KEY(code_proprietaire) REFERENCES coproprietaires(code_proprietaire)
+                )
+            """)
+            created.append("relance_draft")
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_relance_draft_code_created ON relance_draft(code_proprietaire, created_at DESC)"
+        )
+
+        # Commit final explicite pour persister toutes les creations/migrations.
+        conn.commit()
+
     except Exception as e:
         if conn is not None:
             try:
@@ -541,6 +752,9 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         "coproprietaires": has_coproprietaires,
         "nombre_alertes": has_nombre_alertes,
         "config_alerte": has_config_alerte,
+        "relance_config": has_relance_config,
+        "relance_destinataire": has_relance_destinataire,
+        "relance_draft": has_relance_draft,
         "created": created,
     }
 
