@@ -5,8 +5,8 @@ Ce dépôt récupère les charges et les lots depuis un extranet via Playwright,
 ## Points d'entrée et architecture
 
 ### Orchestration principale
-- **Point d'entrée** : `src/cptcopro/main.py` — orchestre la récupération HTML, le parsing, la persistance SQLite et le lancement optionnel de Streamlit.
-- **Flux principal** : récupération HTML parallèle, parsing charges/lots, sauvegarde SQLite, mise à jour `suivi_alertes`, puis lancement optionnel de Streamlit.
+- **Point d'entrée** : `src/cptcopro/main.py` — orchestre la récupération HTML, le parsing, la persistance SQLite, les backups pCloud et le lancement optionnel de Streamlit.
+- **Flux principal** : validation `.env`, récupération HTML parallèle, parsing charges/lots, restauration pCloud si nécessaire, sauvegarde SQLite, mise à jour `suivi_alertes`, backup pCloud optionnel, puis lancement de Streamlit.
 
 ### Parsing HTML (Playwright) - Architecture à 3 modules
 - **`src/cptcopro/Parsing/Commun.py`** : orchestration parallèle, authentification et logique commune de navigation.
@@ -19,14 +19,20 @@ Ce dépôt récupère les charges et les lots depuis un extranet via Playwright,
 
 ### Persistance SQLite
 - **Package principal** : `src/cptcopro/Database/`
-- Modules à connaître : `Creation_BDD.py`, `Charges_To_BDD.py`, `Coproprietaires_To_BDD.py`, `Alertes_Config.py`, `Backup_DB.py`.
-- Tables clés : `charge`, `alertes_debit_eleve`, `coproprietaires`, `suivi_alertes`, `config_alerte`.
+- Modules à connaître : `Creation_BDD.py`, `Charges_To_BDD.py`, `Coproprietaires_To_BDD.py`, `Alertes_Config.py`, `Backup_DB.py`, `Backup_DB_Pcloud.py`, `Relance_Config.py`, `Relance_Templates.py`.
+- Tables clés : `charge`, `alertes_debit_eleve`, `coproprietaires`, `suivi_alertes`, `config_alerte`, `relance_config`, `relance_destinataire`, `relance_draft`, `relance_template`.
 - **`src/cptcopro/Database/Dedoublonnage.py`** existe encore, mais n'est plus dans le flux principal de `main.py`.
 
 ### Système d'alertes
 - **Table `config_alerte`** : seuils configurables par type d'appartement.
 - **Triggers dynamiques** : s'appuient sur `config_alerte` et `coproprietaires.type_apt`.
 - **UI associée** : `src/cptcopro/Pages/Config_Alertes.py` permet de consulter et modifier les seuils.
+
+### Relances email
+- `Database/Relance_Config.py` gère la configuration, les destinataires, les échéances et les brouillons.
+- `Database/Relance_Templates.py` gère les modèles statiques ou guidés par LLM.
+- `utils/relance_mailer.py` génère les messages et les dépose en brouillon IMAP avec OAuth2 ou mot de passe.
+- Pages associées : `Relance.py`, `Relance_Drafts.py`, `Relance_Config.py`, `Relance_Templates.py`, `Relance_Admin.py`.
 
 ### Utilitaires
 - **`src/cptcopro/utils/paths.py`** : chemins portables et résolution du chemin de base.
@@ -47,10 +53,12 @@ Ce dépôt récupère les charges et les lots depuis un extranet via Playwright,
   - `login_site_copro` : Identifiant de connexion
   - `password_site_copro` : Mot de passe
   - `url_site_copro` : URL du site du syndic
+  - `url_situation_copro` : URL de la situation copropriétaire
+  - Variables pCloud : `pcloud_APP_KEY`, `pcloud_APP_SECRET`, `pcloud_location_id`, `pcloud_backup_folder`, `pcloud_backup_folder_id`, `pcloud_backup_file`
 
 ### Emplacement du `.env`
 
-- **Exécution normale** : le parsing lit les credentials depuis un `.env` à la racine du projet.
+- **Exécution normale** : le démarrage valide et charge les variables depuis un `.env` à la racine du projet.
 - **PyInstaller** : le `.env` est attendu à côté de l'exécutable.
 - **Note pratique** : `utils.paths.init_env()` et `utils.env_loader` coexistent ; pour éviter les ambiguïtés, considérer la racine du projet comme emplacement de référence en développement.
 
@@ -101,11 +109,14 @@ Options:
   --streamlit-use-cmd-start
   --streamlit-log-file FILE
   --show-console    Afficher les données dans la console (rich)
+  --no-backup       Ne pas envoyer de backup sur pCloud après l'écriture
+  --deco-pcloud     Se déconnecter de pCloud et supprimer le token local
 ```
 
 ## Limitations et comportements utiles
 
 - Le dédoublonnage existe encore dans `Database/Dedoublonnage.py`, mais n'est plus appelé par `main.py`.
+- Le bloc pCloud expérimental commenté a été supprimé de `main.py`; le flux actif passe par `Backup_DB_Pcloud.py`.
 - Les erreurs de parsing remontent sous forme de codes `KO_*` centralisés dans `src/cptcopro/Parsing/constants.py`.
 - Le détail du flux d'appel et des pages Streamlit est maintenu dans `reports/call_graph.md`.
 
@@ -122,3 +133,21 @@ Options:
 | `src/cptcopro/utils/paths.py` | Résolution des chemins DB/logs/backup |
 | `src/cptcopro/Parsing/constants.py` | Codes d'erreur et timings Playwright |
 | `reports/call_graph.md` | Graphe des appels de fonctions |
+
+## graphify
+
+For any question about this repo's architecture, structure, components, or how to add/modify/find
+code, your first action should be `graphify query "<question>"` when `graphify-out/graph.json`
+exists. Use `graphify path "<A>" "<B>"` for relationship questions and `graphify explain "<concept>"`
+for focused-concept questions. These return a scoped subgraph, usually much smaller than the full
+report or raw grep output.
+
+Triggers: "how do I…", "where is…", "what does … do", "add/modify a <component>",
+"explain the architecture", or anything that depends on how files or classes relate.
+
+If `graphify-out/wiki/index.md` exists, use it for broad navigation. Read `graphify-out/GRAPH_REPORT.md`
+only for broad architecture review or when query/path/explain do not surface enough context. Only read
+source files when (a) modifying/debugging specific code, (b) the graph lacks the needed detail, or
+(c) the graph is missing or stale.
+
+Type `/graphify` in Copilot Chat to build or update the graph.

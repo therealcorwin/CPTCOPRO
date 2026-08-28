@@ -268,6 +268,7 @@ def creer_base_db(db_path: str) -> None:
                 mailbox_drafts_folder TEXT NOT NULL DEFAULT 'Drafts',
                 mailbox_use_ssl INTEGER NOT NULL DEFAULT 1,
                 mailbox_password_env TEXT NOT NULL DEFAULT 'RELANCE_MAILBOX_PASSWORD',
+                mailbox_access_token_env TEXT NOT NULL DEFAULT 'RELANCE_MAILBOX_ACCESS_TOKEN',
                 llm_provider TEXT NOT NULL DEFAULT 'mistral',
                 llm_model TEXT NOT NULL DEFAULT 'mistral-small-latest',
                 llm_api_base TEXT NOT NULL DEFAULT 'https://api.mistral.ai/v1',
@@ -277,6 +278,13 @@ def creer_base_db(db_path: str) -> None:
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cur.execute("PRAGMA table_info(relance_config)")
+        relance_config_columns = {row[1] for row in cur.fetchall()}
+        if "mailbox_access_token_env" not in relance_config_columns:
+            cur.execute(
+                "ALTER TABLE relance_config ADD COLUMN mailbox_access_token_env "
+                "TEXT NOT NULL DEFAULT 'RELANCE_MAILBOX_ACCESS_TOKEN'"
+            )
         cur.execute("""
             INSERT OR IGNORE INTO relance_config (
                 id,
@@ -333,6 +341,7 @@ def creer_base_db(db_path: str) -> None:
                 remote_draft_id TEXT,
                 error_message TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 validated_at DATETIME,
                 sent_at DATETIME,
                 FOREIGN KEY(code_proprietaire) REFERENCES coproprietaires(code_proprietaire)
@@ -342,6 +351,22 @@ def creer_base_db(db_path: str) -> None:
             "CREATE INDEX IF NOT EXISTS idx_relance_draft_code_created ON relance_draft(code_proprietaire, created_at DESC)"
         )
         logger.success("Table 'relance_draft' vérifiée/créée.")
+
+        # Table relance_template
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS relance_template (
+                template_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                subject_template TEXT NOT NULL,
+                body_template TEXT NOT NULL,
+                generation_mode TEXT NOT NULL DEFAULT 'static',
+                tone_instruction TEXT NOT NULL DEFAULT '',
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        logger.success("Table 'relance_template' vérifiée/créée.")
 
         conn.commit()
         logger.success(f"Base de données '{db_path}' créée avec succès.")
@@ -618,6 +643,16 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         if cur.fetchone():
             has_relance_config = True
             logger.info("Table 'relance_config' existe.")
+            cur.execute("PRAGMA table_info(relance_config)")
+            relance_config_columns = {row[1] for row in cur.fetchall()}
+            if "mailbox_access_token_env" not in relance_config_columns:
+                logger.warning(
+                    "Colonne 'mailbox_access_token_env' manquante dans 'relance_config', ajout en cours."
+                )
+                cur.execute(
+                    "ALTER TABLE relance_config ADD COLUMN mailbox_access_token_env "
+                    "TEXT NOT NULL DEFAULT 'RELANCE_MAILBOX_ACCESS_TOKEN'"
+                )
         else:
             has_relance_config = False
             logger.warning("Table 'relance_config' manquante, création en cours.")
@@ -634,6 +669,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     mailbox_drafts_folder TEXT NOT NULL DEFAULT 'Drafts',
                     mailbox_use_ssl INTEGER NOT NULL DEFAULT 1,
                     mailbox_password_env TEXT NOT NULL DEFAULT 'RELANCE_MAILBOX_PASSWORD',
+                    mailbox_access_token_env TEXT NOT NULL DEFAULT 'RELANCE_MAILBOX_ACCESS_TOKEN',
                     llm_provider TEXT NOT NULL DEFAULT 'mistral',
                     llm_model TEXT NOT NULL DEFAULT 'mistral-small-latest',
                     llm_api_base TEXT NOT NULL DEFAULT 'https://api.mistral.ai/v1',
@@ -656,6 +692,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     mailbox_drafts_folder,
                     mailbox_use_ssl,
                     mailbox_password_env,
+                    mailbox_access_token_env,
                     llm_provider,
                     llm_model,
                     llm_api_base,
@@ -665,7 +702,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     updated_at
                 )
                 VALUES (1, 1, 14, 'Syndic de copropriete', '', '', 993, '', 'Drafts', 1,
-                        'RELANCE_MAILBOX_PASSWORD', 'mistral', 'mistral-small-latest',
+                    'RELANCE_MAILBOX_PASSWORD', 'RELANCE_MAILBOX_ACCESS_TOKEN', 'mistral', 'mistral-small-latest',
                         'https://api.mistral.ai/v1', 'MISTRAL_API_KEY', 0.4,
                         'courtois, professionnel et ferme', CURRENT_TIMESTAMP)
             """)
@@ -719,6 +756,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                     remote_draft_id TEXT,
                     error_message TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     validated_at DATETIME,
                     sent_at DATETIME,
                     FOREIGN KEY(code_proprietaire) REFERENCES coproprietaires(code_proprietaire)
@@ -728,6 +766,50 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_relance_draft_code_created ON relance_draft(code_proprietaire, created_at DESC)"
         )
+
+        # Table relance_template
+        logger.info("Vérification de la présence de la table 'relance_template'.")
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='relance_template';"
+        )
+        if cur.fetchone():
+            has_relance_template = True
+            logger.info("Table 'relance_template' existe.")
+            cur.execute("PRAGMA table_info(relance_template)")
+            relance_template_columns = {row[1] for row in cur.fetchall()}
+            if "generation_mode" not in relance_template_columns:
+                logger.warning(
+                    "Colonne 'generation_mode' manquante dans 'relance_template', ajout en cours."
+                )
+                cur.execute(
+                    "ALTER TABLE relance_template ADD COLUMN generation_mode "
+                    "TEXT NOT NULL DEFAULT 'static'"
+                )
+            if "tone_instruction" not in relance_template_columns:
+                logger.warning(
+                    "Colonne 'tone_instruction' manquante dans 'relance_template', ajout en cours."
+                )
+                cur.execute(
+                    "ALTER TABLE relance_template ADD COLUMN tone_instruction "
+                    "TEXT NOT NULL DEFAULT ''"
+                )
+        else:
+            has_relance_template = False
+            logger.warning("Table 'relance_template' manquante, création en cours.")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS relance_template (
+                    template_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    subject_template TEXT NOT NULL,
+                    body_template TEXT NOT NULL,
+                    generation_mode TEXT NOT NULL DEFAULT 'static',
+                    tone_instruction TEXT NOT NULL DEFAULT '',
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            created.append("relance_template")
 
         # Commit final explicite pour persister toutes les creations/migrations.
         conn.commit()
@@ -755,6 +837,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         "relance_config": has_relance_config,
         "relance_destinataire": has_relance_destinataire,
         "relance_draft": has_relance_draft,
+        "relance_template": has_relance_template,
         "created": created,
     }
 

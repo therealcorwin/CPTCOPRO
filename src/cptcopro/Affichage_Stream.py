@@ -91,10 +91,20 @@ Relance_page = st.Page(
     title="Relances et Notifications",
     icon=":material/notifications:",
 )
+Relance_Drafts_page = st.Page(
+    "Pages/Relance_Drafts.py",
+    title="Gestion des Brouillons",
+    icon=":material/drafts:",
+)
 Relance_Config_page = st.Page(
     "Pages/Relance_Config.py",
     title="Configuration Relances",
     icon=":material/settings:",
+)
+Relance_Templates_page = st.Page(
+    "Pages/Relance_Templates.py",
+    title="Templates de Relance",
+    icon=":material/description:",
 )
 Relance_Admin_page = st.Page(
     "Pages/Relance_Admin.py",
@@ -115,7 +125,9 @@ menus = st.navigation(
         ],
         "Relances et Notifications": [
             Relance_page,
+            Relance_Drafts_page,
             Relance_Config_page,
+            Relance_Templates_page,
             Relance_Admin_page,
         ],
         "Liste des Copropriétaires": [Liste_Copro_page],

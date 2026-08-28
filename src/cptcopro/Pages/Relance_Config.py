@@ -30,6 +30,7 @@ except ImportError:
 		"mailbox_drafts_folder": "Drafts",
 		"mailbox_use_ssl": 1,
 		"mailbox_password_env": "RELANCE_MAILBOX_PASSWORD",
+		"mailbox_access_token_env": "RELANCE_MAILBOX_ACCESS_TOKEN",
 		"llm_provider": "mistral",
 		"llm_model": "mistral-small-latest",
 		"llm_api_base": "https://api.mistral.ai/v1",
@@ -116,8 +117,8 @@ st.subheader("Boite mail dediee (brouillons IMAP)")
 with st.form("relance_imap_form"):
 	mailbox_imap_host = st.text_input(
 		"Serveur IMAP",
-		value=str(cfg.get("mailbox_imap_host") or ""),
-		placeholder="imap.votredomaine.com",
+		value=str(cfg.get("mailbox_imap_host") or "outlook.office365.com"),
+		placeholder="outlook.office365.com",
 	)
 	mailbox_imap_port = st.number_input(
 		"Port IMAP",
@@ -129,7 +130,7 @@ with st.form("relance_imap_form"):
 	mailbox_imap_user = st.text_input(
 		"Utilisateur IMAP",
 		value=str(cfg.get("mailbox_imap_user") or ""),
-		placeholder="boite-relance@copro.fr",
+		placeholder="adresse@hotmail.com",
 	)
 	mailbox_drafts_folder = st.text_input(
 		"Dossier brouillons",
@@ -144,6 +145,11 @@ with st.form("relance_imap_form"):
 		value=str(cfg.get("mailbox_password_env") or "RELANCE_MAILBOX_PASSWORD"),
 		help="La valeur du mot de passe n'est jamais stockee en base.",
 	)
+	mailbox_access_token_env = st.text_input(
+		"Variable d'environnement du jeton OAuth2 (optionnel)",
+		value=str(cfg.get("mailbox_access_token_env") or "RELANCE_MAILBOX_ACCESS_TOKEN"),
+		help="Pour Hotmail, le jeton OAuth2 est prioritaire sur le mot de passe et n'est jamais stocke en base.",
+	)
 
 	submitted_imap = st.form_submit_button("Enregistrer configuration IMAP", type="primary")
 	if submitted_imap:
@@ -155,6 +161,7 @@ with st.form("relance_imap_form"):
 			mailbox_drafts_folder=mailbox_drafts_folder.strip() or "Drafts",
 			mailbox_use_ssl=1 if mailbox_use_ssl else 0,
 			mailbox_password_env=mailbox_password_env.strip() or "RELANCE_MAILBOX_PASSWORD",
+			mailbox_access_token_env=mailbox_access_token_env.strip() or "RELANCE_MAILBOX_ACCESS_TOKEN",
 		)
 		_load_relance_config.clear()
 		st.success("Configuration IMAP enregistree.")

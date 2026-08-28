@@ -12,10 +12,56 @@ import urllib.error
 from email.message import EmailMessage
 from typing import Any
 
+from cptcopro.utils.hotmail_oauth import get_hotmail_access_token
+
 
 def _build_subject(nom_proprietaire: str, date_origin: str | None) -> str:
     date_label = date_origin or "periode en cours"
     return f"Relance charges copropriete - {nom_proprietaire} ({date_label})"
+
+
+class _SafePlaceholderDict(dict):
+    """Dict qui laisse le placeholder tel quel s'il est absent des donnees."""
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def _build_placeholder_context(
+    data: dict[str, Any],
+    config: dict[str, Any],
+) -> _SafePlaceholderDict:
+    debit = float(data.get("debit") or 0.0)
+    return _SafePlaceholderDict(
+        nom_proprietaire=str(data.get("nom_proprietaire") or ""),
+        code_proprietaire=str(data.get("code_proprietaire") or ""),
+        debit=debit,
+        debit_fmt=f"{debit:.2f} EUR",
+        num_apt=str(data.get("num_apt") or "NA"),
+        type_apt=str(data.get("type_apt") or "NA"),
+        date_origin=str(data.get("date_origin") or ""),
+        sender_name=str(config.get("sender_name") or ""),
+        sender_email=str(config.get("sender_email") or ""),
+        tone_instruction=str(config.get("tone_instruction") or ""),
+        frequency_days=str(config.get("frequency_days") or ""),
+    )
+
+
+def render_relance_template(
+    template: dict[str, Any],
+    data: dict[str, Any],
+    config: dict[str, Any],
+) -> tuple[str, str]:
+    """Genere (subject, body) a partir d'un template parametrable et des donnees du coproprietaire.
+
+    Placeholders disponibles: nom_proprietaire, code_proprietaire, debit, debit_fmt,
+    num_apt, type_apt, date_origin, sender_name, sender_email, tone_instruction,
+    frequency_days.
+    """
+    context = _build_placeholder_context(data, config)
+    subject = str(template.get("subject_template") or "").format_map(context)
+    body = str(template.get("body_template") or "").format_map(context)
+    return subject, body
 
 
 def _fallback_body(data: dict[str, Any], tone_instruction: str) -> str:
@@ -37,20 +83,31 @@ def _fallback_body(data: dict[str, Any], tone_instruction: str) -> str:
 def generate_relance_draft_with_llm(
     data: dict[str, Any],
     config: dict[str, Any],
+    template: dict[str, Any] | None = None,
 ) -> tuple[str, str, str, str]:
     """Genere (subject, body, provider, model) avec Mistral si possible.
 
+    Si `template` est fourni, son `tone_instruction` prevaut sur celui de la
+    configuration globale, et son `body_template` sert de guide de contenu
+    (elements a mentionner) pour l'assistant, sans etre recopie tel quel.
     En absence de cle API, un contenu de secours est genere localement.
     """
     provider = str(config.get("llm_provider") or "mistral").lower()
     model = str(config.get("llm_model") or "mistral-small-latest")
-    tone_instruction = str(
+    template_tone = str((template or {}).get("tone_instruction") or "").strip()
+    tone_instruction = template_tone or str(
         config.get("tone_instruction") or "courtois, professionnel et ferme"
     )
-    subject = _build_subject(
-        str(data.get("nom_proprietaire") or "coproprietaire"),
-        str(data.get("date_origin") or ""),
-    )
+
+    context = _build_placeholder_context(data, config)
+    template_subject = str((template or {}).get("subject_template") or "").strip()
+    if template_subject:
+        subject = template_subject.format_map(context)
+    else:
+        subject = _build_subject(
+            str(data.get("nom_proprietaire") or "coproprietaire"),
+            str(data.get("date_origin") or ""),
+        )
 
     if provider != "mistral":
         return (subject, _fallback_body(data, tone_instruction), provider, model)
@@ -61,7 +118,10 @@ def generate_relance_draft_with_llm(
     if not api_key:
         return (subject, _fallback_body(data, tone_instruction), provider, model)
 
-    temperature = float(config.get("llm_temperature") or 0.4)
+    try:
+        temperature = float(config.get("llm_temperature") or 0.4)
+    except (TypeError, ValueError):
+        temperature = 0.4
     copro_nom = str(data.get("nom_proprietaire") or "")
     debit = float(data.get("debit") or 0.0)
     num_apt = str(data.get("num_apt") or "NA")
@@ -72,6 +132,14 @@ def generate_relance_draft_with_llm(
         "Tu es un assistant de syndic. "
         "Tu rediges des relances de paiement en francais, sans menace, conforme et factuelle."
     )
+    template_body = str((template or {}).get("body_template") or "").strip()
+    content_guidance = ""
+    if template_body:
+        rendered_guidance = template_body.format_map(context)
+        content_guidance = (
+            "- Structure et elements a inclure (guide, ne pas recopier tel quel):\\n"
+            f"{rendered_guidance}\\n"
+        )
     user_prompt = (
         "Redige un email de relance de charges de copropriete.\\n"
         "Contraintes:\\n"
@@ -79,6 +147,7 @@ def generate_relance_draft_with_llm(
         "- Ne pas inventer de penalites ni de references legales.\\n"
         "- Message concis (120-220 mots), clair et actionnable.\\n"
         "- Inclure une invitation a contacter le syndic en cas de desaccord.\\n"
+        f"{content_guidance}"
         "- Retourner uniquement le corps de mail (sans sujet).\\n\\n"
         "Donnees coproprietaire:\\n"
         f"Nom: {copro_nom}\\n"
@@ -87,6 +156,7 @@ def generate_relance_draft_with_llm(
         f"Date situation: {date_origin}\\n"
         f"Debit constate: {debit:.2f} EUR\\n"
     )
+
 
     payload = {
         "model": model,
@@ -118,7 +188,7 @@ def generate_relance_draft_with_llm(
         )
         if not body:
             body = _fallback_body(data, tone_instruction)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, KeyError, ValueError):
+    except Exception:
         body = _fallback_body(data, tone_instruction)
 
     return (subject, body, provider, model)
@@ -152,11 +222,28 @@ def save_draft_to_imap(config: dict[str, Any], message: EmailMessage) -> str:
     port = int(config.get("mailbox_imap_port") or 993)
     password_env = str(config.get("mailbox_password_env") or "RELANCE_MAILBOX_PASSWORD").strip()
     password = os.getenv(password_env)
+    access_token_env = str(config.get("mailbox_access_token_env") or "RELANCE_MAILBOX_ACCESS_TOKEN").strip()
+    configured_access_token = os.getenv(access_token_env)
+    has_invalid_configured_token = bool(
+        configured_access_token and configured_access_token.count(".") != 2
+    )
+    access_token = (
+        None
+        if has_invalid_configured_token
+        else configured_access_token
+    )
+    if not configured_access_token:
+        cached_access_token = get_hotmail_access_token(config)
+        if cached_access_token:
+            access_token = cached_access_token
 
     if not host or not user:
         raise ValueError("Configuration IMAP incomplete (host/user manquant)")
-    if not password:
-        raise ValueError(f"Mot de passe IMAP absent dans la variable env {password_env}")
+    if not access_token and not password:
+        raise ValueError(
+            f"Authentification IMAP absente: renseignez {access_token_env} "
+            f"(OAuth2 Hotmail) ou {password_env}"
+        )
 
     if use_ssl:
         client = imaplib.IMAP4_SSL(host, port, ssl_context=ssl.create_default_context())
@@ -164,7 +251,34 @@ def save_draft_to_imap(config: dict[str, Any], message: EmailMessage) -> str:
         client = imaplib.IMAP4(host, port)
 
     try:
-        client.login(user, password)
+        auth_error = None
+        if access_token:
+            auth_string = f"user={user}\x01auth=Bearer {access_token}\x01\x01"
+            try:
+                client.authenticate("XOAUTH2", lambda _: auth_string.encode("ascii"))
+            except imaplib.IMAP4.error as exc:
+                auth_error = RuntimeError(
+                    "Authentification OAuth2 Hotmail refusée. Le jeton est absent, "
+                    "expiré ou ne possède pas la permission IMAP.AccessAsUser.All."
+                )
+                if not password:
+                    raise auth_error from exc
+
+        if auth_error is not None or not access_token:
+            try:
+                client.login(user, password)
+            except imaplib.IMAP4.error as exc:
+                if auth_error is not None:
+                    raise RuntimeError(
+                        f"Authentification OAuth2 et mot de passe Hotmail refusées. "
+                        f"OAuth2: {auth_error} Mot de passe: utilisez un mot de passe "
+                        f"d'application ou OAuth2 avec IMAP.AccessAsUser.All."
+                    ) from exc
+                raise RuntimeError(
+                    "Authentification Hotmail refusée. Le mot de passe classique "
+                    "est souvent bloqué pour IMAP : utilisez un mot de passe "
+                    "d'application ou OAuth2."
+                ) from exc
         internaldate = imaplib.Time2Internaldate(time.time())
         typ, response = client.append(folder, "\\Draft", internaldate, message.as_bytes())
         if typ != "OK":

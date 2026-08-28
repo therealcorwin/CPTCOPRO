@@ -34,6 +34,17 @@ from .Relance_Config import (
     get_relance_drafts,
     mark_relance_draft_status,
 )
+from .Relance_Templates import (
+    DEFAULT_TEMPLATE_NAME,
+    TEMPLATE_PLACEHOLDERS,
+    GENERATION_MODES,
+    init_relance_templates_if_missing,
+    list_relance_templates,
+    get_relance_template,
+    create_relance_template,
+    update_relance_template,
+    delete_relance_template,
+)
 from .Backup_DB import backup_db
 
 __all__ = [
@@ -68,6 +79,16 @@ __all__ = [
     "save_relance_draft",
     "get_relance_drafts",
     "mark_relance_draft_status",
+    # Relance_Templates
+    "DEFAULT_TEMPLATE_NAME",
+    "TEMPLATE_PLACEHOLDERS",
+    "GENERATION_MODES",
+    "init_relance_templates_if_missing",
+    "list_relance_templates",
+    "get_relance_template",
+    "create_relance_template",
+    "update_relance_template",
+    "delete_relance_template",
     # Backup_DB
     "backup_db",
 ]

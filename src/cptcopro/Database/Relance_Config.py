@@ -28,6 +28,7 @@ DEFAULT_RELANCE_CONFIG: dict[str, Any] = {
     "mailbox_drafts_folder": "Drafts",
     "mailbox_use_ssl": 1,
     "mailbox_password_env": "RELANCE_MAILBOX_PASSWORD",
+    "mailbox_access_token_env": "RELANCE_MAILBOX_ACCESS_TOKEN",
     "llm_provider": "mistral",
     "llm_model": "mistral-small-latest",
     "llm_api_base": "https://api.mistral.ai/v1",
@@ -61,6 +62,7 @@ def init_relance_config_if_missing(db_path: str) -> bool:
                 mailbox_drafts_folder,
                 mailbox_use_ssl,
                 mailbox_password_env,
+                mailbox_access_token_env,
                 llm_provider,
                 llm_model,
                 llm_api_base,
@@ -81,6 +83,7 @@ def init_relance_config_if_missing(db_path: str) -> bool:
                 str(DEFAULT_RELANCE_CONFIG["mailbox_drafts_folder"]),
                 int(DEFAULT_RELANCE_CONFIG["mailbox_use_ssl"]),
                 str(DEFAULT_RELANCE_CONFIG["mailbox_password_env"]),
+                str(DEFAULT_RELANCE_CONFIG["mailbox_access_token_env"]),
                 str(DEFAULT_RELANCE_CONFIG["llm_provider"]),
                 str(DEFAULT_RELANCE_CONFIG["llm_model"]),
                 str(DEFAULT_RELANCE_CONFIG["llm_api_base"]),
@@ -130,6 +133,7 @@ def update_relance_config(db_path: str, **kwargs: Any) -> bool:
         "mailbox_drafts_folder",
         "mailbox_use_ssl",
         "mailbox_password_env",
+        "mailbox_access_token_env",
         "llm_provider",
         "llm_model",
         "llm_api_base",
@@ -295,44 +299,85 @@ def save_relance_draft(
     status: str = "draft_local",
     remote_draft_id: str | None = None,
     error_message: str | None = None,
+    draft_id: int | None = None,
 ) -> int:
-    """Enregistre un brouillon de relance en base et retourne son identifiant."""
+    """Enregistre ou met a jour un brouillon de relance en base et retourne son identifiant.
+    
+    Si draft_id est fourni, fait un UPDATE, sinon un INSERT.
+    """
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
-        cur.execute(
-            """
-            INSERT INTO relance_draft (
-                code_proprietaire,
-                nom_proprietaire,
-                debit,
-                email_to,
-                subject,
-                body,
-                llm_provider,
-                llm_model,
-                status,
-                remote_draft_id,
-                error_message
+        if draft_id is not None:
+            # Mise a jour d'un brouillon existant
+            cur.execute(
+                """
+                UPDATE relance_draft SET
+                    code_proprietaire = ?,
+                    nom_proprietaire = ?,
+                    debit = ?,
+                    email_to = ?,
+                    subject = ?,
+                    body = ?,
+                    llm_provider = ?,
+                    llm_model = ?,
+                    status = ?,
+                    remote_draft_id = ?,
+                    error_message = ?
+                WHERE draft_id = ?
+                """,
+                (
+                    (code_proprietaire or "").strip(),
+                    (nom_proprietaire or "").strip(),
+                    float(debit),
+                    (email_to or "").strip(),
+                    subject,
+                    body,
+                    llm_provider,
+                    llm_model,
+                    status,
+                    remote_draft_id,
+                    error_message,
+                    int(draft_id),
+                ),
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                (code_proprietaire or "").strip(),
-                (nom_proprietaire or "").strip(),
-                float(debit),
-                (email_to or "").strip(),
-                subject,
-                body,
-                llm_provider,
-                llm_model,
-                status,
-                remote_draft_id,
-                error_message,
-            ),
-        )
-        conn.commit()
-        return int(cur.lastrowid)
+            conn.commit()
+            return int(draft_id)
+        else:
+            # Nouveau brouillon, insertion
+            cur.execute(
+                """
+                INSERT INTO relance_draft (
+                    code_proprietaire,
+                    nom_proprietaire,
+                    debit,
+                    email_to,
+                    subject,
+                    body,
+                    llm_provider,
+                    llm_model,
+                    status,
+                    remote_draft_id,
+                    error_message
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (code_proprietaire or "").strip(),
+                    (nom_proprietaire or "").strip(),
+                    float(debit),
+                    (email_to or "").strip(),
+                    subject,
+                    body,
+                    llm_provider,
+                    llm_model,
+                    status,
+                    remote_draft_id,
+                    error_message,
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
     except Exception as exc:
         conn.rollback()
         logger.error(f"Erreur save_relance_draft: {exc}")
@@ -370,10 +415,16 @@ def get_relance_drafts(
             FROM relance_draft
         """
         params: list[Any] = []
+        where_clauses = []
         if status:
-            query += " WHERE status = ?"
+            where_clauses.append("status = ?")
             params.append(status)
+        else:
+            where_clauses.append("status != ?")
+            params.append("deleted")
 
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
         query += " ORDER BY datetime(created_at) DESC LIMIT ?"
         params.append(int(limit))
 
@@ -388,6 +439,7 @@ def mark_relance_draft_status(
     draft_id: int,
     status: str,
     error_message: str | None = None,
+    remote_draft_id: str | None = None,
 ) -> bool:
     """Met a jour le statut d'un brouillon (validated/sent/error/etc.)."""
     status = (status or "").strip().lower()
@@ -395,7 +447,11 @@ def mark_relance_draft_status(
         raise ValueError("status vide")
 
     fields = ["status = ?", "error_message = ?"]
-    params: list[Any] = [status, error_message, int(draft_id)]
+    params: list[Any] = [status, error_message]
+    if remote_draft_id is not None:
+        fields.append("remote_draft_id = ?")
+        params.append(remote_draft_id)
+    params.append(int(draft_id))
 
     if status == "validated":
         fields.append("validated_at = CURRENT_TIMESTAMP")

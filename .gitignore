@@ -137,6 +137,8 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+.oauth/
+msal_token_cache.json
 .venv
 env/
 venv/
@@ -231,3 +233,5 @@ CPTCOPRO.code-workspace
 -- Table de configuration (une seule lig.sql
 .pcloud_credentials
 src/cptcopro/BDD2/test.sqlite*
+graphify-out
+
