@@ -37,6 +37,10 @@ REQUIRED_STARTUP_ENV_VARS = [
     *REQUIRED_PCLOUD_BACKUP_ENV_VARS,
 ]
 
+# Devient True une fois le .env lu avec succès, pour ne parser le fichier
+# qu'une seule fois par processus (voir _ensure_env_loaded()).
+_env_loaded = False
+
 
 def get_app_base_path() -> Path:
     """
@@ -62,6 +66,31 @@ def get_env_file_path() -> Path:
     return get_app_base_path() / ".env"
 
 
+def _ensure_env_loaded(env_path: Path) -> bool:
+    """Charge le fichier .env une seule fois par processus (idempotent).
+
+    Les appels suivants (avec le même ou un autre chemin) ne relisent pas le
+    fichier: une fois `.env` chargé dans `os.environ`, il n'y a plus besoin de
+    re-vérifier sa présence ni de le re-parser à chaque appel.
+
+    Returns:
+        True si le fichier a été chargé (ou l'était déjà), False s'il est introuvable.
+    """
+    global _env_loaded
+    if _env_loaded:
+        return True
+
+    if not env_path.exists():
+        logger.bind(type_log="ENV").warning(
+            f"Fichier .env non trouvé à: {env_path}")
+        return False
+
+    load_dotenv(env_path)
+    logger.bind(type_log="ENV").info(f"Fichier .env chargé depuis: {env_path}")
+    _env_loaded = True
+    return True
+
+
 def load_env_file() -> bool:
     """
     Charge le fichier .env s'il existe.
@@ -69,17 +98,7 @@ def load_env_file() -> bool:
     Returns:
         True si le fichier a été chargé, False sinon.
     """
-    env_path = get_env_file_path()
-
-    if env_path.exists():
-        load_dotenv(env_path)
-        logger.bind(type_log="ENV").info(
-            f"Fichier .env chargé depuis: {env_path}")
-        return True
-    else:
-        logger.bind(type_log="ENV").warning(
-            f"Fichier .env non trouvé à: {env_path}")
-        return False
+    return _ensure_env_loaded(get_env_file_path())
 
 
 def check_env_file_exists() -> bool:
@@ -127,8 +146,8 @@ def load_and_validate_env(required_vars: list[str] | None = None) -> dict[str, s
 
     env_path = get_env_file_path()
 
-    # Vérifier l'existence du fichier
-    if not env_path.exists():
+    # Charge le fichier une seule fois par processus (no-op si déjà fait)
+    if not _ensure_env_loaded(env_path):
         var_examples = "\n".join(
             f"  - {var}=VOTRE_VALEUR" for var in required_vars)
         error_msg = (
@@ -138,10 +157,6 @@ def load_and_validate_env(required_vars: list[str] | None = None) -> dict[str, s
         )
         logger.bind(type_log="ENV").error(error_msg)
         raise FileNotFoundError(error_msg)
-
-    # Charger le fichier
-    load_dotenv(env_path)
-    logger.bind(type_log="ENV").info(f"Fichier .env chargé depuis: {env_path}")
 
     # Valider les variables requises
     success, missing = validate_required_env_vars(required_vars)

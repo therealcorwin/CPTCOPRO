@@ -20,6 +20,15 @@ Options:
 
 import asyncio
 import sys
+
+# Valider toutes les variables d'environnement requises AVANT d'importer les
+# modules applicatifs : certains d'entre eux (ex. Backup_DB_Pcloud) lisent le
+# .env dès l'import et lèveraient sinon une erreur partielle (seulement leurs
+# propres clés) qui masquerait les autres clés manquantes.
+from cptcopro.utils.env_loader import validate_startup_env
+
+validate_startup_env()
+
 from selectolax.parser import HTMLParser
 import cptcopro.Database.Backup_DB_Pcloud as bckp_pcloud
 import pathlib
@@ -29,13 +38,9 @@ import cptcopro.Traitement.Lots_Copro as tlc
 import cptcopro.Database as dtb
 import cptcopro.utils.streamlit_launcher as usl
 from cptcopro.utils.paths import get_db_path, get_log_path
-from cptcopro.utils.env_loader import validate_startup_env
 from loguru import logger
 import time
 import atexit
-
-# Charger et valider les variables d'environnement avant toute utilisation
-validate_startup_env()
 
 # Configurer les logs avec le bon chemin
 LOG_PATH = str(get_log_path("app.log"))
@@ -63,50 +68,7 @@ logger = logger.bind(type_log="MAIN")
 # Utiliser le chemin de DB portable
 DB_PATH = str(get_db_path())
 
-# dtb.verif_repertoire_db(DB_PATH)
-# dtb.verif_presence_db(DB_PATH)
-# dtb.integrite_db(DB_PATH)
-# bdb.backup_db(DB_PATH)
-# exit()
 
-#if bckp_pcloud.tester_presence_token_pcloud():
-#    logger.info("Fichier de token pCloud trouvé, tentative de connexion...")
-#    try:
-#        pcloud_client = bckp_pcloud.connecter_pcloud_via_token()
-#        logger.success("Connexion à pCloud réussie via token existant.")
-#        bckp_pcloud.sauvegarder_bdd_pcloud(pcloud_client, DB_PATH)
-#        #bckp_pcloud.lister_fichiers_et_dossiers_pcloud(pcloud_client)
-#        #bckp_pcloud.telecharger_dernier_backup_pcloud(pcloud_client, DB_PATH)
-#    except Exception as e:
-#        logger.error(f"Échec de la connexion à pCloud via token : {e}")
-#        logger.info("Tentative de connexion via OAuth2...")
-#        try:
-#            pcloud_client = bckp_pcloud.connecter_pcloud_via_oauth()
-#            logger.success("Connexion à pCloud réussie via OAuth2.")
-#        except Exception as e:
-#            logger.critical(f"Échec de la connexion à pCloud via OAuth2 : {e}")
-#            sys.exit(1)
-#    age_token = pcloud_client.get_credentials_info()
-#    if age_token.get('age_days', 0) >= 25:  # Refresh before 30 days
-#        logger.warning("⚠️ Token is getting old, consider refreshing")
-#        try:
-#            logger.info("Tentative de rafraichissement du token pCloud...")
-#            bckp_pcloud.connecter_pcloud_via_oauth()
-#            logger.success("Rafraichissement du token pCloud réussi.")
-#        except Exception as e:
-#            logger.error(f"Échec du rafraîchissement du token pCloud : {e}")
-#else:
-#    logger.warning(
-#        "Fichier de token pCloud introuvable, tentative de connexion via OAuth2..."
-#    )
-#    try:
-#        pcloud_client = bckp_pcloud.connecter_pcloud_via_oauth()
-#        logger.success("Connexion à pCloud réussie via OAuth2.")
-#    except Exception as e:
-#        logger.critical(f"Échec de la connexion à pCloud via OAuth2 : {e}")
-#        sys.exit(1)
-##bckp_pcloud.deconnecter_pcloud(sdk=pcloud_client)
-#exit()
 def main() -> None:
     """
     Point d'entrée principal de l'application de suivi des copropriétaires.
@@ -321,8 +283,6 @@ def main() -> None:
                     logger.info(
                         f"Base restaurée déplacée vers le chemin cible '{target_path}'."
                     )
-            #finally:
-                #bckp_pcloud.deconnecter_pcloud(sdk=pcloud_client)
         dtb.integrite_db(DB_PATH)
         dtb.backup_db(DB_PATH)
         if restored_from_pcloud:

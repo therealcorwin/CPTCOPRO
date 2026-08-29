@@ -20,6 +20,16 @@ from cptcopro.utils.env_loader import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_env_loaded_cache():
+    """Chaque test simule un processus frais: reset le cache de chargement du .env."""
+    import cptcopro.utils.env_loader as env_loader
+
+    env_loader._env_loaded = False
+    yield
+    env_loader._env_loaded = False
+
+
 class TestGetAppBasePath:
     """Tests pour get_app_base_path()."""
 
@@ -426,3 +436,59 @@ class TestValidateStartupEnv:
                     os.environ[var] = value
                 else:
                     os.environ.pop(var, None)
+
+
+class TestEnvLoadedOnlyOnce:
+    """Verrouille le comportement de cache: le .env ne doit etre parse qu'une
+    seule fois par processus, meme si plusieurs getters sont appeles."""
+
+    def test_load_dotenv_called_once_across_multiple_getters(self, tmp_path, monkeypatch):
+        import cptcopro.utils.env_loader as env_loader
+
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "login_site_copro=a\n"
+            "password_site_copro=b\n"
+            "url_site_copro=c\n"
+            "url_situation_copro=d\n"
+            "pcloud_APP_KEY=e\n"
+            "pcloud_APP_SECRET=f\n"
+            "pcloud_location_id=1\n"
+            "pcloud_backup_folder=g\n"
+            "pcloud_backup_folder_id=2\n"
+            "pcloud_backup_file=h\n"
+        )
+
+        vars_to_clean = [
+            "login_site_copro",
+            "password_site_copro",
+            "url_site_copro",
+            "url_situation_copro",
+            "pcloud_APP_KEY",
+            "pcloud_APP_SECRET",
+            "pcloud_location_id",
+            "pcloud_backup_folder",
+            "pcloud_backup_folder_id",
+            "pcloud_backup_file",
+        ]
+        for var in vars_to_clean:
+            monkeypatch.delenv(var, raising=False)
+
+        calls = []
+        original_load_dotenv = env_loader.load_dotenv
+
+        def counting_load_dotenv(path, *args, **kwargs):
+            calls.append(path)
+            return original_load_dotenv(path, *args, **kwargs)
+
+        monkeypatch.setattr(env_loader, "load_dotenv", counting_load_dotenv)
+        monkeypatch.setattr(env_loader, "get_env_file_path", lambda: env_file)
+
+        env_loader.validate_startup_env()
+        env_loader.get_credentials()
+        result = env_loader.load_and_validate_env(
+            ["pcloud_APP_KEY", "pcloud_APP_SECRET"]
+        )
+
+        assert len(calls) == 1
+        assert result["pcloud_APP_KEY"] == "e"

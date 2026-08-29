@@ -97,7 +97,6 @@ Voir [`reports/call_graph.md`](reports/call_graph.md) pour le graphe complet des
 
 ## Notes utiles
 
-- Le dédoublonnage existe encore dans `Database/Dedoublonnage.py`, mais n'est plus appelé par `main.py`.
 - Les erreurs de parsing remontent via des codes `KO_*` définis dans `src/cptcopro/Parsing/constants.py`.
 - Les données persistantes vivent sous `src/cptcopro/BDD`, `src/cptcopro/logs` et `src/cptcopro/Backup` en développement.
 - En cas d'absence de base locale, `main.py` tente une restauration depuis pCloud avant d'écrire de nouvelles données.

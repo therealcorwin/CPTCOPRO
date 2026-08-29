@@ -7,7 +7,6 @@ Ce package contient les modules pour :
 - Insertion des copropriétaires (Coproprietaires_To_BDD)
 - Configuration des alertes (Alertes_Config)
 - Sauvegarde de la base (Backup_DB)
-- Dédoublonnage des données (Dedoublonnage)
 """
 
 from .constants import DEFAULT_ALERT_THRESHOLDS, DEFAULT_THRESHOLD_FALLBACK

@@ -21,7 +21,6 @@ Ce dépôt récupère les charges et les lots depuis un extranet via Playwright,
 - **Package principal** : `src/cptcopro/Database/`
 - Modules à connaître : `Creation_BDD.py`, `Charges_To_BDD.py`, `Coproprietaires_To_BDD.py`, `Alertes_Config.py`, `Backup_DB.py`.
 - Tables clés : `charge`, `alertes_debit_eleve`, `coproprietaires`, `suivi_alertes`, `config_alerte`.
-- **`src/cptcopro/Database/Dedoublonnage.py`** existe encore, mais n'est plus dans le flux principal de `main.py`.
 
 ### Système d'alertes
 - **Table `config_alerte`** : seuils configurables par type d'appartement.
@@ -43,16 +42,18 @@ Ce dépôt récupère les charges et les lots depuis un extranet via Playwright,
 
 - **Python requis** : `>=3.12,<3.14` (défini dans `pyproject.toml`)
 - **Dépendances principales** : `loguru`, `selectolax`, `pandas`, `plotly`, `rich`, `python-dotenv`, `playwright`, `streamlit`, `streamlit-extras`
-- **Variables d'environnement** (ou `.env`) nécessaires :
-  - `login_site_copro` : Identifiant de connexion
-  - `password_site_copro` : Mot de passe
-  - `url_site_copro` : URL du site du syndic
+- **Variables d'environnement** (ou `.env`) requises au démarrage (voir `REQUIRED_STARTUP_ENV_VARS` dans `env_loader.py`) :
+  - Core site copro : `login_site_copro`, `password_site_copro`, `url_site_copro`, `url_situation_copro`
+  - pCloud : `pcloud_APP_KEY`, `pcloud_APP_SECRET`, `pcloud_location_id`, `pcloud_backup_folder`, `pcloud_backup_folder_id`, `pcloud_backup_file`
+  - Toutes documentées dans `src/cptcopro/.env.example` (un test dédié vérifie que cette liste et le fichier restent synchronisés)
 
-### Emplacement du `.env`
+### Emplacement et chargement du `.env`
 
 - **Exécution normale** : le parsing lit les credentials depuis un `.env` à la racine du projet.
 - **PyInstaller** : le `.env` est attendu à côté de l'exécutable.
-- **Note pratique** : `utils.paths.init_env()` et `utils.env_loader` coexistent ; pour éviter les ambiguïtés, considérer la racine du projet comme emplacement de référence en développement.
+- **`utils.env_loader` est le point d'entrée unique** pour charger/valider le `.env` (`utils.paths.init_env()` a été supprimé) ; la résolution du chemin (`paths.get_env_file_path()`) reste dans `paths.py` et est réutilisée par `env_loader`.
+- **Chargement en cache** : le fichier `.env` n'est lu/parsé qu'une seule fois par processus (flag `_env_loaded` dans `env_loader.py`) ; chaque appelant continue de valider ses propres clés requises à chaque appel, sans relire le fichier.
+- **Ordre d'import important dans `main.py`** : `validate_startup_env()` doit être appelé avant d'importer tout module applicatif (ex. `Backup_DB_Pcloud`) qui lit le `.env` au niveau module — sinon une erreur partielle (clés d'un seul sous-module) masquerait la liste complète des clés manquantes.
 
 ### Exécution locale
 
@@ -105,9 +106,9 @@ Options:
 
 ## Limitations et comportements utiles
 
-- Le dédoublonnage existe encore dans `Database/Dedoublonnage.py`, mais n'est plus appelé par `main.py`.
 - Les erreurs de parsing remontent sous forme de codes `KO_*` centralisés dans `src/cptcopro/Parsing/constants.py`.
 - Le détail du flux d'appel et des pages Streamlit est maintenu dans `reports/call_graph.md`.
+- `tests/test_env_example_sync.py` échoue si une variable de `REQUIRED_STARTUP_ENV_VARS` n'est pas documentée dans `.env.example` ; `tests/test_env_loader.py::TestEnvLoadedOnlyOnce` verrouille le chargement unique du `.env`.
 
 ## Fichiers à consulter rapidement
 
@@ -120,5 +121,24 @@ Options:
 | `src/cptcopro/Traitement/Lots_Copro.py` | Parsing HTML des lots |
 | `src/cptcopro/Database/__init__.py` | API publique du package Database |
 | `src/cptcopro/utils/paths.py` | Résolution des chemins DB/logs/backup |
+| `src/cptcopro/utils/env_loader.py` | Chargement/validation unique du `.env` |
 | `src/cptcopro/Parsing/constants.py` | Codes d'erreur et timings Playwright |
 | `reports/call_graph.md` | Graphe des appels de fonctions |
+
+## graphify
+
+For any question about this repo's architecture, structure, components, or how to add/modify/find
+code, your first action should be `graphify query "<question>"` when `graphify-out/graph.json`
+exists. Use `graphify path "<A>" "<B>"` for relationship questions and `graphify explain "<concept>"`
+for focused-concept questions. These return a scoped subgraph, usually much smaller than the full
+report or raw grep output.
+
+Triggers: "how do I…", "where is…", "what does … do", "add/modify a <component>",
+"explain the architecture", or anything that depends on how files or classes relate.
+
+If `graphify-out/wiki/index.md` exists, use it for broad navigation. Read `graphify-out/GRAPH_REPORT.md`
+only for broad architecture review or when query/path/explain do not surface enough context. Only read
+source files when (a) modifying/debugging specific code, (b) the graph lacks the needed detail, or
+(c) the graph is missing or stale.
+
+Type `/graphify` in Copilot Chat to build or update the graph.

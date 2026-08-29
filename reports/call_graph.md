@@ -282,7 +282,6 @@ flowchart LR
 | Database/Alertes_Config.py | Alertes et seuils | Gere les seuils, le suivi des alertes et le recalcul du nombre d'alertes |
 | Database/Backup_DB.py | Backup local SQLite | Copie la base locale dans le repertoire de backup du projet |
 | Database/Backup_DB_Pcloud.py | Backup et restauration pCloud | Gere le token, la connexion, la restauration, l'upload et la deconnexion |
-| Database/Dedoublonnage.py | Outils hors flux principal | Conserve des aides historiques de dedoublonnage, non appellees par `main.py` |
 | Affichage_Stream.py | Interface Streamlit | Construit la navigation multi-pages et lance les pages |
 
 ## Constantes de timing (source de verite)
@@ -313,8 +312,7 @@ flowchart LR
 - `_recup_html_generic` reste le coeur DRY de la collecte HTML.
 - `validate_startup_env()` est le point d'entree unique pour verifier les variables requises au demarrage.
 - Le flux principal de `main.py` repose sur `validate_startup_env()`, pas sur un autre bootstrap.
-- Le flux principal n'appelle plus le dedoublonnage.
-- Raison: index UNIQUE et INSERT OR REPLACE dans la persistance des charges.
+- Le dedoublonnage n'est plus necessaire (index UNIQUE et INSERT OR REPLACE dans la persistance des charges) ; le module historique `Database/Dedoublonnage.py` a ete supprime.
 - Le backup local est fait avant les ecritures, alors que le backup pCloud est fait apres les ecritures, sauf `--no-backup`.
 - `--deco-pcloud` se limite a la deconnexion pCloud et a la suppression du token local.
 - Les pages Streamlit utilisent majoritairement `@st.cache_data` sur les fonctions de chargement.
