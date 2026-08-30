@@ -1,4 +1,4 @@
-"""Gestion des templates d'email de relance (creation, edition, apercu)."""
+"""Gestion des modèles d'email de relance (création, édition, aperçu)."""
 
 from __future__ import annotations
 
@@ -15,17 +15,18 @@ from cptcopro.Database import (
     get_relance_config,
 )
 from cptcopro.utils.relance_mailer import render_relance_template
+from cptcopro.utils.ui_components import render_header
 
 
 DB_PATH = get_db_path()
 
 _MODE_LABELS = {
-    "static": "Statique (substitution directe des placeholders)",
-    "llm": "Assistant IA (le sujet/corps servent de guide de contenu et de ton)",
+    "static": "Statique (substitution directe des variables)",
+    "llm": "Assistant IA Mistral (guide de contexte et de ton)",
 }
 
 _SAMPLE_DATA = {
-    "nom_proprietaire": "Dupont Jean",
+    "nom_proprietaire": "M. Dupont Jean",
     "code_proprietaire": "D001",
     "debit": 1234.56,
     "num_apt": "12",
@@ -52,38 +53,36 @@ def _load_config(db_path: str) -> dict:
     return get_relance_config(db_path)
 
 
-st.title("Templates de Relance")
-st.caption(
-    "Creez et parametrez les modeles d'email utilises pour generer les brouillons de relance."
+render_header(
+    "📝 Modèles d'Emails de Relance",
+    "Configurez les modèles types et les consignes de rédaction pour l'assistant IA",
 )
 
 db_path_str = str(DB_PATH)
 cfg = _load_config(db_path_str)
 templates = _load_templates(db_path_str, _db_cache_key())
 
-st.subheader("Placeholders disponibles")
-st.code(", ".join("{" + p + "}" for p in TEMPLATE_PLACEHOLDERS), language=None)
-st.caption(
-    "Utilisez ces placeholders dans le sujet et le corps du template. "
-    "Ils seront remplaces par les donnees reelles du coproprietaire lors de la generation."
-)
+with st.expander("ℹ️ Variables dynamiques disponibles", expanded=False):
+    st.markdown("Vous pouvez insérer ces variables dans le sujet et le corps de vos messages :")
+    chips = [f"`{{{p}}}`" for p in TEMPLATE_PLACEHOLDERS]
+    st.markdown(" ".join(chips))
+    st.caption("Exemple : `{nom_proprietaire}`, `{debit_fmt}`, `{num_apt}`, `{date_origin}`, `{sender_name}`.")
 
 st.divider()
-st.subheader("Templates existants")
 
 _NEW_TEMPLATE_KEY = "__new__"
 
 if not templates:
-    template_labels = {_NEW_TEMPLATE_KEY: "Nouveau template"}
+    template_labels = {_NEW_TEMPLATE_KEY: "➕ Créer un nouveau modèle"}
     selected_id = _NEW_TEMPLATE_KEY
 else:
     template_labels = {
-        t["template_id"]: f"{t['name']}" + (" (par defaut)" if t["is_default"] else "")
+        t["template_id"]: f"📄 {t['name']}" + (" (⭐ Par défaut)" if t["is_default"] else "")
         for t in templates
     }
-    template_labels[_NEW_TEMPLATE_KEY] = "Nouveau template"
+    template_labels[_NEW_TEMPLATE_KEY] = "➕ Créer un nouveau modèle"
     selected_id = st.selectbox(
-        "Selectionner un template a consulter/editer, ou creer un nouveau",
+        "Sélectionnez un modèle à éditer :",
         options=list(template_labels.keys()),
         format_func=lambda tid: template_labels[tid],
         key="template_select",
@@ -96,106 +95,114 @@ selected_template = (
     else next(t for t in templates if t["template_id"] == selected_id)
 )
 
-with st.form("edit_template_form"):
-    name = st.text_input("Nom du template", value=selected_template.get("name", ""))
-    generation_mode = st.radio(
-        "Mode de generation",
-        options=list(GENERATION_MODES),
-        format_func=lambda m: _MODE_LABELS.get(m, m),
-        index=list(GENERATION_MODES).index(selected_template.get("generation_mode") or "static"),
-        horizontal=True,
-        key="edit_template_mode",
-    )
-    subject_template = st.text_input(
-        "Sujet",
-        value=selected_template.get(
-            "subject_template", "Relance charges copropriete - {nom_proprietaire} ({date_origin})"
-        ),
-    )
-    body_template = st.text_area(
-        "Corps",
-        value=selected_template.get(
-            "body_template",
-            (
-                "Bonjour {nom_proprietaire},\n\n"
-                "A la date du {date_origin}, un solde debiteur de {debit_fmt} est constate "
-                "sur votre lot {num_apt} ({type_apt}).\n\n"
-                "Cordialement,\n"
-                "{sender_name}"
+col_form, col_prev = st.columns([1.2, 1], gap="large")
+
+with col_form:
+    st.markdown(f"### {'Nouveau Modèle' if is_new else 'Édition du Modèle'}")
+
+    with st.form("edit_template_form"):
+        name = st.text_input("Nom du modèle", value=selected_template.get("name", ""))
+        generation_mode = st.radio(
+            "Mode de rédaction",
+            options=list(GENERATION_MODES),
+            format_func=lambda m: _MODE_LABELS.get(m, m),
+            index=list(GENERATION_MODES).index(selected_template.get("generation_mode") or "static"),
+            horizontal=True,
+            key="edit_template_mode",
+        )
+        subject_template = st.text_input(
+            "Objet du message",
+            value=selected_template.get(
+                "subject_template", "Relance charges copropriété - {nom_proprietaire} ({date_origin})"
             ),
-        ),
-        height=280,
-    )
-    tone_instruction = st.text_input(
-        "Ton a appliquer",
-        value=str(selected_template.get("tone_instruction") or "courtois, professionnel et ferme"),
-        help="Utilise pour guider le ton du message, notamment en mode assistant IA.",
-    )
-    is_default = st.checkbox(
-        "Definir comme template par defaut",
-        value=bool(selected_template.get("is_default")),
-    )
-
-    col1, col2 = st.columns(2)
-    with col1:
-        submitted = st.form_submit_button(
-            "Creer le template" if is_new else "Enregistrer", type="primary"
         )
-    with col2:
-        deleted = st.form_submit_button("Supprimer", type="secondary", disabled=is_new)
-
-    if submitted:
-        try:
-            if is_new:
-                create_relance_template(
-                    db_path_str,
-                    name=name,
-                    subject_template=subject_template,
-                    body_template=body_template,
-                    generation_mode=generation_mode,
-                    tone_instruction=tone_instruction,
-                    is_default=is_default,
-                )
-                st.success("Template cree.")
-            else:
-                update_relance_template(
-                    db_path_str,
-                    template_id=selected_id,
-                    name=name.strip(),
-                    subject_template=subject_template,
-                    body_template=body_template,
-                    generation_mode=generation_mode,
-                    tone_instruction=tone_instruction,
-                    is_default=is_default,
-                )
-                st.success("Template mis a jour.")
-            _load_templates.clear()
-            st.rerun()
-        except ValueError as exc:
-            st.error(str(exc))
-
-    if deleted and not is_new:
-        try:
-            delete_relance_template(db_path_str, selected_id)
-            _load_templates.clear()
-            st.success("Template supprime.")
-            st.rerun()
-        except ValueError as exc:
-            st.error(str(exc))
-
-if not is_new:
-    st.markdown("**Apercu avec donnees d'exemple**")
-    if (selected_template.get("generation_mode") or "static") == "llm":
-        st.caption(
-            "Mode assistant IA: le contenu final sera redige par l'IA en suivant ce guide et ce ton, "
-            "il ne sera pas recopie tel quel."
+        body_template = st.text_area(
+            "Corps du message",
+            value=selected_template.get(
+                "body_template",
+                (
+                    "Bonjour {nom_proprietaire},\n\n"
+                    "À la date du {date_origin}, un solde débiteur de {debit_fmt} est constaté "
+                    "sur votre lot {num_apt} ({type_apt}).\n\n"
+                    "Nous vous remercions de bien vouloir régulariser cette situation.\n\n"
+                    "Cordialement,\n"
+                    "{sender_name}"
+                ),
+            ),
+            height=260,
         )
+        tone_instruction = st.text_input(
+            "Consigne de ton (utilisé par l'IA)",
+            value=str(selected_template.get("tone_instruction") or "courtois, professionnel et ferme"),
+            help="Guide le style du modèle lors de la rédaction avec l'IA Mistral.",
+        )
+        is_default = st.checkbox(
+            "Définir comme modèle par défaut",
+            value=bool(selected_template.get("is_default")),
+        )
+
+        col_b1, col_b2 = st.columns(2, gap="medium")
+        with col_b1:
+            submitted = st.form_submit_button(
+                "✨ Créer le modèle" if is_new else "💾 Enregistrer", type="primary", use_container_width=True
+            )
+        with col_b2:
+            deleted = st.form_submit_button("🗑️ Supprimer", type="secondary", disabled=is_new, use_container_width=True)
+
+        if submitted:
+            try:
+                if is_new:
+                    create_relance_template(
+                        db_path_str,
+                        name=name,
+                        subject_template=subject_template,
+                        body_template=body_template,
+                        generation_mode=generation_mode,
+                        tone_instruction=tone_instruction,
+                        is_default=is_default,
+                    )
+                    st.toast("Modèle créé avec succès !", icon="✨")
+                else:
+                    update_relance_template(
+                        db_path_str,
+                        template_id=selected_id,
+                        name=name.strip(),
+                        subject_template=subject_template,
+                        body_template=body_template,
+                        generation_mode=generation_mode,
+                        tone_instruction=tone_instruction,
+                        is_default=is_default,
+                    )
+                    st.toast("Modèle mis à jour !", icon="💾")
+                _load_templates.clear()
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+
+        if deleted and not is_new:
+            try:
+                delete_relance_template(db_path_str, selected_id)
+                _load_templates.clear()
+                st.toast("Modèle supprimé", icon="🗑️")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+
+with col_prev:
+    st.markdown("### 👁️ Aperçu du rendu")
+    mode_actuel = selected_template.get("generation_mode") or generation_mode
+    if mode_actuel == "llm":
+        st.info("🤖 **Mode Assistant IA** : Le texte ci-dessous servira de guide thématique à Mistral pour générer un message fluide et personnalisé.")
+    else:
+        st.caption("Exemple avec un copropriétaire fictif :")
+
     try:
-        preview_subject, preview_body = render_relance_template(
-            selected_template, _SAMPLE_DATA, cfg
-        )
-        st.text_input("Sujet genere", value=preview_subject, disabled=True)
-        st.text_area("Corps genere", value=preview_body, height=200, disabled=True)
+        dummy_tpl = {
+            "subject_template": subject_template,
+            "body_template": body_template,
+        }
+        preview_sub, preview_txt = render_relance_template(dummy_tpl, _SAMPLE_DATA, cfg)
+        st.text_input("Objet généré", value=preview_sub, disabled=True)
+        st.text_area("Corps généré", value=preview_txt, height=260, disabled=True)
     except Exception as exc:
-        st.warning(f"Impossible de generer l'apercu: {exc}")
-
+        st.warning(f"Aperçu indisponible : {exc}")

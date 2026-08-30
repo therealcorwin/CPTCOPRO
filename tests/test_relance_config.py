@@ -174,7 +174,7 @@ def test_mark_draft_status_keeps_remote_id(tmp_path: Path):
     assert draft["remote_draft_id"] == "(APPENDUID 1 7)"
 
 
-def test_non_oauth_value_uses_password_login(monkeypatch):
+def test_non_oauth_value_uses_password_login(monkeypatch, tmp_path: Path):
     class FakeImap:
         def __init__(self):
             self.login_args = None
@@ -202,11 +202,13 @@ def test_non_oauth_value_uses_password_login(monkeypatch):
             "mailbox_imap_user": "sender@hotmail.com",
             "mailbox_access_token_env": "TEST_RELANCE_VALUE",
             "mailbox_password_env": "TEST_RELANCE_PASSWORD",
+            "mailbox_oauth_cache_path": str(tmp_path / "nocache.json"),
         },
         message,
     )
 
     assert fake.login_args == ("sender@hotmail.com", "app-password")
+
 
 
 def test_cached_oauth_token_is_preferred(monkeypatch):
@@ -354,4 +356,186 @@ def test_generate_with_llm_uses_template_tone_and_guidance_on_fallback():
     assert provider == "mistral"
     assert model == "mistral-small-latest"
     assert "Le syndic" in body
+
+
+def test_tester_connexion_mistral_without_key(monkeypatch):
+    from cptcopro.utils.relance_mailer import tester_connexion_mistral
+
+    monkeypatch.setenv("MISTRAL_API_KEY", "")
+    ok, msg = tester_connexion_mistral(api_key=None)
+    assert ok is False
+    assert "Clé API absente" in msg
+
+
+
+def test_tester_connexion_mistral_with_mock(monkeypatch):
+    from cptcopro.utils.relance_mailer import tester_connexion_mistral
+    import urllib.request
+    
+
+    class DummyResponse:
+        def __init__(self, content):
+            self.content = content
+
+        def read(self):
+            return self.content
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    def mock_urlopen(req, timeout=15):
+        payload = b'{"choices": [{"message": {"content": "Connexion Mistral operationnelle."}}]}'
+        return DummyResponse(payload)
+
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+
+    ok, msg = tester_connexion_mistral(api_key="fake_key_123")
+    assert ok is True
+    assert "Connexion réussie" in msg
+
+
+def test_verifier_statut_token_hotmail_without_client_id(monkeypatch):
+    from cptcopro.utils.hotmail_oauth import verifier_statut_token_hotmail
+
+    monkeypatch.setenv("RELANCE_MAILBOX_CLIENT_ID", "")
+    ok, msg = verifier_statut_token_hotmail()
+    assert ok is False
+    assert "non définie" in msg
+
+
+def test_tester_connexion_imap_without_credentials(tmp_path: Path):
+    from cptcopro.utils.relance_mailer import tester_connexion_imap
+
+    config = {
+        "mailbox_imap_host": "outlook.office365.com",
+        "mailbox_imap_user": "test@hotmail.com",
+        "mailbox_password_env": "MISSING_PASSWORD_ENV",
+        "mailbox_access_token_env": "MISSING_ACCESS_TOKEN_ENV",
+        "mailbox_oauth_cache_path": str(tmp_path / "nocache.json"),
+    }
+    ok, msg, folders = tester_connexion_imap(config)
+    assert ok is False
+    assert "Authentification IMAP absente" in msg
+    assert folders == []
+
+
+
+def test_mark_relance_draft_status_sets_sent_at(tmp_path: Path):
+    db_path = setup_db(tmp_path / "relance_sent_at.db")
+
+    draft_id = dbmod.save_relance_draft(
+        db_path,
+        code_proprietaire="C100",
+        nom_proprietaire="Testeur",
+        debit=150.0,
+        email_to="testeur@example.com",
+        subject="Relance 1",
+        body="Corps",
+        llm_provider="mistral",
+        llm_model="mistral-small-latest",
+        status="draft_local",
+    )
+
+    drafts_before = dbmod.get_relance_drafts(db_path)
+    assert drafts_before[0]["sent_at"] is None
+
+    # Passage en draft_imap -> sent_at doit être renseigné
+    dbmod.mark_relance_draft_status(db_path, draft_id, status="draft_imap", remote_draft_id="remote-123")
+    drafts_after = dbmod.get_relance_drafts(db_path)
+    assert drafts_after[0]["status"] == "draft_imap"
+    assert drafts_after[0]["sent_at"] is not None
+    assert drafts_after[0]["remote_draft_id"] == "remote-123"
+
+
+def test_relances_tracking_summary_and_due_metrics(tmp_path: Path):
+    db_path = setup_db(tmp_path / "relance_tracking.db")
+
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO coproprietaires (nom_proprietaire, code_proprietaire, num_apt, type_apt) VALUES (?, ?, ?, ?)",
+            ("Durand", "D002", "14", "4p"),
+        )
+        cur.execute(
+            """
+            INSERT INTO alertes_debit_eleve (
+                id_origin, nom_proprietaire, code_proprietaire, debit, type_alerte, date_origin,
+                last_detection, first_detection, occurence
+            )
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_DATE, CURRENT_DATE, ?)
+            """,
+            (2, "Durand", "D002", 450.0, "4p", "2026-02-01", 1),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Créer 2 relances envoyées pour D002
+    d1 = dbmod.save_relance_draft(
+        db_path,
+        code_proprietaire="D002",
+        nom_proprietaire="Durand",
+        debit=450.0,
+        email_to="durand@example.com",
+        subject="Premiere relance",
+        body="Corps 1",
+        llm_provider="mistral",
+        llm_model="mistral-small-latest",
+        status="draft_imap",
+    )
+    d2 = dbmod.save_relance_draft(
+        db_path,
+        code_proprietaire="D002",
+        nom_proprietaire="Durand",
+        debit=450.0,
+        email_to="durand@example.com",
+        subject="Deuxieme relance",
+        body="Corps 2",
+        llm_provider="mistral",
+        llm_model="mistral-small-latest",
+        status="sent",
+    )
+
+    summary = dbmod.get_relances_tracking_summary(db_path)
+    assert len(summary) == 1
+    item = summary[0]
+    assert item["code_proprietaire"] == "D002"
+    assert item["nom_proprietaire"] == "Durand"
+    assert item["nb_relances_envoyees"] == 2
+    assert item["first_relance_date"] is not None
+    assert item["last_relance_date"] is not None
+    assert item["debit_actuel"] == 450.0
+
+    # Vérifier que list_relances_due inclut aussi nb_relances_total
+    due_list = dbmod.list_relances_due(db_path)
+    assert len(due_list) == 1
+    assert due_list[0]["nb_relances_total"] == 2
+    assert due_list[0]["first_relance_date"] is not None
+
+
+def test_parse_imap_list_response_rfc3501():
+    from cptcopro.utils.relance_mailer import _parse_imap_list_response
+
+    # Formats standards avec guillemets et slash
+    assert _parse_imap_list_response('(\\HasNoChildren) "/" "Drafts"') == "Drafts"
+    assert _parse_imap_list_response('(\\HasNoChildren \\Drafts) "/" "Brouillons"') == "Brouillons"
+    
+    # Sans guillemets autour du nom
+    assert _parse_imap_list_response('(\\HasNoChildren) "/" INBOX') == "INBOX"
+    
+    # Séparateur point (Namespace)
+    assert _parse_imap_list_response('(\\HasNoChildren) "." "INBOX.Drafts"') == "INBOX.Drafts"
+    
+    # Délimiteur NIL
+    assert _parse_imap_list_response('(\\HasNoChildren) NIL "INBOX"') == "INBOX"
+    
+    # Nom avec espaces et guillemets internes
+    assert _parse_imap_list_response('(\\HasNoChildren) "/" "Dossier Personnel"') == "Dossier Personnel"
+
+
+
 

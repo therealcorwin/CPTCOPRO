@@ -164,55 +164,61 @@ def recuperer_situation_copro(
     data = []
 
     if table:
-        # Extraire les en-têtes du tableau
-        headers = [
-            header.text(strip=True)
-            for header in table.css("td.ttA3, td.ttA4, td.ttA5, td.ttA6")
-        ]
-        # Fallback : si aucune en-tête avec classes, essayer la première ligne du tableau
-        if not headers:
-            first_row = table.css_first("tr")
-            if first_row:
-                headers = [cell.text(strip=True) for cell in first_row.css("td")]
-
-        logger.debug(f"En-têtes extraites : {headers}")  # Debug : Vérifier les en-têtes
-
-        # Vérifier que les en-têtes nécessaires sont présents; si non, on infère par position
+        rows = table.css("tr")
         required_headers = ["Code", "Copropriétaire", "Débit", "Crédit"]
-        header_indices = {}
-        for idx, h in enumerate(headers):
-            header_indices[h] = idx
+        header_indices: dict[str, int] = {}
 
-        # Si noms attendus non trouvés, fallback positionnel (0..3)
-        missing = [rh for rh in required_headers if rh not in header_indices]
-        if missing:
-            # map positions
-            logger.warning(
-                f"En-têtes attendues manquantes {missing}, utilisation du mapping positionnel."
-            )
+        # 1. Identifier la ligne d'en-tête réelle contenant Code / Copropriétaire
+        for row in rows:
+            row_cells = [cell.text(strip=True) for cell in row.css("td")]
+            row_lower = [c.lower() for c in row_cells]
+            if "code" in row_lower and any("copropriétaire" in c or "coproprietaire" in c for c in row_lower):
+                for idx, c_text in enumerate(row_cells):
+                    c_low = c_text.lower()
+                    if c_low == "code":
+                        header_indices["Code"] = idx
+                    elif "copropriétaire" in c_low or "coproprietaire" in c_low:
+                        header_indices["Copropriétaire"] = idx
+                    elif "débit" in c_low or "debit" in c_low:
+                        header_indices["Débit"] = idx
+                    elif "crédit" in c_low or "credit" in c_low:
+                        header_indices["Crédit"] = idx
+                logger.debug(f"Ligne d'en-tête identifiée : {row_cells} -> {header_indices}")
+                break
+
+        # 2. Fallback si non trouvé textuellement (ex: fixtures sans en-tête standard)
+        if not all(k in header_indices for k in required_headers):
+            first_header_row = table.css_first("tr")
+            if first_header_row:
+                first_cells = [cell.text(strip=True) for cell in first_header_row.css("td")]
+                for idx, c_text in enumerate(first_cells):
+                    c_low = c_text.lower()
+                    if "code" in c_low:
+                        header_indices["Code"] = idx
+                    elif "copro" in c_low:
+                        header_indices["Copropriétaire"] = idx
+                    elif "déb" in c_low or "deb" in c_low:
+                        header_indices["Débit"] = idx
+                    elif "créd" in c_low or "cred" in c_low:
+                        header_indices["Crédit"] = idx
+
+            # Compléter tout index manquant par position (0, 1, 2, 3)
             for i, rh in enumerate(required_headers):
-                header_indices[rh] = i
+                if rh not in header_indices:
+                    header_indices[rh] = i
 
-        logger.debug(
-            f"Indices des en-têtes : {header_indices}"
-        )  # Debug : Vérifier les indices des colonnes
+            logger.debug(f"Indices d'en-têtes complétés : {header_indices}")
 
-        # Extraire les données des lignes du tableau
+        # 3. Extraire les données des lignes du tableau
         data = []
-        # Prendre à partir de la 3ème ligne (index 2) pour être moins agressif sur les différents HTML
-        rows = table.css("tr")[2:]
+        min_cols = max(header_indices.values()) + 1
         for row in rows:
             cells = [cell.text(strip=True) for cell in row.css("td")]
-            logger.debug(
-                f"Ligne extraite : {cells}"
-            )  # Debug : Vérifier les cellules extraites
-            if len(cells) >= len(
-                headers
-            ):  # Vérifier que la ligne contient suffisamment de colonnes
+            if len(cells) >= min_cols:
                 try:
                     # Vérifier que toutes les colonnes nécessaires sont présentes
-                    code_proprietaire = cells[header_indices["Code"]]
-                    nom_proprietaire = cells[header_indices["Copropriétaire"]]
+                    code_proprietaire = cells[header_indices["Code"]].strip()
+                    nom_proprietaire = cells[header_indices["Copropriétaire"]].strip()
                     debit_cell = (
                         cells[header_indices["Débit"]]
                         if header_indices.get("Débit") is not None
@@ -223,6 +229,32 @@ def recuperer_situation_copro(
                         if header_indices.get("Crédit") is not None
                         else ""
                     )
+
+                    # Filtrer les lignes d'en-tête, lignes vides et sélecteurs de filtre
+                    if not code_proprietaire or not nom_proprietaire:
+                        continue
+                    if code_proprietaire.lower() in (
+                        "code",
+                        "copropriétaire",
+                        "coproprietaire",
+                        "informations",
+                        "en-tete1",
+                    ):
+                        continue
+                    if nom_proprietaire.lower() in (
+                        "copropriétaire",
+                        "coproprietaire",
+                        "nom",
+                        "nom propriétaire",
+                        "en-tete2",
+                    ):
+                        continue
+                    # Rejeter les lignes aberrantes (ex: select de filtre concaténé dans la cellule)
+                    if len(code_proprietaire) > 30 or len(nom_proprietaire) > 150:
+                        logger.debug(
+                            f"Ligne de menu/filtre ignorée : code='{code_proprietaire[:30]}...'"
+                        )
+                        continue
 
                     debit = normalise_somme(debit_cell)
                     credit = normalise_somme(credit_cell)
@@ -276,19 +308,14 @@ def afficher_etat_coproprietaire(data: list[Any], date_suivi_copro: str) -> None
     table_copro.add_column("Crédit", style="green", justify="right")
 
     # Ajout des lignes de données au tableau
-    for (
-        code_proprietaire,
-        nom_proprietaire,
-        debit,
-        credit,
-        date_suivi_copro,
-    ) in data[3:]:
-        table_copro.add_row(
-            str(code_proprietaire),
-            str(nom_proprietaire),
-            str(debit),
-            str(credit),
-        )
+    for row in data:
+        if isinstance(row, (tuple, list)) and len(row) >= 4:
+            table_copro.add_row(
+                str(row[0]),
+                str(row[1]),
+                str(row[2]),
+                str(row[3]),
+            )
 
     # Affichage du tableau dans la console
     console.print(table_copro)

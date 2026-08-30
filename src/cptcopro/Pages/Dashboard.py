@@ -87,76 +87,97 @@ def suivi_nbre_alertes(db_path: Path, db_cache_key: int) -> tuple[int, int]:
         return 0, 0
 
 
+try:
+    from cptcopro.utils.ui_components import render_header, apply_plotly_theme
+except ImportError:
+    def render_header(title, subtitle=None, badge_text=None, badge_variant="info"):
+        st.title(title)
+        if subtitle:
+            st.caption(subtitle)
+    def apply_plotly_theme(fig):
+        return fig
+
 loguru.logger.info("Starting Streamlit app for coproprietaires display")
 db_cache_key = _get_db_cache_key(DB_PATH)
 Charge_globale = chargement_somme_debit_global(DB_PATH, db_cache_key)
 nbre_alerte, nbre_alerte_precedent = suivi_nbre_alertes(DB_PATH, db_cache_key)
 delta_alerte = nbre_alerte - nbre_alerte_precedent
+
+render_header(
+    "📊 Tableau de bord",
+    "Synthèse financière et indicateurs clés de la copropriété",
+)
+
 if Charge_globale.empty:
-    st.error("Aucune donnée disponible à afficher.")
+    st.warning("Aucune donnée de charge disponible.")
     st.stop()
 
-st.image(Path(__file__).parent / "Assets" / "gb2.png", width=1000)
+st.divider()
 
-gauche, centre, droite = st.columns(3, gap=24)
+gauche, centre, droite = st.columns(3, gap="medium")
 
-with st.container():
-    with gauche:
-        st.space("small")
-        date_dernier_releve = Charge_globale["date"].iat[-1].strftime(
-            "%d/%m/%Y")
-        date_avant_dernier_releve = (
-            Charge_globale["date"].iat[-2].strftime("%d/%m/%Y")
-            if len(Charge_globale) >= 2
-            else "N/A"
-        )
-        st.metric(
-            "Date du dernier relevé",
-            value=date_dernier_releve,
-            delta=date_avant_dernier_releve,
-            delta_color="off",
-        )
-        style_metric_cards(background_color="#292D34")
-    with centre:
-        st.space("small")
-        st.metric(
-            "Nombre d'alertes",
-            value=nbre_alerte,
-            delta=delta_alerte,
-            delta_color="inverse",
-        )
-        style_metric_cards(background_color="#292D34")
-    with droite:
-        st.space("small")
-        # valeur la plus récente formatée
-        charge_N = f"{Charge_globale['debit global'].iat[-1]:.2f}"
-        # Vérifier qu'il existe au moins 2 lignes avant d'accéder à iat[-2]
-        if len(Charge_globale) >= 2:
-            delta_val = (
-                Charge_globale["debit global"].iat[-1]
-                - Charge_globale["debit global"].iat[-2]
-            )
-            delta_charge = f"{delta_val:.2f}"
-        else:
-            # Valeur de repli : aucune valeur précédente -> ne pas afficher de delta
-            delta_charge = None
-        st.metric(
-            "CHARGE GLOBALE",
-            value=charge_N,
-            delta=delta_charge,
-            delta_color="inverse",
-            help="Si Indicateur vert, le débit global a diminué par rapport à la dernière mesure.",
-        )
-        style_metric_cards(background_color="#292D34")
+date_dernier_releve = Charge_globale["date"].iat[-1].strftime("%d/%m/%Y")
+date_avant_dernier_releve = (
+    Charge_globale["date"].iat[-2].strftime("%d/%m/%Y")
+    if len(Charge_globale) >= 2
+    else None
+)
 
+with gauche:
+    st.metric(
+        "Dernier relevé",
+        value=date_dernier_releve,
+        delta=f"Précédent : {date_avant_dernier_releve}" if date_avant_dernier_releve else None,
+        delta_color="off",
+    )
+
+with centre:
+    st.metric(
+        "Alertes actives",
+        value=nbre_alerte,
+        delta=delta_alerte,
+        delta_color="inverse",
+        help="Nombre de copropriétaires dont le débit dépasse le seuil configuré.",
+    )
+
+with droite:
+    charge_N = Charge_globale["debit global"].iat[-1]
+    if len(Charge_globale) >= 2:
+        delta_val = charge_N - Charge_globale["debit global"].iat[-2]
+        delta_str = f"{delta_val:,.2f} €".replace(",", " ")
+    else:
+        delta_str = None
+
+    st.metric(
+        "Débit global de la copropriété",
+        value=f"{charge_N:,.2f} €".replace(",", " "),
+        delta=delta_str,
+        delta_color="inverse",
+        help="Total cumulé des débits. En vert si le montant diminue par rapport au relevé précédent.",
+    )
+
+st.divider()
 
 chart = px.line(
     Charge_globale,
     x="date",
     y="debit global",
-    title="Evolution des débits des copropriétaires",
+    title="Évolution du débit global de la copropriété",
     markers=True,
 )
+chart.update_traces(line_color="#0284C7", marker=dict(size=7, color="#38BDF8"))
+chart.update_layout(xaxis_title="Date de relevé", yaxis_title="Débit global (€)")
+chart = apply_plotly_theme(chart)
+
 st.plotly_chart(chart, width="stretch")
-with st.expander("Table des données"):
-    st.dataframe(Charge_globale.sort_values(by="date", ascending=False))
+
+with st.expander("📋 Consulter l'historique complet des relevés"):
+    st.dataframe(
+        Charge_globale.sort_values(by="date", ascending=False),
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
+            "debit global": st.column_config.NumberColumn("Débit global (€)", format="%.2f €"),
+        },
+    )

@@ -24,14 +24,9 @@ def _extract_date_from_result(res):
 def test_table_with_classes():
     html = load_fixture("table_with_classes.html")
     parser = HTMLParser(html)
-    # recuperer_date_situation_copro peut renvoyer soit une chaîne soit un tuple
     res = tp.recuperer_date_situation_copro(parser)
     date_str = _extract_date_from_result(res)
-    # recuperer_situation_copro peut accepter 2 ou 3 arguments selon la version
-    try:
-        data = tp.recuperer_situation_copro(parser, date_str)
-    except TypeError:
-        data = tp.recuperer_situation_copro(parser, date_str)
+    data = tp.recuperer_situation_copro(parser, date_str)
     # should find two rows (we added two copropriétaires)
     assert len(data) >= 2
     # first tuple code matches
@@ -43,10 +38,7 @@ def test_table_without_classes_fallback():
     parser = HTMLParser(html)
     res = tp.recuperer_date_situation_copro(parser)
     date_str = _extract_date_from_result(res)
-    try:
-        data = tp.recuperer_situation_copro(parser, date_str)
-    except TypeError:
-        data = tp.recuperer_situation_copro(parser, date_str)
+    data = tp.recuperer_situation_copro(parser, date_str)
     assert len(data) >= 1
     assert data[0][1] == "Legrand"
 
@@ -56,8 +48,31 @@ def test_no_table_returns_empty():
     parser = HTMLParser(html)
     res = tp.recuperer_date_situation_copro(parser)
     date_str = _extract_date_from_result(res)
-    try:
-        data = tp.recuperer_situation_copro(parser, date_str)
-    except TypeError:
-        data = tp.recuperer_situation_copro(parser, date_str)
+    data = tp.recuperer_situation_copro(parser, date_str)
     assert data == []
+
+
+def test_multiheader_and_select_rows_filtered():
+    html = """
+    <html>
+      <body>
+        <td id="lzA1">Solde des copropriétaires au 29/08/2026</td>
+        <table id="ctzA1">
+          <tr><td class="ttA3">Informations</td><td class="ttA4"></td><td class="ttA5"></td><td class="ttA6"></td></tr>
+          <tr><td>Code</td><td>Copropriétaire</td><td>Débit</td><td>Crédit</td></tr>
+          <tr></tr>
+          <tr><td>558AAB-HABITAT480AADRIEN J. / RAMOS...</td><td>558A</td><td>0,00</td><td>0,00</td></tr>
+          <tr><td>001</td><td>Dupont Jean</td><td>150,00</td><td>0,00</td></tr>
+          <tr><td>002</td><td>Martin Paul</td><td>0,00</td><td>80,00</td></tr>
+        </table>
+      </body>
+    </html>
+    """
+    parser = HTMLParser(html)
+    data = tp.recuperer_situation_copro(parser, "2026-08-29")
+    assert len(data) == 2
+    assert data[0][0] == "001"
+    assert data[0][1] == "Dupont Jean"
+    assert data[1][0] == "002"
+    assert data[1][1] == "Martin Paul"
+

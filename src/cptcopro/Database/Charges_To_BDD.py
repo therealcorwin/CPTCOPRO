@@ -12,17 +12,27 @@ logger = logger.bind(type_log="BDD")
 
 
 def _normaliser_lignes_charge(data: List[Any]) -> list[tuple[Any, Any, Any, Any, Any]]:
-    """Normalise la collecte charges en ignorant les anciennes entrées d'en-tête.
+    """Normalise la collecte charges en filtrant les entrées d'en-tête et lignes invalides.
 
-    Historique: le code supprimait systématiquement `data[0:3]`.
-    Désormais on accepte:
-    - une liste directement composée de tuples charges,
-    - une liste mixte contenant des lignes d'en-tête (str) puis des tuples.
+    Historique: le code d'origine supprimait aveuglément `data[0:3]`.
+    Désormais on valide chaque ligne pour ne conserver que les vraies charges de copropriétaires :
+    - code_proprietaire et nom_proprietaire non vides et non égaux aux mots d'en-tête ("Code", "Copropriétaire", etc.)
+    - exclusion des lignes résiduelles de filtres HTML concaténés (longueur aberrante).
     """
     lignes: list[tuple[Any, Any, Any, Any, Any]] = []
     for row in data:
         if isinstance(row, (tuple, list)) and len(row) >= 5:
-            lignes.append((row[0], row[1], row[2], row[3], row[4]))
+            code = str(row[0]).strip()
+            nom = str(row[1]).strip()
+            if not code or not nom:
+                continue
+            if code.lower() in ("code", "copropriétaire", "coproprietaire", "informations", "en-tete1"):
+                continue
+            if nom.lower() in ("copropriétaire", "coproprietaire", "nom", "nom propriétaire", "en-tete2"):
+                continue
+            if len(code) > 30 or len(nom) > 150:
+                continue
+            lignes.append((code, nom, row[2], row[3], row[4]))
     return lignes
 
 
@@ -31,12 +41,13 @@ def enregistrer_donnees_sqlite(data: List[Any], db_path: str) -> None:
     Enregistre les données extraites dans une base de données SQLite.
 
     La fonction se connecte à la base de données SQLite spécifiée par `db_path`
-    et insère les données fournies dans la table `charge`.
+    et insère les données fournies dans la table `charge` après validation
+    et normalisation par `_normaliser_lignes_charge`.
 
     Parameters:
-    - data (list[Any]): Une liste de tuples contenant les données à enregistrer.
-      Chaque tuple doit avoir le format suivant : (code_proprietaire, nom_proprietaire, debit, credit, date).
-      Les 3 premiers éléments sont ignorés (en-têtes).
+    - data (list[Any]): Une liste de tuples contenant les données de charges à enregistrer.
+      Chaque tuple doit contenir : (code_proprietaire, nom_proprietaire, debit, credit, date).
+      Les éventuelles lignes d'en-tête ou de format invalide sont automatiquement filtrées.
     - db_path (str): Le chemin vers la base de données SQLite.
 
     Returns:
