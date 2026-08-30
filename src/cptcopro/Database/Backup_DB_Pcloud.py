@@ -15,6 +15,8 @@ from pcloud_sdk.progress_utils import SimpleProgressBar
 
 from cptcopro.utils.env_loader import get_pcloud_backup_config, get_pcloud_credentials
 from cptcopro.utils.paths import get_db_path, get_log_path, get_project_root_dir
+from cptcopro.utils.pcloud_oauth import obtenir_code_oauth_automatique
+
 
 
 # Charger les credentials OAuth2 pCloud depuis le fichier .env
@@ -58,14 +60,14 @@ logger = logger.bind(type_log="PCLOUD")
 
 def tester_presence_token_pcloud(token_file: Path | None = None) -> bool:
     """Teste la présence du fichier de token pCloud `.pcloud_credentials`."""
-    token_path = token_file or pcloud_token_path
+    token_path = token_file or (get_project_root_dir() / PCLOUD_TOKEN_FILE_NAME)
     exists = token_path.exists()
     logger.info("Présence du token pCloud '{}': {}", token_path, exists)
     return exists
 
 def creer_client_pcloud(token_file: Path | None = None) -> PCloudSDK:
     """Crée un client pCloud configuré pour OAuth2 et gestion du token."""
-    token_path = token_file or pcloud_token_path
+    token_path = token_file or (get_project_root_dir() / PCLOUD_TOKEN_FILE_NAME)
     return PCloudSDK(
         app_key=PCloud_APP_KEY,
         app_secret=PCloud_APP_SECRET,
@@ -88,7 +90,16 @@ def connecter_pcloud_via_oauth(
     print("Veuillez ouvrir cette URL pour autoriser l'application :")
     print(auth_url)
 
-    authorization_code = input("Entrez le code d'autorisation pCloud : ").strip()
+    authorization_code = None
+    try:
+        authorization_code = obtenir_code_oauth_automatique(auth_url, redirect_uri)
+    except Exception as exc:
+        logger.warning(f"Récupération automatique du code OAuth échouée: {exc}")
+
+    if not authorization_code:
+        logger.info("Saisie manuelle du code d'autorisation pCloud...")
+        authorization_code = input("Entrez le code d'autorisation pCloud : ").strip()
+
     if not authorization_code:
         raise ValueError("Aucun code d'autorisation pCloud fourni.")
 
@@ -132,7 +143,7 @@ def tester_token_et_connecter_pcloud(
     redirect_uri: str = DEFAULT_REDIRECT_URI,
 ) -> PCloudSDK:
     """Teste la présence du token pCloud puis lance la connexion adaptée."""
-    token_path = token_file or pcloud_token_path
+    token_path = token_file or (get_project_root_dir() / PCLOUD_TOKEN_FILE_NAME)
     if tester_presence_token_pcloud(token_path):
         try:
             return connecter_pcloud_via_token(token_path)
