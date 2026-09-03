@@ -10,32 +10,35 @@ Les navigations spécifiques sont déléguées à :
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable, Coroutine
 from contextlib import suppress
+from typing import Any
 
-from playwright.async_api import Page, async_playwright
 from loguru import logger
+from playwright.async_api import Page, async_playwright
 
-from cptcopro.utils.env_loader import get_credentials
 from cptcopro.utils.browser_launcher import launch_browser
+from cptcopro.utils.env_loader import get_credentials
+
 from . import Charge_Copro as pcc
 from . import Lots_Copro as pcl
 from .constants import (
-    ERROR_GO_TO_URL,
+    DELAY_PARALLEL_LOGIN,
+    DELAY_RETRY_MENU,
+    DELAY_RETRY_URL,
+    ERROR_CLICK_LOGIN,
+    ERROR_CLICK_MENU,
     ERROR_FILL_LOGIN,
     ERROR_FILL_PASSWORD,
-    ERROR_CLICK_LOGIN,
-    ERROR_WAIT_FOR_LOAD,
-    ERROR_CLICK_MENU,
+    ERROR_GO_TO_URL,
     ERROR_OPEN_BROWSER,
-    TIMEOUT_URL_ACCESS,
+    ERROR_WAIT_FOR_LOAD,
+    MAX_RETRY_MENU,
+    MAX_RETRY_URL,
     TIMEOUT_ELEMENT_WAIT,
     TIMEOUT_MENU_WAIT,
     TIMEOUT_PAGE_LOAD,
-    DELAY_RETRY_URL,
-    DELAY_RETRY_MENU,
-    DELAY_PARALLEL_LOGIN,
-    MAX_RETRY_URL,
-    MAX_RETRY_MENU,
+    TIMEOUT_URL_ACCESS,
 )
 
 PARALLEL_TASK_TIMEOUT_S = 180
@@ -55,7 +58,7 @@ def _is_expected_target_closed(exc: Exception) -> bool:
     return TARGET_CLOSED_SNIPPET in str(exc)
 
 
-def _is_expected_target_closed_context(context: dict) -> bool:
+def _is_expected_target_closed_context(context: dict[str, object]) -> bool:
     """Détecte les contextes asyncio correspondant à une fermeture Playwright attendue."""
     exc = context.get("exception")
     if isinstance(exc, Exception) and _is_expected_target_closed(exc):
@@ -73,9 +76,7 @@ def _get_cached_credentials() -> dict[str, str]:
     return _credentials_cache
 
 
-async def login_and_open_menu(
-    page: Page, login: str, password: str, url: str
-) -> str | None:
+async def login_and_open_menu(page: Page, login: str, password: str, url: str) -> str | None:
     """
     Effectue la connexion au site et ouvre le menu principal.
 
@@ -97,9 +98,7 @@ async def login_and_open_menu(
                 break
             except Exception as e:
                 if attempt == 0:
-                    logger.warning(
-                        f"Premier accès URL lent, nouvelle tentative... ({e})"
-                    )
+                    logger.warning(f"Premier accès URL lent, nouvelle tentative... ({e})")
                     await page.wait_for_timeout(DELAY_RETRY_URL)
                     # On laisse la boucle faire un nouveau page.goto
                 else:
@@ -159,13 +158,9 @@ async def login_and_open_menu(
                     await page.wait_for_timeout(DELAY_RETRY_MENU)
                     try:
                         await page.reload(timeout=TIMEOUT_PAGE_LOAD)
-                        await page.wait_for_load_state(
-                            "networkidle", timeout=TIMEOUT_PAGE_LOAD
-                        )
+                        await page.wait_for_load_state("networkidle", timeout=TIMEOUT_PAGE_LOAD)
                     except Exception as reload_err:
-                        logger.warning(
-                            f"Rechargement échoué: {reload_err}, on continue..."
-                        )
+                        logger.warning(f"Rechargement échoué: {reload_err}, on continue...")
                 else:
                     raise
     except Exception as e:
@@ -186,7 +181,7 @@ async def _recup_html_generic(
     password: str,
     url: str,
     section_name: str,
-    fetch_func,
+    fetch_func: Callable[..., Awaitable[str]],
 ) -> str:
     """
     Fonction générique pour récupérer le HTML d'une section dans son propre navigateur.
@@ -205,26 +200,22 @@ async def _recup_html_generic(
     async with async_playwright() as p:
         browser = await launch_browser(p, headless=headless)
         if browser is None:
-            logger.error(
-                f"Impossible d'ouvrir le navigateur pour {section_name}")
+            logger.error(f"Impossible d'ouvrir le navigateur pour {section_name}")
             return ERROR_OPEN_BROWSER
 
         page = None
         try:
             page = await browser.new_page()
-            logger.info(
-                f"[{section_name}] Navigateur démarré, connexion en cours...")
+            logger.info(f"[{section_name}] Navigateur démarré, connexion en cours...")
 
             error = await login_and_open_menu(page, login, password, url)
             if error:
                 logger.error(f"[{section_name}] Erreur login: {error}")
                 return error
 
-            logger.success(
-                f"[{section_name}] Connexion réussie, navigation en cours..."
-            )
+            logger.success(f"[{section_name}] Connexion réussie, navigation en cours...")
             html = await fetch_func(page)
-            return html
+            return str(html)
 
         except Exception as e:
             logger.error(f"[{section_name}] Exception: {e}")
@@ -247,9 +238,7 @@ async def _recup_html_generic(
                             e,
                         )
             try:
-                await asyncio.wait_for(
-                    browser.close(), timeout=BROWSER_CLOSE_TIMEOUT_S
-                )
+                await asyncio.wait_for(browser.close(), timeout=BROWSER_CLOSE_TIMEOUT_S)
                 logger.info(f"[{section_name}] Navigateur fermé")
             except Exception as e:
                 if _is_expected_target_closed(e):
@@ -266,9 +255,7 @@ async def _recup_html_generic(
                     )
 
 
-async def recup_html_charges(
-    headless: bool, login: str, password: str, url: str
-) -> str:
+async def recup_html_charges(headless: bool, login: str, password: str, url: str) -> str:
     """Récupère le HTML des charges dans son propre navigateur."""
     return await _recup_html_generic(
         headless,
@@ -307,18 +294,17 @@ async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
     login = credentials["login_site_copro"]
     password = credentials["password_site_copro"]
     url = credentials["url_site_copro"]
-    logger.info(
-        "Démarrage de la récupération parallèle avec 2 navigateurs séparés")
+    logger.info("Démarrage de la récupération parallèle avec 2 navigateurs séparés")
 
-    async def _fetch_charges_delayed():
+    async def _fetch_charges_delayed() -> str:
         """Lance les charges avec un délai pour éviter collision de login."""
         # Attendre que les lots soient probablement connectés avant de démarrer
         await asyncio.sleep(DELAY_PARALLEL_LOGIN)
         return await recup_html_charges(headless, login, password, url)
 
-    async def _fetch_with_timeout(section: str, coro):
+    async def _fetch_with_timeout(section: str, coro: Coroutine[Any, Any, str]) -> str:
         """Encadre chaque collecte d'un timeout global pour éviter un blocage silencieux."""
-        task = asyncio.create_task(coro, name=f"fetch-{section}")
+        task: asyncio.Task[str] = asyncio.create_task(coro, name=f"fetch-{section}")
         try:
             return await asyncio.wait_for(task, timeout=PARALLEL_TASK_TIMEOUT_S)
         except asyncio.CancelledError:
@@ -340,7 +326,9 @@ async def recup_all_html_parallel(headless: bool = True) -> tuple[str, str]:
     loop = asyncio.get_running_loop()
     previous_exception_handler = loop.get_exception_handler()
 
-    def _loop_exception_handler(current_loop, context):
+    def _loop_exception_handler(
+        current_loop: asyncio.AbstractEventLoop, context: dict[str, object]
+    ) -> None:
         if _is_expected_target_closed_context(context):
             logger.debug("Exception Playwright attendue ignorée pendant l'arrêt")
             return

@@ -9,7 +9,8 @@ Ce module gère :
 
 import os
 import sqlite3
-from typing import Any, Dict
+from typing import Any
+
 from loguru import logger
 
 from .constants import DEFAULT_ALERT_THRESHOLDS, DEFAULT_THRESHOLD_FALLBACK
@@ -376,15 +377,14 @@ def creer_base_db(db_path: str) -> None:
                 conn.rollback()
             except sqlite3.Error as rollback_error:
                 logger.warning(f"Rollback impossible lors de la création DB : {rollback_error}")
-        logger.error(
-            f"Erreur lors de la création de la base de données : {e}")
+        logger.error(f"Erreur lors de la création de la base de données : {e}")
         raise
     finally:
         if conn is not None:
             conn.close()
 
 
-def integrite_db(db_path: str) -> Dict[str, Any]:
+def integrite_db(db_path: str) -> dict[str, Any]:
     """
     Vérifie l'existence des composants de la base et crée ceux qui manquent.
 
@@ -402,9 +402,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
 
         # Table charge
         logger.info("Vérification de la présence de la table 'charge'.")
-        cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='charge';"
-        )
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='charge';")
         if cur.fetchone():
             has_charge = True
             logger.info("Table 'charge' existe.")
@@ -413,9 +411,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_charge_unique';"
             )
             if not cur.fetchone():
-                logger.info(
-                    "Création de l'index UNIQUE sur (code_proprietaire, date)..."
-                )
+                logger.info("Création de l'index UNIQUE sur (code_proprietaire, date)...")
                 cur.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_charge_unique ON charge(code_proprietaire, date);"
                 )
@@ -440,8 +436,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             logger.info("Table 'charge' créée.")
 
         # Table alertes_debit_eleve
-        logger.info(
-            "Vérification de la présence de la table 'alertes_debit_eleve'.")
+        logger.info("Vérification de la présence de la table 'alertes_debit_eleve'.")
         cur.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='alertes_debit_eleve';"
         )
@@ -468,10 +463,11 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             fixed_types = cur.rowcount
             if fixed_types:
                 created.append(f"alertes_debit_eleve.type_alerte({fixed_types} lignes)")
-                logger.info(f"{fixed_types} ligne(s) 'alertes_debit_eleve' avec type_alerte vide corrigée(s).")
+                logger.info(
+                    f"{fixed_types} ligne(s) 'alertes_debit_eleve' avec type_alerte vide corrigée(s)."
+                )
         else:
-            logger.warning(
-                "Table 'alertes_debit_eleve' manquante, création en cours.")
+            logger.warning("Table 'alertes_debit_eleve' manquante, création en cours.")
             has_alertes = False
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS alertes_debit_eleve (
@@ -493,15 +489,12 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
 
         # Table config_alerte
         logger.info("Vérification de la présence de la table 'config_alerte'.")
-        cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='config_alerte';"
-        )
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='config_alerte';")
         if cur.fetchone():
             has_config_alerte = True
             logger.info("Table 'config_alerte' existe.")
         else:
-            logger.warning(
-                "Table 'config_alerte' manquante, création en cours.")
+            logger.warning("Table 'config_alerte' manquante, création en cours.")
             has_config_alerte = False
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS config_alerte (
@@ -536,8 +529,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             logger.info("Table 'config_alerte' créée avec seuils par défaut.")
 
         # Trigger alerte_debit_eleve
-        logger.info(
-            "Vérification et mise à jour des triggers 'alerte_debit_eleve'.")
+        logger.info("Vérification et mise à jour des triggers 'alerte_debit_eleve'.")
         cur.execute(
             "SELECT name FROM sqlite_master WHERE type='trigger' AND name='alerte_debit_eleve_insert';"
         )
@@ -545,25 +537,20 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             has_trigger = True
             logger.info("Trigger 'alerte_debit_eleve' existe.")
         else:
-            logger.warning(
-                "Trigger 'alerte_debit_eleve' manquant, création en cours.")
+            logger.warning("Trigger 'alerte_debit_eleve' manquant, création en cours.")
             has_trigger = False
             created.append("alerte_debit_eleve")
 
         cur.executescript(ALERT_TRIGGERS_SQL)
 
         # Table coproprietaires
-        logger.info(
-            "Vérification de la présence de la table 'coproprietaires'.")
-        cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='coproprietaires';"
-        )
+        logger.info("Vérification de la présence de la table 'coproprietaires'.")
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='coproprietaires';")
         if cur.fetchone():
             has_coproprietaires = True
             logger.info("Table 'coproprietaires' existe.")
         else:
-            logger.warning(
-                "Table 'coproprietaires' manquante, création en cours.")
+            logger.warning("Table 'coproprietaires' manquante, création en cours.")
             has_coproprietaires = False
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS coproprietaires (
@@ -580,9 +567,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
         conn.commit()
 
         # Vue vw_charge_coproprietaires
-        logger.info(
-            "Vérification de la présence de la vue 'vw_charge_coproprietaires'."
-        )
+        logger.info("Vérification de la présence de la vue 'vw_charge_coproprietaires'.")
         try:
             cur.executescript("""
                 CREATE VIEW IF NOT EXISTS vw_charge_coproprietaires AS
@@ -600,20 +585,16 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
             """)
             logger.success("View 'vw_charge_coproprietaires' créée/assurée.")
         except Exception as e:
-            logger.error(
-                f"Impossible de créer la vue vw_charge_coproprietaires : {e}")
+            logger.error(f"Impossible de créer la vue vw_charge_coproprietaires : {e}")
 
         # Table suivi_alertes
         logger.info("Vérification de la présence de la table 'suivi_alertes'.")
-        cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='suivi_alertes';"
-        )
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='suivi_alertes';")
         if cur.fetchone():
             has_nombre_alertes = True
             logger.info("Table 'suivi_alertes' existe.")
         else:
-            logger.warning(
-                "Table 'suivi_alertes' manquante, création en cours.")
+            logger.warning("Table 'suivi_alertes' manquante, création en cours.")
             has_nombre_alertes = False
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS suivi_alertes (
@@ -637,9 +618,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
 
         # Table relance_config
         logger.info("Vérification de la présence de la table 'relance_config'.")
-        cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='relance_config';"
-        )
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='relance_config';")
         if cur.fetchone():
             has_relance_config = True
             logger.info("Table 'relance_config' existe.")
@@ -732,9 +711,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
 
         # Table relance_draft
         logger.info("Vérification de la présence de la table 'relance_draft'.")
-        cur.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='relance_draft';"
-        )
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='relance_draft';")
         if cur.fetchone():
             has_relance_draft = True
             logger.info("Table 'relance_draft' existe.")
@@ -820,8 +797,7 @@ def integrite_db(db_path: str) -> Dict[str, Any]:
                 conn.rollback()
             except sqlite3.Error as rollback_error:
                 logger.warning(f"Rollback impossible lors de la vérification DB : {rollback_error}")
-        logger.error(
-            f"Erreur lors de la vérification/création des composants DB : {e}")
+        logger.error(f"Erreur lors de la vérification/création des composants DB : {e}")
         raise
     finally:
         if conn is not None:
@@ -856,7 +832,9 @@ def purger_alertes_pour_rebuild(db_path: str) -> None:
             )
         """)
         conn.commit()
-        logger.info("Tables 'alertes_debit_eleve' et 'suivi_alertes' (entrées orphelines) purgées après restore pCloud.")
+        logger.info(
+            "Tables 'alertes_debit_eleve' et 'suivi_alertes' (entrées orphelines) purgées après restore pCloud."
+        )
     except Exception as e:
         conn.rollback()
         logger.error(f"Erreur lors de la purge des alertes : {e}")

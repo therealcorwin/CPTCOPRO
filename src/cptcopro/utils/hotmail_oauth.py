@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, cast
 
 import msal
 
@@ -23,7 +24,7 @@ def get_token_cache_path() -> Path:
     """Retourne le fichier de cache OAuth2 hors du depot Git."""
     cache_dir = get_data_dir() / "oauth"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / "msal_token_cache.json"
+    return cast(Path, cache_dir / "msal_token_cache.json")
 
 
 def _load_cache(cache_path: Path) -> msal.SerializableTokenCache:
@@ -47,18 +48,14 @@ def verifier_statut_token_hotmail(
     """Vérifie si un token Hotmail OAuth2 valide est présent dans le cache ou renouvelable."""
     config = config or {}
     init_env()
-    client_id_env = str(
-        config.get("mailbox_client_id_env") or DEFAULT_CLIENT_ID_ENV
-    ).strip()
+    client_id_env = str(config.get("mailbox_client_id_env") or DEFAULT_CLIENT_ID_ENV).strip()
     client_id = os.getenv(client_id_env, "").strip()
     if not client_id:
         return False, f"Variable d'environnement client ID '{client_id_env}' non définie dans .env."
 
     authority = str(config.get("mailbox_oauth_authority") or DEFAULT_AUTHORITY).strip()
     scopes = list(config.get("mailbox_oauth_scopes") or DEFAULT_SCOPES)
-    cache_path = Path(
-        str(config.get("mailbox_oauth_cache_path") or get_token_cache_path())
-    )
+    cache_path = Path(str(config.get("mailbox_oauth_cache_path") or get_token_cache_path()))
     if not cache_path.exists():
         return False, "Aucun token trouvé en cache (autorisation requise)."
 
@@ -85,9 +82,7 @@ def demarrer_device_flow_microsoft(
     """Initie le flux d'autorisation Device Code Microsoft et retourne les informations pour l'UI."""
     config = config or {}
     init_env()
-    client_id_env = str(
-        config.get("mailbox_client_id_env") or DEFAULT_CLIENT_ID_ENV
-    ).strip()
+    client_id_env = str(config.get("mailbox_client_id_env") or DEFAULT_CLIENT_ID_ENV).strip()
     client_id = os.getenv(client_id_env, "").strip()
     if not client_id:
         raise ValueError(
@@ -96,9 +91,7 @@ def demarrer_device_flow_microsoft(
 
     authority = str(config.get("mailbox_oauth_authority") or DEFAULT_AUTHORITY).strip()
     scopes = list(config.get("mailbox_oauth_scopes") or DEFAULT_SCOPES)
-    cache_path = Path(
-        str(config.get("mailbox_oauth_cache_path") or get_token_cache_path())
-    )
+    cache_path = Path(str(config.get("mailbox_oauth_cache_path") or get_token_cache_path()))
     cache = _load_cache(cache_path)
     app = msal.PublicClientApplication(
         client_id,
@@ -111,7 +104,7 @@ def demarrer_device_flow_microsoft(
             "Impossible d'initier le flux Device Code Microsoft: "
             + json.dumps(flow, ensure_ascii=False)
         )
-    return flow
+    return cast(dict[str, Any], flow)
 
 
 def valider_device_flow_microsoft(
@@ -121,17 +114,13 @@ def valider_device_flow_microsoft(
     """Attend la validation du Device Flow par l'utilisateur et persiste le token."""
     config = config or {}
     init_env()
-    client_id_env = str(
-        config.get("mailbox_client_id_env") or DEFAULT_CLIENT_ID_ENV
-    ).strip()
+    client_id_env = str(config.get("mailbox_client_id_env") or DEFAULT_CLIENT_ID_ENV).strip()
     client_id = os.getenv(client_id_env, "").strip()
     if not client_id:
         return False, f"Variable {client_id_env} absente."
 
     authority = str(config.get("mailbox_oauth_authority") or DEFAULT_AUTHORITY).strip()
-    cache_path = Path(
-        str(config.get("mailbox_oauth_cache_path") or get_token_cache_path())
-    )
+    cache_path = Path(str(config.get("mailbox_oauth_cache_path") or get_token_cache_path()))
     cache = _load_cache(cache_path)
     app = msal.PublicClientApplication(
         client_id,
@@ -144,7 +133,7 @@ def valider_device_flow_microsoft(
 
     if isinstance(result, dict) and result.get("access_token"):
         return True, "Authentification Hotmail OAuth2 réussie et enregistrée dans le cache."
-    
+
     error_desc = "Autorisation non complétée ou réponse invalide de Microsoft."
     if isinstance(result, dict):
         error_desc = (
@@ -168,18 +157,14 @@ def get_hotmail_access_token(
     """
     config = config or {}
     init_env()
-    client_id_env = str(
-        config.get("mailbox_client_id_env") or DEFAULT_CLIENT_ID_ENV
-    ).strip()
+    client_id_env = str(config.get("mailbox_client_id_env") or DEFAULT_CLIENT_ID_ENV).strip()
     client_id = os.getenv(client_id_env, "").strip()
     if not client_id:
         return None
 
     authority = str(config.get("mailbox_oauth_authority") or DEFAULT_AUTHORITY).strip()
     scopes = list(config.get("mailbox_oauth_scopes") or DEFAULT_SCOPES)
-    cache_path = Path(
-        str(config.get("mailbox_oauth_cache_path") or get_token_cache_path())
-    )
+    cache_path = Path(str(config.get("mailbox_oauth_cache_path") or get_token_cache_path()))
     cache = _load_cache(cache_path)
     app = msal.PublicClientApplication(
         client_id,

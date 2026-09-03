@@ -8,15 +8,12 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-import loguru
 
 from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
-    is_privacy_enabled,
 )
 from cptcopro.utils.ui_components import render_header
-
 
 DB_PATH = get_db_path()
 
@@ -88,7 +85,7 @@ with col_f1:
     ).strip()
 
 with col_f2:
-    types_disponibles = ["Tous"] + sorted([t for t in df_copros["Type"].dropna().unique() if t])
+    types_disponibles = ["Tous", *sorted(t for t in df_copros["Type"].dropna().unique() if t)]
     filtre_type = st.selectbox(
         "Type d'appartement",
         options=types_disponibles,
@@ -97,7 +94,9 @@ with col_f2:
     )
 
 with col_f3:
-    st.caption("💡 Astuce : Rendez-vous sur la page **Recherche & Fiche copropriétaire** pour une analyse 360° individuelle.")
+    st.caption(
+        "💡 Astuce : Rendez-vous sur la page **Recherche & Fiche copropriétaire** pour une analyse 360° individuelle."
+    )
 
 # Filtrage du DataFrame
 df_filtre = df_copros.copy()
@@ -128,7 +127,9 @@ st.dataframe(
         "Code": st.column_config.TextColumn("Code", width="small"),
         "Type": st.column_config.TextColumn("Type Lot", width="small"),
         "Numero": st.column_config.TextColumn("Numéro Lot / Apt", width="small"),
-        "Date": st.column_config.DateColumn("Dernière vérification", format="DD/MM/YYYY", width="medium"),
+        "Date": st.column_config.DateColumn(
+            "Dernière vérification", format="DD/MM/YYYY", width="medium"
+        ),
     },
 )
 

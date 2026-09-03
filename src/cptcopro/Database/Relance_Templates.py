@@ -165,6 +165,8 @@ def create_relance_template(
             ),
         )
         conn.commit()
+        if cur.lastrowid is None:
+            raise RuntimeError("INSERT did not return a lastrowid")
         return int(cur.lastrowid)
     except Exception as exc:
         conn.rollback()
@@ -218,9 +220,9 @@ def update_relance_template(
         if updates.get("is_default") == 1:
             cur.execute("UPDATE relance_template SET is_default = 0")
         set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [int(template_id)]
+        values = [*updates.values(), int(template_id)]
         cur.execute(
-            f"UPDATE relance_template SET {set_clause}, updated_at = CURRENT_TIMESTAMP "
+            f"UPDATE relance_template SET {set_clause}, updated_at = CURRENT_TIMESTAMP "  # nosec B608 — set_clause = ", ".join(f"{k} = ?" for k in updates) : clés dict interne, valeurs via "?"
             "WHERE template_id = ?",
             values,
         )

@@ -120,7 +120,7 @@ def get_relance_config(db_path: str) -> dict[str, Any]:
         conn.close()
 
 
-def update_relance_config(db_path: str, **kwargs: Any) -> bool:
+def update_relance_config(db_path: str, **kwargs: object) -> bool:
     """Met a jour la configuration de relance (ligne id=1)."""
     allowed = {
         "enabled",
@@ -148,7 +148,7 @@ def update_relance_config(db_path: str, **kwargs: Any) -> bool:
 
     if "frequency_days" in updates:
         try:
-            freq = int(updates["frequency_days"])
+            freq = int(str(updates["frequency_days"]))
         except (TypeError, ValueError) as exc:
             raise ValueError("frequency_days doit etre un entier") from exc
         if freq <= 0:
@@ -156,10 +156,10 @@ def update_relance_config(db_path: str, **kwargs: Any) -> bool:
         updates["frequency_days"] = freq
 
     if "mailbox_imap_port" in updates:
-        updates["mailbox_imap_port"] = int(updates["mailbox_imap_port"])
+        updates["mailbox_imap_port"] = int(str(updates["mailbox_imap_port"]))
 
     if "llm_temperature" in updates:
-        updates["llm_temperature"] = float(updates["llm_temperature"])
+        updates["llm_temperature"] = float(str(updates["llm_temperature"]))
 
     set_clause = ", ".join(f"{k} = ?" for k in updates.keys())
     values = list(updates.values())
@@ -169,7 +169,7 @@ def update_relance_config(db_path: str, **kwargs: Any) -> bool:
         init_relance_config_if_missing(db_path)
         cur = conn.cursor()
         cur.execute(
-            f"UPDATE relance_config SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+            f"UPDATE relance_config SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = 1",  # nosec B608 — set_clause = ", ".join(f"{k} = ?" for k in updates) : clés dict interne, valeurs via "?"
             values,
         )
         conn.commit()
@@ -306,7 +306,7 @@ def save_relance_draft(
     draft_id: int | None = None,
 ) -> int:
     """Enregistre ou met a jour un brouillon de relance en base et retourne son identifiant.
-    
+
     Si draft_id est fourni, fait un UPDATE, sinon un INSERT.
     """
     conn = sqlite3.connect(db_path)
@@ -314,24 +314,15 @@ def save_relance_draft(
     try:
         if draft_id is not None:
             # Mise a jour d'un brouillon existant
-            update_sent_clause = ", sent_at = COALESCE(sent_at, CURRENT_TIMESTAMP)" if status in ("draft_imap", "sent") else ""
+            update_sent_clause = (
+                ", sent_at = COALESCE(sent_at, CURRENT_TIMESTAMP)"
+                if status in ("draft_imap", "sent")
+                else ""
+            )
+            # nosec B608 — update_sent_clause est une constante SQL littérale choisie parmi 2 valeurs hardcodées, aucune entrée utilisateur
+            sql_update = f"UPDATE relance_draft SET code_proprietaire = ?, nom_proprietaire = ?, debit = ?, email_to = ?, subject = ?, body = ?, llm_provider = ?, llm_model = ?, status = ?, remote_draft_id = ?, error_message = ? {update_sent_clause} WHERE draft_id = ?"  # nosec B608
             cur.execute(
-                f"""
-                UPDATE relance_draft SET
-                    code_proprietaire = ?,
-                    nom_proprietaire = ?,
-                    debit = ?,
-                    email_to = ?,
-                    subject = ?,
-                    body = ?,
-                    llm_provider = ?,
-                    llm_model = ?,
-                    status = ?,
-                    remote_draft_id = ?,
-                    error_message = ?
-                    {update_sent_clause}
-                WHERE draft_id = ?
-                """,
+                sql_update,
                 (
                     (code_proprietaire or "").strip(),
                     (nom_proprietaire or "").strip(),
@@ -352,24 +343,10 @@ def save_relance_draft(
         else:
             # Nouveau brouillon, insertion
             sent_at_val = "CURRENT_TIMESTAMP" if status in ("draft_imap", "sent") else "NULL"
+            # nosec B608 — sent_at_val vaut "CURRENT_TIMESTAMP" ou "NULL" : 2 constantes SQL hardcodées, aucune entrée utilisateur
+            sql_insert = f"INSERT INTO relance_draft (code_proprietaire, nom_proprietaire, debit, email_to, subject, body, llm_provider, llm_model, status, remote_draft_id, error_message, sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {sent_at_val})"  # nosec B608
             cur.execute(
-                f"""
-                INSERT INTO relance_draft (
-                    code_proprietaire,
-                    nom_proprietaire,
-                    debit,
-                    email_to,
-                    subject,
-                    body,
-                    llm_provider,
-                    llm_model,
-                    status,
-                    remote_draft_id,
-                    error_message,
-                    sent_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {sent_at_val})
-                """,
+                sql_insert,
                 (
                     (code_proprietaire or "").strip(),
                     (nom_proprietaire or "").strip(),
@@ -385,6 +362,8 @@ def save_relance_draft(
                 ),
             )
             conn.commit()
+            if cur.lastrowid is None:
+                raise RuntimeError("INSERT did not return a lastrowid")
             return int(cur.lastrowid)
     except Exception as exc:
         conn.rollback()
@@ -472,7 +451,7 @@ def mark_relance_draft_status(
     cur = conn.cursor()
     try:
         cur.execute(
-            f"UPDATE relance_draft SET {', '.join(fields)} WHERE draft_id = ?",
+            f"UPDATE relance_draft SET {', '.join(fields)} WHERE draft_id = ?",  # nosec B608 — fields = liste de chaînes SQL statiques hardcodées dans le code, aucune entrée utilisateur
             params,
         )
         conn.commit()
@@ -487,7 +466,7 @@ def mark_relance_draft_status(
 
 def get_relances_tracking_summary(db_path: str) -> list[dict[str, Any]]:
     """Retourne la synthèse analytique du suivi des relances par copropriétaire.
-    
+
     Fournit pour chaque copropriétaire :
     - Premier envoi, dernier envoi
     - Nombre de relances envoyées
@@ -556,7 +535,7 @@ def get_relances_tracking_summary(db_path: str) -> list[dict[str, Any]]:
             LEFT JOIN relance_destinataire d ON d.code_proprietaire = base.code_proprietaire
             LEFT JOIN stats_envoyes s ON s.code_proprietaire = base.code_proprietaire
             LEFT JOIN last_draft ld ON ld.code_proprietaire = base.code_proprietaire
-            ORDER BY 
+            ORDER BY
                 CASE WHEN a.debit IS NOT NULL AND a.debit > 0 THEN 0 ELSE 1 END,
                 COALESCE(a.debit, 0.0) DESC,
                 COALESCE(s.nb_relances_envoyees, 0) DESC
@@ -565,4 +544,3 @@ def get_relances_tracking_summary(db_path: str) -> list[dict[str, Any]]:
         return [dict(r) for r in rows]
     finally:
         conn.close()
-

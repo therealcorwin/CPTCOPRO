@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import imaplib
 import json
 import os
 import re
 import ssl
 import time
-import imaplib
-import urllib.request
 import urllib.error
+import urllib.request
+from contextlib import suppress
 from email.message import EmailMessage
 from typing import Any
 
@@ -20,13 +21,12 @@ from cptcopro.utils.hotmail_oauth import get_hotmail_access_token
 logger = logger.bind(type_log="RELANCE")
 
 
-
 def _build_subject(nom_proprietaire: str, date_origin: str | None) -> str:
     date_label = date_origin or "periode en cours"
     return f"Relance charges copropriete - {nom_proprietaire} ({date_label})"
 
 
-class _SafePlaceholderDict(dict):
+class _SafePlaceholderDict(dict[str, Any]):
     """Dict qui laisse le placeholder tel quel s'il est absent des donnees."""
 
     def __missing__(self, key: str) -> str:
@@ -95,16 +95,23 @@ def tester_connexion_mistral(
     key = api_key if api_key is not None else os.getenv("MISTRAL_API_KEY", "")
     key = key.strip() if key else ""
     if not key:
-        return False, "Clé API absente. Définissez MISTRAL_API_KEY dans votre fichier .env ou dans le formulaire."
-
+        return (
+            False,
+            "Clé API absente. Définissez MISTRAL_API_KEY dans votre fichier .env ou dans le formulaire.",
+        )
 
     api_base_url = api_base.rstrip("/")
+    if not api_base_url.lower().startswith("https://"):
+        return False, f"URL API invalide : le schéma doit être https:// (reçu : '{api_base_url}')"
     payload = {
         "model": model,
         "temperature": 0.2,
         "max_tokens": 30,
         "messages": [
-            {"role": "user", "content": "Réponds uniquement par 'Connexion Mistral opérationnelle.'"}
+            {
+                "role": "user",
+                "content": "Réponds uniquement par 'Connexion Mistral opérationnelle.'",
+            }
         ],
     }
     req = urllib.request.Request(
@@ -118,15 +125,10 @@ def tester_connexion_mistral(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=15) as response:
+        with urllib.request.urlopen(req, timeout=15) as response:  # nosec B310 — schéma https:// validé ligne 103 avant construction de la requête
             raw = response.read().decode("utf-8")
         content = json.loads(raw)
-        rep = (
-            content.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
+        rep = content.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         return True, f"Connexion réussie avec {model} ! Réponse: '{rep}'"
     except urllib.error.HTTPError as http_err:
         err_msg = http_err.read().decode("utf-8", errors="ignore")
@@ -168,6 +170,11 @@ def generate_relance_draft_with_llm(
         return (subject, _fallback_body(data, tone_instruction), provider, model)
 
     api_base = str(config.get("llm_api_base") or "https://api.mistral.ai/v1").rstrip("/")
+    if not api_base.lower().startswith("https://"):
+        logger.warning(
+            f"URL API Mistral invalide (schéma non-https) : '{api_base}'. Utilisation du fallback."
+        )
+        return (subject, _fallback_body(data, tone_instruction), provider, model)
     api_key_env = str(config.get("llm_api_key_env") or "MISTRAL_API_KEY")
     api_key = os.getenv(api_key_env)
     if not api_key:
@@ -176,7 +183,6 @@ def generate_relance_draft_with_llm(
             "Génération du brouillon de secours local (fallback)."
         )
         return (subject, _fallback_body(data, tone_instruction), provider, model)
-
 
     try:
         temperature = float(config.get("llm_temperature") or 0.4)
@@ -237,15 +243,10 @@ def generate_relance_draft_with_llm(
 
     try:
         logger.info(f"Appel API Mistral ({model}) pour {copro_nom}...")
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=30) as response:  # nosec B310 — schéma https:// validé ligne 173 avant construction de la requête
             raw = response.read().decode("utf-8")
         content = json.loads(raw)
-        body = (
-            content.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
+        body = content.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         if body:
             logger.success(f"Brouillon généré avec succès par Mistral pour {copro_nom}.")
             return (subject, body, "mistral", model)
@@ -262,7 +263,6 @@ def generate_relance_draft_with_llm(
         logger.error(f"Erreur lors de la génération avec Mistral : {exc}")
         body = _fallback_body(data, tone_instruction)
         return (subject, body, provider, model)
-
 
 
 def build_email_message(
@@ -292,23 +292,23 @@ def _connect_and_authenticate_imap(config: dict[str, Any]) -> imaplib.IMAP4:
     port = int(config.get("mailbox_imap_port") or 993)
     password_env = str(config.get("mailbox_password_env") or "RELANCE_MAILBOX_PASSWORD").strip()
     password = os.getenv(password_env)
-    access_token_env = str(config.get("mailbox_access_token_env") or "RELANCE_MAILBOX_ACCESS_TOKEN").strip()
+    access_token_env = str(
+        config.get("mailbox_access_token_env") or "RELANCE_MAILBOX_ACCESS_TOKEN"
+    ).strip()
     configured_access_token = os.getenv(access_token_env)
     has_invalid_configured_token = bool(
         configured_access_token and configured_access_token.count(".") != 2
     )
-    access_token = (
-        None
-        if has_invalid_configured_token
-        else configured_access_token
-    )
+    access_token = None if has_invalid_configured_token else configured_access_token
     if not access_token:
         cached_access_token = get_hotmail_access_token(config)
         if cached_access_token:
             access_token = cached_access_token
 
     if not host or not user:
-        raise ValueError("Configuration IMAP incomplète : serveur hôte ou adresse utilisateur manquante.")
+        raise ValueError(
+            "Configuration IMAP incomplète : serveur hôte ou adresse utilisateur manquante."
+        )
     if not access_token and not password:
         raise ValueError(
             f"Authentification IMAP absente : aucune autorisation OAuth2 valide trouvée "
@@ -316,6 +316,7 @@ def _connect_and_authenticate_imap(config: dict[str, Any]) -> imaplib.IMAP4:
             f"dans la page Configuration Relances."
         )
 
+    client: imaplib.IMAP4 | imaplib.IMAP4_SSL
     if use_ssl:
         client = imaplib.IMAP4_SSL(host, port, ssl_context=ssl.create_default_context())
     else:
@@ -338,10 +339,9 @@ def _connect_and_authenticate_imap(config: dict[str, Any]) -> imaplib.IMAP4:
         else:
             auth_error = RuntimeError("Client IMAP ne supporte pas l'authentification XOAUTH2.")
 
-
     if auth_error is not None or not access_token:
         try:
-            client.login(user, password)
+            client.login(user, password or "")
             return client
         except imaplib.IMAP4.error as exc:
             if auth_error is not None:
@@ -397,16 +397,17 @@ def tester_connexion_imap(config: dict[str, Any]) -> tuple[bool, str, list[str]]
                         folders.append(folder_name)
 
         user = str(config.get("mailbox_imap_user") or "")
-        folder = str(config.get("mailbox_drafts_folder") or "Drafts")
-        return True, f"Connexion IMAP réussie pour '{user}' ! {len(folders)} dossier(s) détecté(s).", folders
+        return (
+            True,
+            f"Connexion IMAP réussie pour '{user}' ! {len(folders)} dossier(s) détecté(s).",
+            folders,
+        )
     except Exception as exc:
         return False, f"Échec de la connexion IMAP : {exc}", []
     finally:
         if client is not None:
-            try:
+            with suppress(Exception):
                 client.logout()
-            except Exception:
-                pass
 
 
 def save_draft_to_imap(config: dict[str, Any], message: EmailMessage) -> str:
@@ -425,23 +426,30 @@ def save_draft_to_imap(config: dict[str, Any], message: EmailMessage) -> str:
         last_error = None
         for candidate in candidate_folders:
             try:
-                typ, response = client.append(candidate, "\\Draft", internaldate, message.as_bytes())
+                typ, response = client.append(
+                    candidate, "\\Draft", internaldate, message.as_bytes()
+                )
                 if typ == "OK":
-                    logger.success(f"Brouillon déposé avec succès dans le dossier IMAP '{candidate}'.")
+                    logger.success(
+                        f"Brouillon déposé avec succès dans le dossier IMAP '{candidate}'."
+                    )
                     if response and response[0]:
                         return response[0].decode("utf-8", errors="ignore")
                     return "imap-append-ok"
                 else:
-                    details = response[0].decode("utf-8", errors="ignore") if response and response[0] else ""
+                    details = (
+                        response[0].decode("utf-8", errors="ignore")
+                        if response and response[0]
+                        else ""
+                    )
                     last_error = f"Réponse APPEND IMAP sur '{candidate}': {details}"
             except Exception as e:
                 last_error = str(e)
                 continue
 
-        raise RuntimeError(f"Échec APPEND IMAP vers les dossiers ({', '.join(candidate_folders)}): {last_error}")
+        raise RuntimeError(
+            f"Échec APPEND IMAP vers les dossiers ({', '.join(candidate_folders)}): {last_error}"
+        )
     finally:
-        try:
+        with suppress(Exception):
             client.logout()
-        except Exception:
-            pass
-

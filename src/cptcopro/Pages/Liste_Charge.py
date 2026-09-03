@@ -8,25 +8,23 @@ Cette page regroupe :
 
 from __future__ import annotations
 
+import datetime as dt
 import io
 import sqlite3
-import datetime as dt
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-import loguru
 
 from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
-    preparer_df_pour_graphe,
     is_privacy_enabled,
+    preparer_df_pour_graphe,
 )
-from cptcopro.utils.ui_components import render_header, apply_plotly_theme
-
+from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 DB_PATH = get_db_path()
 
@@ -53,7 +51,9 @@ def load_charges(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     return df
 
 
-def _normalize_date_range(date_val, min_d, max_d) -> tuple[dt.date, dt.date]:
+def _normalize_date_range(
+    date_val: object, min_d: dt.date, max_d: dt.date
+) -> tuple[dt.date, dt.date]:
     """Extrait en toute sécurité start_date et end_date d'un st.date_input."""
     if isinstance(date_val, (tuple, list)):
         if len(date_val) >= 2:
@@ -81,7 +81,7 @@ if df_all.empty:
 
 date_min = df_all["date"].min()
 date_max = df_all["date"].max()
-all_types = ["Tous"] + sorted([t for t in df_all["type_apt"].dropna().unique() if t])
+all_types = ["Tous", *sorted(t for t in df_all["type_apt"].dropna().unique() if t)]
 
 # ============================================================================
 # FILTRES ERGONOMIQUES
@@ -107,7 +107,12 @@ with st.container():
     with col_f3:
         quick_focus = st.selectbox(
             "Filtre prédéfini",
-            options=["Tous les copropriétaires", "Top 5 Débits récents", "Top 10 Débits récents", "Débits > 0 uniquement"],
+            options=[
+                "Tous les copropriétaires",
+                "Top 5 Débits récents",
+                "Top 10 Débits récents",
+                "Débits > 0 uniquement",
+            ],
             index=0,
             key="charges_quick_focus",
         )
@@ -124,9 +129,7 @@ with st.container():
 start_date, end_date = _normalize_date_range(date_range, date_min, date_max)
 
 # Application des filtres
-filtered_df = df_all[
-    (df_all["date"] >= start_date) & (df_all["date"] <= end_date)
-].copy()
+filtered_df = df_all[(df_all["date"] >= start_date) & (df_all["date"] <= end_date)].copy()
 
 if search_query:
     filtered_df = filtered_df[
@@ -180,11 +183,13 @@ st.space("small")
 # ============================================================================
 # ONGLETS DE VISUALISATION
 # ============================================================================
-tab_table, tab_graph, tab_stats = st.tabs([
-    "📋 Suivi Détaillé (Tableau)",
-    "📈 Analyse Temporelle (Graphique)",
-    "📊 Répartition & Top Débits",
-])
+tab_table, tab_graph, tab_stats = st.tabs(
+    [
+        "📋 Suivi Détaillé (Tableau)",
+        "📈 Analyse Temporelle (Graphique)",
+        "📊 Répartition & Top Débits",
+    ]
+)
 
 # --- ONGLET 1: TABLEAU ---
 with tab_table:
@@ -194,7 +199,7 @@ with tab_table:
         df_sorted = filtered_df.sort_values(
             ["date", "proprietaire"], ascending=[False, True]
         ).copy()
-        
+
         display_df = appliquer_confidentialite(df_sorted)
 
         st.dataframe(
@@ -274,7 +279,9 @@ with tab_graph:
             elif preset_focus == "Top 10":
                 focus_owners = derniers_soldes.nlargest(10, "debit")["proprietaire"].tolist()
             else:
-                focus_owners = derniers_soldes[derniers_soldes["debit"] > 2000]["proprietaire"].tolist()
+                focus_owners = derniers_soldes[derniers_soldes["debit"] > 2000][
+                    "proprietaire"
+                ].tolist()
                 if not focus_owners:
                     focus_owners = derniers_soldes.nlargest(5, "debit")["proprietaire"].tolist()
 
@@ -334,7 +341,9 @@ with tab_graph:
             if not custom_selected_owners:
                 st.info("Sélectionnez au moins un copropriétaire pour afficher les courbes.")
             else:
-                custom_plot_df = filtered_df[filtered_df["proprietaire"].isin(custom_selected_owners)]
+                custom_plot_df = filtered_df[
+                    filtered_df["proprietaire"].isin(custom_selected_owners)
+                ]
                 prep_df = preparer_df_pour_graphe(custom_plot_df, "proprietaire")
                 fig = px.line(
                     prep_df,
@@ -361,7 +370,10 @@ with tab_graph:
         elif graph_mode == "📊 Tendance Globale & Typologies":
             macro_type = st.radio(
                 "Type de vue macroscopique :",
-                options=["Masse totale des débits (Cumul)", "Débit moyen par typologie (T2, T3, T4, T5)"],
+                options=[
+                    "Masse totale des débits (Cumul)",
+                    "Débit moyen par typologie (T2, T3, T4, T5)",
+                ],
                 horizontal=True,
                 key="graph_macro_type",
             )
@@ -380,11 +392,7 @@ with tab_graph:
                 fig = apply_plotly_theme(fig)
                 st.plotly_chart(fig, width="stretch")
             else:
-                type_agg = (
-                    filtered_df.groupby(["date", "type_apt"])["debit"]
-                    .mean()
-                    .reset_index()
-                )
+                type_agg = filtered_df.groupby(["date", "type_apt"])["debit"].mean().reset_index()
                 fig = px.line(
                     type_agg,
                     x="date",
@@ -478,7 +486,7 @@ with tab_stats:
                 .sort_values("debit", ascending=True)
             )
             top_10_prep = preparer_df_pour_graphe(top_10, "proprietaire")
-            
+
             fig_bar = px.bar(
                 top_10_prep,
                 x="debit",

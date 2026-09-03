@@ -10,11 +10,10 @@ doivent être stockées dans le répertoire de l'exécutable.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
-import logging
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -87,7 +86,7 @@ def get_bundle_dir() -> Path:
     - En mode développement: src/cptcopro
     """
     if is_pyinstaller_bundle():
-        return Path(sys._MEIPASS) / "cptcopro"
+        return Path(getattr(sys, "_MEIPASS", "")) / "cptcopro"
     else:
         return Path(__file__).parent.parent
 
@@ -138,8 +137,7 @@ def get_db_path(db_name: str | None = None) -> Path:
             path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             _LOG.error(f"Cannot create DB directory '{path.parent}': {e}")
-            raise OSError(
-                f"Cannot create DB directory '{path.parent}': {e}") from e
+            raise OSError(f"Cannot create DB directory '{path.parent}': {e}") from e
         return path
 
     # Déterminer le nom de la BDD: paramètre > variable d'env > défaut
@@ -180,8 +178,7 @@ def get_log_path(log_name: str = "cptcopro.log") -> Path:
             path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             _LOG.error(f"Cannot create log directory '{path.parent}': {e}")
-            raise OSError(
-                f"Cannot create log directory '{path.parent}': {e}") from e
+            raise OSError(f"Cannot create log directory '{path.parent}': {e}") from e
         return path
 
     log_dir = get_data_dir() / "logs"
@@ -204,7 +201,7 @@ def get_backup_dir() -> Path:
     return backup_dir
 
 
-def get_env_file_path() -> Optional[Path]:
+def get_env_file_path() -> Path | None:
     """Retourne le chemin vers le fichier .env s'il existe.
 
     Cherche dans l'ordre:
@@ -247,7 +244,7 @@ def get_env_file_path() -> Optional[Path]:
     return None
 
 
-def get_streamlit_config_dir() -> Optional[Path]:
+def get_streamlit_config_dir() -> Path | None:
     """Retourne le répertoire de configuration Streamlit.
 
     Returns:

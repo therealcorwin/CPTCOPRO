@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any, cast
 
 import streamlit as st
 
 try:
     from cptcopro.utils.paths import get_db_path, init_env
+
     init_env()
     from cptcopro.Database import (
         DEFAULT_RELANCE_CONFIG,
         get_relance_config,
-        update_relance_config,
         init_relance_config_if_missing,
+        update_relance_config,
     )
     from cptcopro.utils.hotmail_oauth import (
         demarrer_device_flow_microsoft,
@@ -22,8 +24,8 @@ try:
         verifier_statut_token_hotmail,
     )
     from cptcopro.utils.relance_mailer import (
-        tester_connexion_mistral,
         tester_connexion_imap,
+        tester_connexion_mistral,
     )
     from cptcopro.utils.ui_components import render_header
 
@@ -50,7 +52,7 @@ except ImportError:
         "tone_instruction": "courtois, professionnel et ferme",
     }
 
-    def render_header(title, subtitle=None):
+    def render_header(title: str, subtitle: str | None = None) -> None:
         st.title(title)
         if subtitle:
             st.caption(subtitle)
@@ -58,42 +60,44 @@ except ImportError:
     def init_relance_config_if_missing(db_path: str) -> bool:
         return False
 
-    def get_relance_config(db_path: str) -> dict:
+    def get_relance_config(db_path: str) -> dict[str, Any]:
         del db_path
-        return DEFAULT_RELANCE_CONFIG.copy()
+        return cast(dict[str, Any], DEFAULT_RELANCE_CONFIG.copy())
 
-    def update_relance_config(db_path: str, **kwargs) -> bool:
+    def update_relance_config(db_path: str, **kwargs: object) -> bool:
         del db_path, kwargs
         return True
 
-    def verifier_statut_token_hotmail(config=None):
+    def verifier_statut_token_hotmail(config: object = None) -> tuple[bool, str]:
         return False, "Module non chargé"
 
-    def demarrer_device_flow_microsoft(config=None):
+    def demarrer_device_flow_microsoft(config: object = None) -> dict[str, Any]:
         return {}
 
-    def valider_device_flow_microsoft(flow, config=None):
+    def valider_device_flow_microsoft(flow: object, config: object = None) -> tuple[bool, str]:
         return False, "Module non chargé"
 
-    def tester_connexion_mistral(api_key=None, model="", api_base=""):
+    def tester_connexion_mistral(
+        api_key: str | None = None, model: str = "", api_base: str = ""
+    ) -> tuple[bool, str]:
         return False, "Module non chargé"
 
-    def tester_connexion_imap(config):
+    def tester_connexion_imap(config: object) -> tuple[bool, str, list[str]]:
         return False, "Module non chargé", []
 
 
 def _db_cache_key(db_path: Path) -> int:
     try:
-        return db_path.stat().st_mtime_ns
+        return int(db_path.stat().st_mtime_ns)
     except OSError:
         return 0
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_relance_config(db_path: str, cache_key: int) -> dict:
+def _load_relance_config(db_path: str, cache_key: int) -> dict[str, Any]:
     del cache_key
     init_relance_config_if_missing(db_path)
-    return get_relance_config(db_path)
+    return cast(dict[str, Any], get_relance_config(db_path))
 
 
 render_header(
@@ -107,11 +111,13 @@ cfg = _load_relance_config(db_path_str, _db_cache_key(DB_PATH))
 enabled = bool(int(cfg.get("enabled", 1)))
 frequency_days = int(cfg.get("frequency_days", 14) or 14)
 
-tab_rules, tab_mailbox, tab_llm = st.tabs([
-    "📋 Règles de relance",
-    "📬 Boîte mail & OAuth2 (Hotmail)",
-    "🤖 Modèle IA (Mistral)",
-])
+tab_rules, tab_mailbox, tab_llm = st.tabs(
+    [
+        "📋 Règles de relance",
+        "📬 Boîte mail & OAuth2 (Hotmail)",
+        "🤖 Modèle IA (Mistral)",
+    ]
+)
 
 # ============================================================================
 # ONGLET 1: RÈGLES DE RELANCE
@@ -146,7 +152,9 @@ with tab_rules:
                 help="Adresse email utilisée pour signer les courriers.",
             )
 
-        submitted_rules = st.form_submit_button("💾 Enregistrer les règles", type="primary", use_container_width=True)
+        submitted_rules = st.form_submit_button(
+            "💾 Enregistrer les règles", type="primary", use_container_width=True
+        )
         if submitted_rules:
             update_relance_config(
                 db_path_str,
@@ -183,7 +191,9 @@ with tab_mailbox:
 
         col_auth1, _ = st.columns([1.5, 2])
         with col_auth1:
-            if st.button("🔑 Démarrer l'autorisation Microsoft", type="primary", use_container_width=True):
+            if st.button(
+                "🔑 Démarrer l'autorisation Microsoft", type="primary", use_container_width=True
+            ):
                 try:
                     flow = demarrer_device_flow_microsoft(cfg)
                     st.session_state.ms_device_flow = flow
@@ -197,12 +207,16 @@ with tab_mailbox:
             verification_uri = flow.get("verification_uri", "https://microsoft.com/devicelogin")
 
             st.info(f"1. Copiez ce code : **`{user_code}`**")
-            st.markdown(f"2. Ouvrez le lien : **[{verification_uri}]({verification_uri})** et collez le code.")
+            st.markdown(
+                f"2. Ouvrez le lien : **[{verification_uri}]({verification_uri})** et collez le code."
+            )
             st.caption("3. Une fois l'autorisation accordée, cliquez sur Valider :")
 
             col_val1, col_val2 = st.columns(2, gap="medium")
             with col_val1:
-                if st.button("✓ Valider et enregistrer le jeton", type="primary", use_container_width=True):
+                if st.button(
+                    "✓ Valider et enregistrer le jeton", type="primary", use_container_width=True
+                ):
                     with st.spinner("Validation en cours..."):
                         success, msg = valider_device_flow_microsoft(flow, cfg)
                         if success:
@@ -247,7 +261,9 @@ with tab_mailbox:
             value=bool(int(cfg.get("mailbox_use_ssl", 1) or 1)),
         )
 
-        submitted_imap = st.form_submit_button("💾 Enregistrer la configuration IMAP", type="primary", use_container_width=True)
+        submitted_imap = st.form_submit_button(
+            "💾 Enregistrer la configuration IMAP", type="primary", use_container_width=True
+        )
         if submitted_imap:
             update_relance_config(
                 db_path_str,
@@ -309,7 +325,9 @@ with tab_llm:
             height=80,
         )
 
-        submitted_llm = st.form_submit_button("💾 Enregistrer la configuration IA", type="primary", use_container_width=True)
+        submitted_llm = st.form_submit_button(
+            "💾 Enregistrer la configuration IA", type="primary", use_container_width=True
+        )
         if submitted_llm:
             update_relance_config(
                 db_path_str,
@@ -331,7 +349,9 @@ with tab_llm:
                 api_k = os.getenv(key_var)
                 model_name = str(cfg.get("llm_model") or "mistral-small-latest")
                 api_b = str(cfg.get("llm_api_base") or "https://api.mistral.ai/v1")
-                ok_mistral, msg_mistral = tester_connexion_mistral(api_k, model=model_name, api_base=api_b)
+                ok_mistral, msg_mistral = tester_connexion_mistral(
+                    api_k, model=model_name, api_base=api_b
+                )
                 if ok_mistral:
                     st.success(f"✅ {msg_mistral}")
                 else:

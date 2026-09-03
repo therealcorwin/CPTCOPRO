@@ -2,11 +2,13 @@ import os
 import shutil
 import sqlite3
 from datetime import datetime
+
 from loguru import logger
 
 # Import du module de chemins portables
 try:
     from cptcopro.utils.paths import get_backup_dir
+
     _USE_PORTABLE_PATHS = True
 except ImportError:
     _USE_PORTABLE_PATHS = False
@@ -15,7 +17,7 @@ logger.remove()
 logger = logger.bind(type_log="BACKUP")
 
 
-def backup_db(db_path) -> str | None:
+def backup_db(db_path: str) -> str | None:
     """
     Sauvegarde la base de données SQLite dans un dossier 'BACKUP' du répertoire de l'application.
     Le fichier de sauvegarde est nommé au format 'backup_bdd-DD-MM-YY-HH-MM-SS'. Toutes les étapes et événements sont enregistrés dans le fichier 'backup.txt' via loguru.
@@ -27,8 +29,10 @@ def backup_db(db_path) -> str | None:
     if _USE_PORTABLE_PATHS:
         backup_dir: str = str(get_backup_dir())
     else:
-        backup_dir: str = os.path.join(os.path.dirname(__file__), "BACKUP")
-    backup_filename: str = f"backup_{os.path.basename(db_path)}-{now.strftime('%d-%m-%y-%H-%M-%S')}.sqlite"
+        backup_dir = os.path.join(os.path.dirname(__file__), "BACKUP")
+    backup_filename: str = (
+        f"backup_{os.path.basename(db_path)}-{now.strftime('%d-%m-%y-%H-%M-%S')}.sqlite"
+    )
     backup_path: str = os.path.join(backup_dir, backup_filename)
 
     logger.info("Démarrage de la sauvegarde de la base de données.")
@@ -37,22 +41,19 @@ def backup_db(db_path) -> str | None:
 
     # Vérification et création du dossier backup
     if not os.path.exists(backup_dir):
-        logger.warning(
-            f"Le répertoire '{backup_dir}' n'existe pas. Création en cours...")
+        logger.warning(f"Le répertoire '{backup_dir}' n'existe pas. Création en cours...")
         try:
             os.makedirs(backup_dir)
             logger.success(f"Répertoire '{backup_dir}' créé.")
         except Exception as e:
-            logger.error(
-                f"Erreur lors de la création du répertoire '{backup_dir}' : {e}")
+            logger.error(f"Erreur lors de la création du répertoire '{backup_dir}' : {e}")
             return None
     else:
         logger.info(f"Répertoire '{backup_dir}' déjà existant.")
 
     # Vérification de l'existence de la base de données
     if not os.path.exists(db_path):
-        logger.error(
-            f"Base de données '{db_path}' introuvable. Sauvegarde annulée.")
+        logger.error(f"Base de données '{db_path}' introuvable. Sauvegarde annulée.")
         return None
 
     # Vérifier s'il y a une connexion persistante en cours
@@ -62,8 +63,7 @@ def backup_db(db_path) -> str | None:
         conn.close()
         logger.info("Connexion à la base de données fermée avant sauvegarde.")
     except Exception as e:
-        logger.error(
-            f"Erreur lors de la fermeture de la connexion à la base : {e}")
+        logger.error(f"Erreur lors de la fermeture de la connexion à la base : {e}")
 
     # Sauvegarde de la base de données
     try:
@@ -71,8 +71,7 @@ def backup_db(db_path) -> str | None:
         shutil.copy2(db_path, backup_path)
         logger.info(f"Base de données sauvegardée sous '{backup_path}'.")
     except Exception as e:
-        logger.error(
-            f"Erreur lors de la sauvegarde de la base de données : {e}")
+        logger.error(f"Erreur lors de la sauvegarde de la base de données : {e}")
         return None
 
     logger.info("Sauvegarde terminée avec succès.")

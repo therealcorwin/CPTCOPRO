@@ -217,6 +217,11 @@ flowchart LR
         pg_stats_adv[Statistiques_Avancees.py]
         pg_config[Config_Alertes.py]
         pg_search[Rechercher_Copro.py]
+        pg_relance[Relance.py]
+        pg_drafts[Relance_Drafts.py]
+        pg_templates[Relance_Templates.py]
+        pg_relance_config[Relance_Config.py]
+        pg_relance_admin[Relance_Admin.py]
     end
 
     subgraph DATA_FUNCTIONS[Fonctions de chargement]
@@ -237,6 +242,11 @@ flowchart LR
         f_cfg1[load_config]
         f_cfg2[save_config]
         f_rech[load_all_charges_data]
+        f_relance[Relance_Config et relance_mailer]
+        f_drafts[get_relance_drafts et relance_mailer]
+        f_templates[Relance_Templates]
+        f_relance_config[Relance_Config et hotmail_oauth]
+        f_relance_admin[Relance_Config]
     end
 
     nav --> pg_dashboard --> f_dash1
@@ -262,7 +272,71 @@ flowchart LR
     pg_config --> f_cfg2
 
     nav --> pg_search --> f_rech
+
+    nav --> pg_relance --> f_relance
+    nav --> pg_drafts --> f_drafts
+    nav --> pg_templates --> f_templates
+    nav --> pg_relance_config --> f_relance_config
+    nav --> pg_relance_admin --> f_relance_admin
 ```
+
+## Confidentialite transversale (Streamlit)
+
+La bascule `masquer_donnees_sensibles` est definie dans `Affichage_Stream.py`.
+Les composants et graphiques qui l'utilisent consultent l'etat centralise par
+`is_privacy_enabled()` avant d'anonymiser les donnees.
+
+```mermaid
+flowchart LR
+    ui[Affichage_Stream.py sidebar toggle] --> state[st.session_state masquer_donnees_sensibles]
+    state --> enabled[is_privacy_enabled]
+    header[render_header] --> enabled
+    dataframe[preparer_df_pour_graphe] --> enabled
+    dataframe --> anonymiser
+    list[masquer_liste] --> enabled
+    list --> anonymiser
+    confidentialite[appliquer_confidentialite] --> enabled
+    confidentialite --> anonymiser
+```
+
+## Authentification Hotmail (relances)
+
+La page `Pages/Relance_Config.py` configure le compte IMAP et pilote
+l'autorisation Microsoft. Le flux nominal utilise OAuth2; le mot de passe
+est un repli seulement.
+
+```mermaid
+sequenceDiagram
+    participant U as Utilisateur
+    participant UI as Relance_Config.py
+    participant O as hotmail_oauth.py
+    participant M as Microsoft
+    participant C as Cache MSAL
+    participant I as relance_mailer.py
+    participant H as IMAP Hotmail
+
+    UI->>O: verifier_statut_token_hotmail()
+    U->>UI: Demarrer l'autorisation
+    UI->>O: demarrer_device_flow_microsoft()
+    O->>M: initiate_device_flow(IMAP.AccessAsUser.All)
+    M-->>U: URL et code temporaire
+    U->>UI: Valider l'autorisation
+    UI->>O: valider_device_flow_microsoft(flow)
+    O->>M: acquire_token_by_device_flow(flow)
+    O->>C: sauvegarde du token
+
+    I->>O: get_hotmail_access_token()
+    O->>C: lecture et renouvellement silencieux
+    I->>H: XOAUTH2 avec le token
+```
+
+| Etape | Comportement |
+| --- | --- |
+| Configuration | Requiert un identifiant d'application Microsoft dans `RELANCE_MAILBOX_CLIENT_ID`; le scope par defaut est `IMAP.AccessAsUser.All`. |
+| Cache | MSAL persiste le token sous `oauth/msal_token_cache.json` dans le repertoire de donnees de l'application. |
+| Priorite IMAP | `RELANCE_MAILBOX_ACCESS_TOKEN`, puis token MSAL en cache, puis `RELANCE_MAILBOX_PASSWORD`. |
+| Repli | En cas d'echec XOAUTH2, un login IMAP classique n'est tente que si un mot de passe est configure. |
+| Erreur | Sans token valide ni mot de passe, le depot de brouillon s'arrete avec une erreur indiquant de lancer l'autorisation depuis la page de configuration. |
 
 ## Organisation des modules (corrigee)
 
@@ -282,8 +356,17 @@ flowchart LR
 | Database/Alertes_Config.py | Alertes et seuils | Gere les seuils, le suivi des alertes et le recalcul du nombre d'alertes |
 | Database/Backup_DB.py | Backup local SQLite | Copie la base locale dans le repertoire de backup du projet |
 | Database/Backup_DB_Pcloud.py | Backup et restauration pCloud | Gere le token, la connexion, la restauration, l'upload et la deconnexion |
-| Database/Dedoublonnage.py | Outils hors flux principal | Conserve des aides historiques de dedoublonnage, non appellees par `main.py` |
+| Database/Relance_Config.py | Configuration et suivi des relances | Gere la configuration, les destinataires, les echeances et les brouillons de relance |
+| Database/Relance_Templates.py | Modeles de relance | Gere les modeles de messages statiques ou guides par LLM |
 | Affichage_Stream.py | Interface Streamlit | Construit la navigation multi-pages et lance les pages |
+| Pages/Relance.py | Generation des relances | Charge les relances dues, genere les brouillons et les transmet a la messagerie |
+| Pages/Relance_Drafts.py | Gestion des brouillons | Consulte, modifie et suit les brouillons de relance |
+| Pages/Relance_Templates.py | Gestion des modeles | Configure les modeles de messages de relance |
+| Pages/Relance_Config.py | Parametres relance et IA | Configure les regles, la messagerie IMAP/OAuth2 et le fournisseur LLM |
+| Pages/Relance_Admin.py | Administration des relances | Expose les operations d'administration du sous-systeme de relance |
+| utils/relance_mailer.py | Generation et depot des emails | Produit les messages et depose les brouillons par IMAP |
+| utils/hotmail_oauth.py | Autorisation Microsoft | Gere le device flow et le statut OAuth2 de la messagerie |
+| utils/privacy.py | Confidentialite des donnees | Centralise l'etat de confidentialite et anonymise les donnees destinees a l'interface |
 
 ## Constantes de timing (source de verite)
 
@@ -313,11 +396,11 @@ flowchart LR
 - `_recup_html_generic` reste le coeur DRY de la collecte HTML.
 - `validate_startup_env()` est le point d'entree unique pour verifier les variables requises au demarrage.
 - Le flux principal de `main.py` repose sur `validate_startup_env()`, pas sur un autre bootstrap.
-- Le flux principal n'appelle plus le dedoublonnage.
-- Raison: index UNIQUE et INSERT OR REPLACE dans la persistance des charges.
+- Le dedoublonnage historique a ete supprime: l'index UNIQUE et INSERT OR REPLACE gerent la persistance des charges.
 - Le backup local est fait avant les ecritures, alors que le backup pCloud est fait apres les ecritures, sauf `--no-backup`.
 - `--deco-pcloud` se limite a la deconnexion pCloud et a la suppression du token local.
 - Les pages Streamlit utilisent majoritairement `@st.cache_data` sur les fonctions de chargement.
+- La navigation Streamlit comprend aussi le pole `Relances & Messagerie`: generation, brouillons, modeles, configuration et administration.
 - `README.md` donne la vue d'ensemble du projet; ce document decrit le detail des flux d'appel.
 
 ## Source of truth

@@ -5,13 +5,14 @@ Ce module gère l'insertion des données de charges des copropriétaires.
 
 import os
 import sqlite3
-from typing import Any, List
+from typing import Any
+
 from loguru import logger
 
 logger = logger.bind(type_log="BDD")
 
 
-def _normaliser_lignes_charge(data: List[Any]) -> list[tuple[Any, Any, Any, Any, Any]]:
+def _normaliser_lignes_charge(data: list[Any]) -> list[tuple[Any, Any, Any, Any, Any]]:
     """Normalise la collecte charges en filtrant les entrées d'en-tête et lignes invalides.
 
     Historique: le code d'origine supprimait aveuglément `data[0:3]`.
@@ -26,9 +27,21 @@ def _normaliser_lignes_charge(data: List[Any]) -> list[tuple[Any, Any, Any, Any,
             nom = str(row[1]).strip()
             if not code or not nom:
                 continue
-            if code.lower() in ("code", "copropriétaire", "coproprietaire", "informations", "en-tete1"):
+            if code.lower() in (
+                "code",
+                "copropriétaire",
+                "coproprietaire",
+                "informations",
+                "en-tete1",
+            ):
                 continue
-            if nom.lower() in ("copropriétaire", "coproprietaire", "nom", "nom propriétaire", "en-tete2"):
+            if nom.lower() in (
+                "copropriétaire",
+                "coproprietaire",
+                "nom",
+                "nom propriétaire",
+                "en-tete2",
+            ):
                 continue
             if len(code) > 30 or len(nom) > 150:
                 continue
@@ -36,7 +49,7 @@ def _normaliser_lignes_charge(data: List[Any]) -> list[tuple[Any, Any, Any, Any,
     return lignes
 
 
-def enregistrer_donnees_sqlite(data: List[Any], db_path: str) -> None:
+def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
     """
     Enregistre les données extraites dans une base de données SQLite.
 
@@ -65,8 +78,8 @@ def enregistrer_donnees_sqlite(data: List[Any], db_path: str) -> None:
         # Insertion des données avec INSERT OR REPLACE
         # Si une entrée avec le même (code_proprietaire, date) existe, elle est mise à jour
         cur.executemany(
-            """INSERT OR REPLACE INTO charge 
-               (code_proprietaire, nom_proprietaire, debit, credit, date, last_check) 
+            """INSERT OR REPLACE INTO charge
+               (code_proprietaire, nom_proprietaire, debit, credit, date, last_check)
                VALUES (?, ?, ?, ?, ?, CURRENT_DATE)""",
             lignes,
         )

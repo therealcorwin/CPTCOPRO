@@ -21,12 +21,14 @@ Note:
     dans Pages/Assets/.
 """
 
-import streamlit as st
 from pathlib import Path
+
+import streamlit as st
 
 # Charger les variables d'environnement
 try:
     from cptcopro.utils.paths import init_env
+
     init_env()
 except ImportError:
     pass  # Fallback si l'import échoue
@@ -34,8 +36,10 @@ except ImportError:
 try:
     from cptcopro.utils.ui_components import inject_custom_css
 except ImportError:
-    def inject_custom_css():
+
+    def inject_custom_css() -> None:
         pass
+
 
 # --- Configuration de la page ---
 st.set_page_config(

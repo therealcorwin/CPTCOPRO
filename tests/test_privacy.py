@@ -4,9 +4,9 @@ Ce module teste les fonctions d'anonymisation et de masquage
 des données sensibles dans les DataFrames.
 """
 
-import pytest
+from unittest.mock import patch
+
 import pandas as pd
-from unittest.mock import patch, MagicMock
 
 
 class TestAnonymiser:
@@ -52,8 +52,8 @@ class TestAnonymiser:
 
     def test_anonymiser_valeur_nan(self):
         """Test avec valeur NaN pandas."""
+
         from cptcopro.utils.privacy import anonymiser
-        import numpy as np
 
         result = anonymiser(pd.NA, "masque")
         assert pd.isna(result)
@@ -124,9 +124,7 @@ class TestAppliquerConfidentialite:
         """Test avec colonnes personnalisées à masquer."""
         from cptcopro.utils.privacy import appliquer_confidentialite
 
-        df = pd.DataFrame(
-            {"nom": ["Jean Dupont"], "email": ["jean@example.com"], "debit": [100]}
-        )
+        df = pd.DataFrame({"nom": ["Jean Dupont"], "email": ["jean@example.com"], "debit": [100]})
 
         with patch("cptcopro.utils.privacy.is_privacy_enabled", return_value=True):
             result = appliquer_confidentialite(df, colonnes=["nom", "email"])
@@ -139,9 +137,7 @@ class TestAppliquerConfidentialite:
         """Test avec mode initiales."""
         from cptcopro.utils.privacy import appliquer_confidentialite
 
-        df = pd.DataFrame(
-            {"proprietaire": ["Jean Dupont", "Marie Martin"], "debit": [100, 200]}
-        )
+        df = pd.DataFrame({"proprietaire": ["Jean Dupont", "Marie Martin"], "debit": [100, 200]})
 
         with patch("cptcopro.utils.privacy.is_privacy_enabled", return_value=True):
             result = appliquer_confidentialite(df, mode="initiales")
@@ -235,7 +231,7 @@ class TestIsPrivacyEnabled:
 
     def test_privacy_definie_false(self):
         """Test quand privacy est explicitement False."""
-        from cptcopro.utils.privacy import is_privacy_enabled, SESSION_KEY_PRIVACY
+        from cptcopro.utils.privacy import SESSION_KEY_PRIVACY, is_privacy_enabled
 
         mock_session = {SESSION_KEY_PRIVACY: False}
         with patch("cptcopro.utils.privacy.st.session_state", mock_session):
@@ -245,7 +241,7 @@ class TestIsPrivacyEnabled:
 
     def test_privacy_definie_true(self):
         """Test quand privacy est True."""
-        from cptcopro.utils.privacy import is_privacy_enabled, SESSION_KEY_PRIVACY
+        from cptcopro.utils.privacy import SESSION_KEY_PRIVACY, is_privacy_enabled
 
         mock_session = {SESSION_KEY_PRIVACY: True}
         with patch("cptcopro.utils.privacy.st.session_state", mock_session):
@@ -261,9 +257,7 @@ class TestPreparerDfPourGraphe:
         """Test quand le mode confidentiel est désactivé."""
         from cptcopro.utils.privacy import preparer_df_pour_graphe
 
-        df = pd.DataFrame(
-            {"proprietaire": ["Jean Dupont", "Marie Martin"], "debit": [100, 200]}
-        )
+        df = pd.DataFrame({"proprietaire": ["Jean Dupont", "Marie Martin"], "debit": [100, 200]})
 
         with patch("cptcopro.utils.privacy.is_privacy_enabled", return_value=False):
             result = preparer_df_pour_graphe(df, "proprietaire")
@@ -276,9 +270,7 @@ class TestPreparerDfPourGraphe:
         """Test quand le mode confidentiel est activé."""
         from cptcopro.utils.privacy import preparer_df_pour_graphe
 
-        df = pd.DataFrame(
-            {"proprietaire": ["Jean Dupont", "Marie Martin"], "debit": [100, 200]}
-        )
+        df = pd.DataFrame({"proprietaire": ["Jean Dupont", "Marie Martin"], "debit": [100, 200]})
 
         with patch("cptcopro.utils.privacy.is_privacy_enabled", return_value=True):
             result = preparer_df_pour_graphe(df, "proprietaire")
@@ -336,14 +328,10 @@ class TestPreparerDfPourGraphe:
         """Test avec colonnes sensibles additionnelles."""
         from cptcopro.utils.privacy import preparer_df_pour_graphe
 
-        df = pd.DataFrame(
-            {"proprietaire": ["Jean Dupont"], "code": ["ABC123"], "debit": [100]}
-        )
+        df = pd.DataFrame({"proprietaire": ["Jean Dupont"], "code": ["ABC123"], "debit": [100]})
 
         with patch("cptcopro.utils.privacy.is_privacy_enabled", return_value=True):
-            result = preparer_df_pour_graphe(
-                df, "proprietaire", colonnes_sensibles=["code"]
-            )
+            result = preparer_df_pour_graphe(df, "proprietaire", colonnes_sensibles=["code"])
 
         assert result["proprietaire"].iloc[0] == "Copro 1"
         assert result["code"].iloc[0] == "●●●●●●"

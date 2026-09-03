@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from cptcopro.Database import integrite_db, enregistrer_donnees_sqlite
+from cptcopro.Database import enregistrer_donnees_sqlite, integrite_db
 from cptcopro.Database.Charges_To_BDD import _normaliser_lignes_charge
 
 

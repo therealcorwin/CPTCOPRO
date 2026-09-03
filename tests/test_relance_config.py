@@ -5,9 +5,11 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from cptcopro import Database as dbmod
-from cptcopro.utils.relance_mailer import generate_relance_draft_with_llm, render_relance_template
 from cptcopro.utils import relance_mailer
+from cptcopro.utils.relance_mailer import generate_relance_draft_with_llm, render_relance_template
 
 
 def setup_db(path: Path) -> str:
@@ -21,7 +23,12 @@ def test_relance_tables_created(tmp_path: Path):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
-        for table_name in ["relance_config", "relance_destinataire", "relance_draft", "relance_template"]:
+        for table_name in [
+            "relance_config",
+            "relance_destinataire",
+            "relance_draft",
+            "relance_template",
+        ]:
             cur.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                 (table_name,),
@@ -210,7 +217,6 @@ def test_non_oauth_value_uses_password_login(monkeypatch, tmp_path: Path):
     assert fake.login_args == ("sender@hotmail.com", "app-password")
 
 
-
 def test_cached_oauth_token_is_preferred(monkeypatch):
     monkeypatch.setattr(
         relance_mailer,
@@ -289,17 +295,14 @@ def test_delete_last_template_is_refused(tmp_path: Path):
     templates = dbmod.list_relance_templates(db_path)
     only_id = templates[0]["template_id"]
 
-    try:
+    with pytest.raises(ValueError):
         dbmod.delete_relance_template(db_path, only_id)
-        assert False, "La suppression du dernier template aurait du echouer"
-    except ValueError:
-        pass
 
 
 def test_create_template_rejects_invalid_generation_mode(tmp_path: Path):
     db_path = setup_db(tmp_path / "relance_template_bad_mode.db")
 
-    try:
+    with pytest.raises(ValueError):
         dbmod.create_relance_template(
             db_path,
             name="Invalide",
@@ -307,9 +310,6 @@ def test_create_template_rejects_invalid_generation_mode(tmp_path: Path):
             body_template="Corps",
             generation_mode="bogus",
         )
-        assert False, "generation_mode invalide aurait du echouer"
-    except ValueError:
-        pass
 
 
 def test_render_relance_template_substitutes_placeholders():
@@ -367,11 +367,10 @@ def test_tester_connexion_mistral_without_key(monkeypatch):
     assert "Clé API absente" in msg
 
 
-
 def test_tester_connexion_mistral_with_mock(monkeypatch):
-    from cptcopro.utils.relance_mailer import tester_connexion_mistral
     import urllib.request
-    
+
+    from cptcopro.utils.relance_mailer import tester_connexion_mistral
 
     class DummyResponse:
         def __init__(self, content):
@@ -422,7 +421,6 @@ def test_tester_connexion_imap_without_credentials(tmp_path: Path):
     assert folders == []
 
 
-
 def test_mark_relance_draft_status_sets_sent_at(tmp_path: Path):
     db_path = setup_db(tmp_path / "relance_sent_at.db")
 
@@ -443,7 +441,9 @@ def test_mark_relance_draft_status_sets_sent_at(tmp_path: Path):
     assert drafts_before[0]["sent_at"] is None
 
     # Passage en draft_imap -> sent_at doit être renseigné
-    dbmod.mark_relance_draft_status(db_path, draft_id, status="draft_imap", remote_draft_id="remote-123")
+    dbmod.mark_relance_draft_status(
+        db_path, draft_id, status="draft_imap", remote_draft_id="remote-123"
+    )
     drafts_after = dbmod.get_relance_drafts(db_path)
     assert drafts_after[0]["status"] == "draft_imap"
     assert drafts_after[0]["sent_at"] is not None
@@ -475,7 +475,7 @@ def test_relances_tracking_summary_and_due_metrics(tmp_path: Path):
         conn.close()
 
     # Créer 2 relances envoyées pour D002
-    d1 = dbmod.save_relance_draft(
+    dbmod.save_relance_draft(
         db_path,
         code_proprietaire="D002",
         nom_proprietaire="Durand",
@@ -487,7 +487,7 @@ def test_relances_tracking_summary_and_due_metrics(tmp_path: Path):
         llm_model="mistral-small-latest",
         status="draft_imap",
     )
-    d2 = dbmod.save_relance_draft(
+    dbmod.save_relance_draft(
         db_path,
         code_proprietaire="D002",
         nom_proprietaire="Durand",
@@ -523,19 +523,18 @@ def test_parse_imap_list_response_rfc3501():
     # Formats standards avec guillemets et slash
     assert _parse_imap_list_response('(\\HasNoChildren) "/" "Drafts"') == "Drafts"
     assert _parse_imap_list_response('(\\HasNoChildren \\Drafts) "/" "Brouillons"') == "Brouillons"
-    
+
     # Sans guillemets autour du nom
     assert _parse_imap_list_response('(\\HasNoChildren) "/" INBOX') == "INBOX"
-    
+
     # Séparateur point (Namespace)
     assert _parse_imap_list_response('(\\HasNoChildren) "." "INBOX.Drafts"') == "INBOX.Drafts"
-    
+
     # Délimiteur NIL
     assert _parse_imap_list_response('(\\HasNoChildren) NIL "INBOX"') == "INBOX"
-    
+
     # Nom avec espaces et guillemets internes
-    assert _parse_imap_list_response('(\\HasNoChildren) "/" "Dossier Personnel"') == "Dossier Personnel"
-
-
-
-
+    assert (
+        _parse_imap_list_response('(\\HasNoChildren) "/" "Dossier Personnel"')
+        == "Dossier Personnel"
+    )

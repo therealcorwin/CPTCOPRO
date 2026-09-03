@@ -4,22 +4,18 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Optional, List
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
-from loguru import logger
 
 from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     preparer_df_pour_graphe,
-    is_privacy_enabled,
 )
-from cptcopro.utils.ui_components import render_header, apply_plotly_theme
-
+from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 DB_PATH = get_db_path()
 
@@ -32,7 +28,9 @@ def _get_db_cache_key(db_path: Path) -> int:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_all_data(db_path: Path, db_cache_key: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_all_data(
+    db_path: Path, db_cache_key: int
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Charge les données des charges, copropriétaires et seuils d'alerte."""
     del db_cache_key
     with sqlite3.connect(db_path) as conn:
@@ -70,7 +68,7 @@ if charges_df.empty:
 
 # Liste unique des copropriétaires et métadonnées associées
 proprietaires_uniques = sorted(charges_df["proprietaire"].unique())
-thresholds_by_type = dict(zip(config_df["type_apt"], config_df["threshold"]))
+thresholds_by_type = dict(zip(config_df["type_apt"], config_df["threshold"], strict=False))
 
 # Table de correspondance métadonnées par propriétaire
 copro_meta_df = (
@@ -80,7 +78,7 @@ copro_meta_df = (
 )
 
 
-def filter_coproprietaires(query: str, all_owners: List[str]) -> List[str]:
+def filter_coproprietaires(query: str, all_owners: list[str]) -> list[str]:
     """Filtre la liste des copropriétaires par nom, code, numéro de lot ou type."""
     if not query:
         return all_owners
@@ -95,7 +93,7 @@ def filter_coproprietaires(query: str, all_owners: List[str]) -> List[str]:
             code = str(row.get("code") or "").lower()
             num_apt = str(row.get("num_apt") or "").lower()
             type_apt = str(row.get("type_apt") or "").lower()
-            
+
             # Normalisation du lot (ex: "01" -> "1")
             num_apt_clean = num_apt.lstrip("0") if num_apt != "0" else "0"
             q_clean = q.lstrip("0") if q != "0" else "0"
@@ -114,10 +112,12 @@ def filter_coproprietaires(query: str, all_owners: List[str]) -> List[str]:
 
 
 # Onglets principaux : Fiche Individuelle vs Comparateur Multi-copropriétaires
-tab_fiche, tab_compare = st.tabs([
-    "👤 Fiche Individuelle 360°",
-    "📊 Comparateur Multi-Copropriétaires",
-])
+tab_fiche, tab_compare = st.tabs(
+    [
+        "👤 Fiche Individuelle 360°",
+        "📊 Comparateur Multi-Copropriétaires",
+    ]
+)
 
 # ============================================================================
 # ONGLET 1: FICHE INDIVIDUELLE 360°
@@ -172,7 +172,9 @@ with tab_fiche:
             # Vérifier si en alerte
             alerte_info = alertes_df[alertes_df["code"] == code_copro]
             is_in_alert = not alerte_info.empty
-            seuil_lot = thresholds_by_type.get(str(type_lot).lower(), thresholds_by_type.get("default", 2000.0))
+            seuil_lot = thresholds_by_type.get(
+                str(type_lot).lower(), thresholds_by_type.get("default", 2000.0)
+            )
 
             st.divider()
 
@@ -183,7 +185,9 @@ with tab_fiche:
             with col_c1:
                 st.metric("Code Copropriétaire", code_copro)
             with col_c2:
-                st.metric("Lot & Typologie", f"Lot {num_lot} ({type_lot.upper() if type_lot else 'N/A'})")
+                st.metric(
+                    "Lot & Typologie", f"Lot {num_lot} ({type_lot.upper() if type_lot else 'N/A'})"
+                )
             with col_c3:
                 st.metric(
                     "Débit Actuel",
@@ -194,9 +198,16 @@ with tab_fiche:
             with col_c4:
                 if is_in_alert:
                     occ = alerte_info.iloc[0]["occurence"]
-                    st.metric("Statut Alerte", f"⚠️ En Alerte ({occ}x)", delta="Débit élevé", delta_color="inverse")
+                    st.metric(
+                        "Statut Alerte",
+                        f"⚠️ En Alerte ({occ}x)",
+                        delta="Débit élevé",
+                        delta_color="inverse",
+                    )
                 else:
-                    st.metric("Statut Alerte", "✅ Normal", delta="Sous le seuil", delta_color="normal")
+                    st.metric(
+                        "Statut Alerte", "✅ Normal", delta="Sous le seuil", delta_color="normal"
+                    )
 
             st.space("small")
 
@@ -233,7 +244,10 @@ with tab_fiche:
             st.plotly_chart(fig_indiv, width="stretch")
 
             # --- Historique des relevés ---
-            with st.expander(f"📋 Historique complet des relevés pour {selected_copro} ({len(df_copro)} relevés)", expanded=False):
+            with st.expander(
+                f"📋 Historique complet des relevés pour {selected_copro} ({len(df_copro)} relevés)",
+                expanded=False,
+            ):
                 df_display = df_copro.sort_values("date", ascending=False).copy()
                 df_display["date_str"] = df_display["date"].dt.strftime("%d/%m/%Y")
                 st.dataframe(
@@ -242,7 +256,9 @@ with tab_fiche:
                     hide_index=True,
                     column_config={
                         "date_str": st.column_config.TextColumn("Date relevé", width="medium"),
-                        "proprietaire": st.column_config.TextColumn("Copropriétaire", width="large"),
+                        "proprietaire": st.column_config.TextColumn(
+                            "Copropriétaire", width="large"
+                        ),
                         "code": st.column_config.TextColumn("Code", width="small"),
                         "num_apt": st.column_config.TextColumn("Lot", width="small"),
                         "type_apt": st.column_config.TextColumn("Type", width="small"),
@@ -262,14 +278,18 @@ with tab_compare:
     selected_multiple = st.multiselect(
         "Choisissez les copropriétaires à superposer :",
         options=proprietaires_uniques,
-        default=proprietaires_uniques[:3] if len(proprietaires_uniques) >= 3 else proprietaires_uniques,
+        default=proprietaires_uniques[:3]
+        if len(proprietaires_uniques) >= 3
+        else proprietaires_uniques,
         key="compare_copros_multiselect",
     )
 
     if not selected_multiple:
         st.info("Veuillez sélectionner au moins un copropriétaire pour afficher le comparatif.")
     else:
-        df_multi = charges_df[charges_df["proprietaire"].isin(selected_multiple)].sort_values(["proprietaire", "date"])
+        df_multi = charges_df[charges_df["proprietaire"].isin(selected_multiple)].sort_values(
+            ["proprietaire", "date"]
+        )
 
         fig_multi = px.line(
             preparer_df_pour_graphe(df_multi, "proprietaire"),

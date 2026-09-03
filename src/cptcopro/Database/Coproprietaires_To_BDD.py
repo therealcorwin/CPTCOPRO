@@ -3,9 +3,11 @@
 Ce module gère l'insertion/mise à jour des données des copropriétaires
 avec leurs informations de lots (numéro et type d'appartement).
 """
+
 import sqlite3
 from collections import Counter
-from typing import Any, List
+from typing import Any
+
 from loguru import logger
 
 logger = logger.bind(type_log="BDD")
@@ -82,8 +84,7 @@ def _valider_collecte(data: list[tuple[str, str, str, str]], cur: sqlite3.Cursor
     ).fetchall()
 
     lots_existants = {
-        _normaliser_lot_type(num_apt, type_apt)
-        for num_apt, type_apt in rows_existantes
+        _normaliser_lot_type(num_apt, type_apt) for num_apt, type_apt in rows_existantes
     }
     lots_entrants_set = set(lots_entrants)
 
@@ -106,10 +107,10 @@ def _valider_collecte(data: list[tuple[str, str, str, str]], cur: sqlite3.Cursor
         )
 
 
-def enregistrer_coproprietaires(data_coproprietaires: List[Any], db_path: str) -> None:
+def enregistrer_coproprietaires(data_coproprietaires: list[Any], db_path: str) -> None:
     """
     Insère des informations de copropriétaires dans la table `coproprietaires`.
-    
+
     Args:
         data_coproprietaires: Liste de dictionnaires contenant les clés:
             - nom_proprietaire (ou proprietaire): nom du propriétaire
@@ -120,19 +121,29 @@ def enregistrer_coproprietaires(data_coproprietaires: List[Any], db_path: str) -
 
     Returns:
         None
-    """    
+    """
     logger.info("Insertion des copropriétaires dans la base de données...")
     data = []
     for copro in data_coproprietaires:
         # Accept both old keys ('proprietaire','code') and new keys ('nom_proprietaire','code_proprietaire')
-        nom = copro.get("nom_proprietaire") if copro.get("nom_proprietaire") is not None else copro.get("proprietaire")
-        code = copro.get("code_proprietaire") if copro.get("code_proprietaire") is not None else copro.get("code")
-        data.append((nom or "", code or "", copro.get("num_apt") or "", copro.get("type_apt") or ""))
+        nom = (
+            copro.get("nom_proprietaire")
+            if copro.get("nom_proprietaire") is not None
+            else copro.get("proprietaire")
+        )
+        code = (
+            copro.get("code_proprietaire")
+            if copro.get("code_proprietaire") is not None
+            else copro.get("code")
+        )
+        data.append(
+            (nom or "", code or "", copro.get("num_apt") or "", copro.get("type_apt") or "")
+        )
 
     if not data:
         logger.info("Aucune donnée coproprietaires à insérer.")
         return None
-    
+
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:

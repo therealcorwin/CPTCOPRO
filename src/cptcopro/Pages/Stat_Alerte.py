@@ -14,8 +14,7 @@ from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     preparer_df_pour_graphe,
 )
-from cptcopro.utils.ui_components import render_header, apply_plotly_theme
-
+from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 DB_PATH = get_db_path()
 
@@ -54,7 +53,7 @@ def recup_suivi_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
         SELECT date_releve, nombre_alertes, total_debit,
                nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
                debit_2p, debit_3p, debit_4p, debit_5p, debit_na
-        FROM suivi_alertes 
+        FROM suivi_alertes
         ORDER BY date_releve DESC
     """
     try:
@@ -96,26 +95,51 @@ if not suivi_alerte.empty:
 
     with col1:
         d2 = get_delta(suivi_alerte, "nb_2p")
-        st.metric("2 pièces (T2)", value=get_val(suivi_alerte, "nb_2p"), delta=f"{'+' if d2>0 else ''}{d2}" if d2 != 0 else None, delta_color="inverse")
+        st.metric(
+            "2 pièces (T2)",
+            value=get_val(suivi_alerte, "nb_2p"),
+            delta=f"{'+' if d2 > 0 else ''}{d2}" if d2 != 0 else None,
+            delta_color="inverse",
+        )
     with col2:
         d3 = get_delta(suivi_alerte, "nb_3p")
-        st.metric("3 pièces (T3)", value=get_val(suivi_alerte, "nb_3p"), delta=f"{'+' if d3>0 else ''}{d3}" if d3 != 0 else None, delta_color="inverse")
+        st.metric(
+            "3 pièces (T3)",
+            value=get_val(suivi_alerte, "nb_3p"),
+            delta=f"{'+' if d3 > 0 else ''}{d3}" if d3 != 0 else None,
+            delta_color="inverse",
+        )
     with col3:
         d4 = get_delta(suivi_alerte, "nb_4p")
-        st.metric("4 pièces (T4)", value=get_val(suivi_alerte, "nb_4p"), delta=f"{'+' if d4>0 else ''}{d4}" if d4 != 0 else None, delta_color="inverse")
+        st.metric(
+            "4 pièces (T4)",
+            value=get_val(suivi_alerte, "nb_4p"),
+            delta=f"{'+' if d4 > 0 else ''}{d4}" if d4 != 0 else None,
+            delta_color="inverse",
+        )
     with col4:
         d5 = get_delta(suivi_alerte, "nb_5p")
-        st.metric("5 pièces (T5+)", value=get_val(suivi_alerte, "nb_5p"), delta=f"{'+' if d5>0 else ''}{d5}" if d5 != 0 else None, delta_color="inverse")
+        st.metric(
+            "5 pièces (T5+)",
+            value=get_val(suivi_alerte, "nb_5p"),
+            delta=f"{'+' if d5 > 0 else ''}{d5}" if d5 != 0 else None,
+            delta_color="inverse",
+        )
     with col5:
         dna = get_delta(suivi_alerte, "nb_na")
-        st.metric("Non classé", value=get_val(suivi_alerte, "nb_na"), delta=f"{'+' if dna>0 else ''}{dna}" if dna != 0 else None, delta_color="inverse")
+        st.metric(
+            "Non classé",
+            value=get_val(suivi_alerte, "nb_na"),
+            delta=f"{'+' if dna > 0 else ''}{dna}" if dna != 0 else None,
+            delta_color="inverse",
+        )
 
 st.divider()
 
 if not alertes_df.empty:
     col_sel, _ = st.columns([1.5, 2])
     with col_sel:
-        types_disponibles = ["Tous"] + sorted(alertes_df["TypeApt"].dropna().unique().tolist())
+        types_disponibles = ["Tous", *sorted(alertes_df["TypeApt"].dropna().unique().tolist())]
         type_selectionne = st.selectbox(
             "Filtrer par type de lot :",
             options=types_disponibles,

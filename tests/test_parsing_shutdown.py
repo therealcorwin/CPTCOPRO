@@ -1,5 +1,3 @@
-import pytest
-
 from cptcopro.Parsing.Commun import (
     _is_expected_target_closed,
     _is_expected_target_closed_context,
@@ -17,9 +15,7 @@ def test_is_expected_target_closed_ignores_other_errors() -> None:
 
 
 def test_is_expected_target_closed_context_matches_exception_field() -> None:
-    context = {
-        "exception": RuntimeError("Target page, context or browser has been closed")
-    }
+    context = {"exception": RuntimeError("Target page, context or browser has been closed")}
     assert _is_expected_target_closed_context(context) is True
 
 

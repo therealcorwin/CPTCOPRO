@@ -10,14 +10,17 @@ Fonctions principales:
     recuperer_situation_copro(): Extrait les données du tableau des charges
     afficher_etat_coproprietaire(): Affiche les données dans la console (rich)
 """
-from selectolax.parser import HTMLParser  # type: ignore
-from datetime import datetime
+
 import re
+from contextlib import suppress
+from datetime import datetime
+from pathlib import Path
 from typing import Any
+
+from loguru import logger
 from rich.console import Console
 from rich.table import Table
-from loguru import logger
-from pathlib import Path
+from selectolax.parser import HTMLParser, Node
 
 logger.remove()
 logger = logger.bind(type_log="TRAITEMENT")
@@ -52,6 +55,58 @@ def normalise_somme(s: str) -> float:
         return 0.0
 
 
+def _extract_raw_date_text(htmlparser: HTMLParser) -> tuple[str, str]:
+    """Extrait le texte brut et le HTML du nœud td#lzA1 ou du document complet."""
+    node = htmlparser.css_first("td#lzA1")
+    logger.debug(f"Recherche du noeud 'td#lzA1' -> {'trouvé' if node else 'absent'}")
+    if node:
+        try:
+            texte = node.text()
+        except Exception:
+            texte = ""
+        try:
+            node_html = node.html or ""
+        except Exception:
+            node_html = ""
+    else:
+        logger.warning("Balise td#lzA1 introuvable, recherche de la date dans tout le document.")
+        try:
+            texte = htmlparser.text()
+        except Exception:
+            texte = ""
+        node_html = ""
+    return texte or "", node_html
+
+
+def _dump_debug_html(htmlparser: HTMLParser, texte_normalise: str, node_html: str) -> None:
+    """Enregistre un dump HTML de diagnostic lors d'un échec de détection de date."""
+    try:
+        if hasattr(htmlparser, "html"):
+            full_html = htmlparser.html
+        elif hasattr(htmlparser, "raw_html"):
+            full_html = htmlparser.raw_html()
+        else:
+            full_html = str(htmlparser)
+    except Exception:
+        full_html = ""
+
+    dump_path = Path(__file__).parent / "last_runtime_dump.html"
+    try:
+        dump_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(dump_path, "w", encoding="utf-8") as f:
+            f.write("<!-- Debug dump: recuperer_date_situation_copro failure -->\n")
+            f.write("<!-- texte (repr): -->\n")
+            f.write(repr(texte_normalise) + "\n\n")
+            f.write("<!-- node HTML (if any): -->\n")
+            with suppress(Exception):
+                f.write(node_html if node_html else "")
+            f.write("\n<!-- full HTML (trunc 200k): -->\n")
+            f.write(full_html[:200000] if full_html else "")
+        logger.error(f"Date non trouvée — dump HTML écrit dans {dump_path}")
+    except Exception as e:
+        logger.error(f"Échec écriture dump HTML : {e}")
+
+
 def recuperer_date_situation_copro(htmlparser: HTMLParser) -> str:
     """
     Extrait la date de la situation des copropriétaires à partir d'un noeud HTML spécifié.
@@ -66,220 +121,141 @@ def recuperer_date_situation_copro(htmlparser: HTMLParser) -> str:
     Returns:
     - str: La date extrait au format JJ/MM/AAAA.
     """
-    node = htmlparser.css_first("td#lzA1")
-    logger.debug(f"Recherche du noeud 'td#lzA1' -> {'trouvé' if node else 'absent'}")
+    texte, node_html = _extract_raw_date_text(htmlparser)
 
-    if node:
-        try:
-            texte = node.text()
-        except Exception:
-            texte = ""
-        # essayer aussi d'obtenir le HTML du noeud pour debug
-        try:
-            node_html = node.html()
-        except Exception:
-            node_html = ""
-        logger.debug(f"Contenu node.text() repr: {repr(texte)}")
-        logger.debug(f"Contenu node.html() (trunc) repr: {repr(node_html)[:2000]}")
-    else:
-        # Fallback : chercher la date dans tout le document si la balise précise est absente
-        logger.warning(
-            "Balise td#lzA1 introuvable, recherche de la date dans tout le document."
-        )
-        try:
-            texte = htmlparser.text()
-            logger.debug(f"Contenu document text() (trunc) repr: {repr(texte)[:2000]}")
-        except Exception:
-            texte = ""
-
-    # Normaliser le texte pour faciliter la recherche (remplacer NBSP, etc.)
-    if texte is None:
-        texte = ""
-    # remplacer NBSP et quelques espaces invisibles communs
-    for ch in ("\u00A0", "\u200B", "\u200C", "\u200D"):
+    for ch in ("\u00a0", "\u200b", "\u200c", "\u200d"):
         texte = texte.replace(ch, " ")
     texte_normalise = re.sub(r"\s+", " ", texte).strip()
     logger.debug(f"Texte normalisé (repr): {repr(texte_normalise)[:2000]}")
 
-    # Extraire la date au format JJ/MM/AAAA
     match = re.search(r"(\d{2}/\d{2}/\d{4})", texte_normalise)
     if not match:
-        # Avant d'échouer, sauvegarder un dump pour analyser le HTML reçu
-        try:
-            if hasattr(htmlparser, "html"):
-                full_html = getattr(htmlparser, "html")
-            elif hasattr(htmlparser, "raw_html"):
-                full_html = htmlparser.raw_html()
-            else:
-                full_html = str(htmlparser)
-        except Exception:
-            full_html = ""
-
-        dump_path = Path(__file__).parent / "last_runtime_dump.html"        
-        try:
-            dump_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(dump_path, "w", encoding="utf-8") as f:                
-                f.write("<!-- Debug dump: recuperer_date_situation_copro failure -->\n")
-                f.write("<!-- texte (repr): -->\n")
-                f.write(repr(texte_normalise) + "\n\n")
-                f.write("<!-- node HTML (if any): -->\n")
-                try:
-                    f.write(node_html if node_html else "")
-                except Exception:
-                    pass
-                f.write("\n<!-- full HTML (trunc 200k): -->\n")
-                f.write(full_html[:200000])
-            logger.error(f"Date non trouvée — dump HTML écrit dans {dump_path}")
-        except Exception as e:
-            logger.error(f"Échec écriture dump HTML : {e}")
-
+        _dump_debug_html(htmlparser, texte_normalise, node_html)
         raise ValueError("Date de situation introuvable dans td#lzA1")
 
     date_str = match.group(1)
     logger.info(f"Date trouvée : {date_str}")
-
-    date_situation_copro = datetime.strptime(date_str, "%d/%m/%Y").strftime("%Y-%m-%d")
-    return date_situation_copro
+    return datetime.strptime(date_str, "%d/%m/%Y").strftime("%Y-%m-%d")
 
 
-def recuperer_situation_copro(
-    htmlparser: HTMLParser, date_suivi_copro: str) -> list[Any]:
+def _match_exact_header_row(rows: list[Node]) -> dict[str, int]:
+    """Extrait les indices d'en-tête depuis une ligne contenant les libellés complets."""
+    for row in rows:
+        row_cells = [cell.text(strip=True) for cell in row.css("td")]
+        row_lower = [c.lower() for c in row_cells]
+        if "code" in row_lower and any(
+            "copropriétaire" in c or "coproprietaire" in c for c in row_lower
+        ):
+            indices: dict[str, int] = {}
+            for idx, c_text in enumerate(row_cells):
+                c_low = c_text.lower()
+                if c_low == "code":
+                    indices["Code"] = idx
+                elif "copropriétaire" in c_low or "coproprietaire" in c_low:
+                    indices["Copropriétaire"] = idx
+                elif "débit" in c_low or "debit" in c_low:
+                    indices["Débit"] = idx
+                elif "crédit" in c_low or "credit" in c_low:
+                    indices["Crédit"] = idx
+            logger.debug(f"Ligne d'en-tête identifiée : {row_cells} -> {indices}")
+            return indices
+    return {}
+
+
+def _fallback_header_indices(first_header_row: Node | None) -> dict[str, int]:
+    """Déduit les indices d'en-tête à partir de motifs partiels ou de positions par défaut."""
+    indices: dict[str, int] = {}
+    if first_header_row:
+        first_cells = [cell.text(strip=True) for cell in first_header_row.css("td")]
+        for idx, c_text in enumerate(first_cells):
+            c_low = c_text.lower()
+            if "code" in c_low:
+                indices["Code"] = idx
+            elif "copro" in c_low:
+                indices["Copropriétaire"] = idx
+            elif "déb" in c_low or "deb" in c_low:
+                indices["Débit"] = idx
+            elif "créd" in c_low or "cred" in c_low:
+                indices["Crédit"] = idx
+
+    for i, rh in enumerate(["Code", "Copropriétaire", "Débit", "Crédit"]):
+        indices.setdefault(rh, i)
+    logger.debug(f"Indices d'en-têtes complétés : {indices}")
+    return indices
+
+
+def _detect_charge_table_headers(table: Node) -> dict[str, int]:
+    """Détecte les index des colonnes obligatoires dans la table des charges."""
+    indices = _match_exact_header_row(table.css("tr"))
+    required_headers = ["Code", "Copropriétaire", "Débit", "Crédit"]
+    if not all(k in indices for k in required_headers):
+        indices = _fallback_header_indices(table.css_first("tr"))
+    return indices
+
+
+def _is_ignorable_charge_row(code: str, nom: str) -> bool:
+    """Détermine si une ligne de charge correspond à un en-tête ou à un sélecteur parasite."""
+    if not code or not nom:
+        return True
+    ignorable_codes = {"code", "copropriétaire", "coproprietaire", "informations", "en-tete1"}
+    ignorable_names = {"copropriétaire", "coproprietaire", "nom", "nom propriétaire", "en-tete2"}
+    if code.lower() in ignorable_codes or nom.lower() in ignorable_names:
+        return True
+    if len(code) > 30 or len(nom) > 150:
+        logger.debug(f"Ligne de menu/filtre ignorée : code='{code[:30]}...'")
+        return True
+    return False
+
+
+def _parse_single_charge_row(
+    cells: list[str], header_indices: dict[str, int], date_suivi_copro: str
+) -> tuple[str, str, float, float, str] | None:
+    """Extrait et valide une ligne individuelle du tableau des charges."""
+    try:
+        code_proprietaire = cells[header_indices["Code"]].strip()
+        nom_proprietaire = cells[header_indices["Copropriétaire"]].strip()
+        if _is_ignorable_charge_row(code_proprietaire, nom_proprietaire):
+            return None
+
+        debit_cell = cells[header_indices["Débit"]] if "Débit" in header_indices else ""
+        credit_cell = cells[header_indices["Crédit"]] if "Crédit" in header_indices else ""
+        debit = normalise_somme(debit_cell)
+        credit = normalise_somme(credit_cell)
+        return (code_proprietaire, nom_proprietaire, debit, credit, date_suivi_copro)
+    except (IndexError, ValueError) as e:
+        logger.error(f"Erreur : {e}. Ligne mal formatée ou données invalides.")
+        return None
+
+
+def recuperer_situation_copro(htmlparser: HTMLParser, date_suivi_copro: str) -> list[Any]:
     """
     Extrait les informations de situation des copropriétaires à partir d'un document HTML.
 
-    La fonction recherche une table spécifique dans le document HTML, extrait les en-têtes et les données des lignes,
-    puis nettoie et convertit les données pour les renvoyer sous forme de liste de tuples.
-
     Parameters:
-    - HTMLParser (HTMLParser): Un objet HTMLParser contenant le document HTML à analyser.
+    - htmlparser (HTMLParser): Un objet HTMLParser contenant le document HTML à analyser.
     - date_suivi_copro (str): Une chaîne de caractères représentant la date au format JJ/MM/AAAA.
 
-        Returns:
-        - list[Any]: Une liste de tuples contenant les données des copropriétaires.
-            Chaque tuple a le format suivant : (code_proprietaire, nom_proprietaire, debit, credit, date).
+    Returns:
+    - list[Any]: Liste de tuples (code_proprietaire, nom_proprietaire, debit, credit, date).
     """
-    # Trouver la table dans le document HTML
     table = htmlparser.css_first("table#ctzA1")
-
-    data = []
-
-    if table:
-        rows = table.css("tr")
-        required_headers = ["Code", "Copropriétaire", "Débit", "Crédit"]
-        header_indices: dict[str, int] = {}
-
-        # 1. Identifier la ligne d'en-tête réelle contenant Code / Copropriétaire
-        for row in rows:
-            row_cells = [cell.text(strip=True) for cell in row.css("td")]
-            row_lower = [c.lower() for c in row_cells]
-            if "code" in row_lower and any("copropriétaire" in c or "coproprietaire" in c for c in row_lower):
-                for idx, c_text in enumerate(row_cells):
-                    c_low = c_text.lower()
-                    if c_low == "code":
-                        header_indices["Code"] = idx
-                    elif "copropriétaire" in c_low or "coproprietaire" in c_low:
-                        header_indices["Copropriétaire"] = idx
-                    elif "débit" in c_low or "debit" in c_low:
-                        header_indices["Débit"] = idx
-                    elif "crédit" in c_low or "credit" in c_low:
-                        header_indices["Crédit"] = idx
-                logger.debug(f"Ligne d'en-tête identifiée : {row_cells} -> {header_indices}")
-                break
-
-        # 2. Fallback si non trouvé textuellement (ex: fixtures sans en-tête standard)
-        if not all(k in header_indices for k in required_headers):
-            first_header_row = table.css_first("tr")
-            if first_header_row:
-                first_cells = [cell.text(strip=True) for cell in first_header_row.css("td")]
-                for idx, c_text in enumerate(first_cells):
-                    c_low = c_text.lower()
-                    if "code" in c_low:
-                        header_indices["Code"] = idx
-                    elif "copro" in c_low:
-                        header_indices["Copropriétaire"] = idx
-                    elif "déb" in c_low or "deb" in c_low:
-                        header_indices["Débit"] = idx
-                    elif "créd" in c_low or "cred" in c_low:
-                        header_indices["Crédit"] = idx
-
-            # Compléter tout index manquant par position (0, 1, 2, 3)
-            for i, rh in enumerate(required_headers):
-                if rh not in header_indices:
-                    header_indices[rh] = i
-
-            logger.debug(f"Indices d'en-têtes complétés : {header_indices}")
-
-        # 3. Extraire les données des lignes du tableau
-        data = []
-        min_cols = max(header_indices.values()) + 1
-        for row in rows:
-            cells = [cell.text(strip=True) for cell in row.css("td")]
-            if len(cells) >= min_cols:
-                try:
-                    # Vérifier que toutes les colonnes nécessaires sont présentes
-                    code_proprietaire = cells[header_indices["Code"]].strip()
-                    nom_proprietaire = cells[header_indices["Copropriétaire"]].strip()
-                    debit_cell = (
-                        cells[header_indices["Débit"]]
-                        if header_indices.get("Débit") is not None
-                        else ""
-                    )
-                    credit_cell = (
-                        cells[header_indices["Crédit"]]
-                        if header_indices.get("Crédit") is not None
-                        else ""
-                    )
-
-                    # Filtrer les lignes d'en-tête, lignes vides et sélecteurs de filtre
-                    if not code_proprietaire or not nom_proprietaire:
-                        continue
-                    if code_proprietaire.lower() in (
-                        "code",
-                        "copropriétaire",
-                        "coproprietaire",
-                        "informations",
-                        "en-tete1",
-                    ):
-                        continue
-                    if nom_proprietaire.lower() in (
-                        "copropriétaire",
-                        "coproprietaire",
-                        "nom",
-                        "nom propriétaire",
-                        "en-tete2",
-                    ):
-                        continue
-                    # Rejeter les lignes aberrantes (ex: select de filtre concaténé dans la cellule)
-                    if len(code_proprietaire) > 30 or len(nom_proprietaire) > 150:
-                        logger.debug(
-                            f"Ligne de menu/filtre ignorée : code='{code_proprietaire[:30]}...'"
-                        )
-                        continue
-
-                    debit = normalise_somme(debit_cell)
-                    credit = normalise_somme(credit_cell)
-
-                    # Ajouter les données nettoyées et converties à la liste
-                    data.append(
-                        (
-                            code_proprietaire,
-                            nom_proprietaire,
-                            debit,
-                            credit,
-                            date_suivi_copro,
-                        )
-                    )
-                except (IndexError, ValueError) as e:
-                    logger.error(
-                        f"Erreur : {e}. Ligne mal formatée ou données invalides."
-                    )
-                    continue
-            else:
-                logger.warning(
-                    "Erreur : Ligne mal formatée, certaines colonnes sont manquantes."
-                )
-    else:
+    if not table:
         logger.error("Tableau introuvable dans le document HTML.")
+        return []
+
+    header_indices = _detect_charge_table_headers(table)
+    min_cols = max(header_indices.values()) + 1
+    data: list[Any] = []
+
+    for row in table.css("tr"):
+        cells = [cell.text(strip=True) for cell in row.css("td")]
+        if len(cells) >= min_cols:
+            parsed = _parse_single_charge_row(cells, header_indices, date_suivi_copro)
+            if parsed is not None:
+                data.append(parsed)
+        else:
+            logger.warning("Erreur : Ligne mal formatée, certaines colonnes sont manquantes.")
+
     return data
 
 

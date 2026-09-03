@@ -5,17 +5,16 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from cptcopro.utils.paths import get_db_path
 from cptcopro.Database import get_relance_drafts, mark_relance_draft_status
+from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.ui_components import render_header
-
 
 DB_PATH = get_db_path()
 
 
 def _db_cache_key() -> int:
     try:
-        return DB_PATH.stat().st_mtime_ns
+        return int(DB_PATH.stat().st_mtime_ns)
     except OSError:
         return 0
 

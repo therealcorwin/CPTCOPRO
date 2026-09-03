@@ -1,5 +1,6 @@
-from selectolax.parser import HTMLParser
 import os
+
+from selectolax.parser import HTMLParser
 
 from cptcopro.Traitement import Charge_Copro as tp
 
@@ -7,7 +8,7 @@ from cptcopro.Traitement import Charge_Copro as tp
 def load_fixture(name: str) -> str:
     base = os.path.join(os.path.dirname(__file__), "fixtures")
     path = os.path.normpath(os.path.join(base, name))
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -75,4 +76,3 @@ def test_multiheader_and_select_rows_filtered():
     assert data[0][1] == "Dupont Jean"
     assert data[1][0] == "002"
     assert data[1][1] == "Martin Paul"
-

@@ -13,11 +13,13 @@ Fonctions principales:
 Note:
     Le module vérifie qu'il y a exactement 64 copropriétaires.
 """
+
 import re
-from typing import Union
-from selectolax.parser import HTMLParser
-from rich.table import Table
+from typing import Any
+
 from rich.console import Console
+from rich.table import Table
+from selectolax.parser import HTMLParser
 
 # patron d'identifiant des éléments ciblés
 PATRON_ID = re.compile(r"^A17_\d+_\d+$")
@@ -31,19 +33,20 @@ _PREFIXES_PROPRIETAIRE_RE = re.compile(
     re.IGNORECASE,
 )
 
+
 def normaliser_prefixes_proprietaire(texte: str) -> str:
     """
     Normalise le nom d'un propriétaire en supprimant les préfixes de civilité.
-    
+
     Supprime les préfixes de genre (M., Mme, Monsieur, Madame, etc.) ainsi que
     les conjonctions (ou, et) et nettoie la ponctuation résiduelle.
-    
+
     Args:
         texte: Chaîne contenant le nom du propriétaire avec préfixes potentiels.
-    
+
     Returns:
         Nom nettoyé sans préfixes de civilité, avec espaces normalisés.
-    
+
     Example:
         >>> normaliser_prefixes_proprietaire("M. et Mme DUPONT")
         'DUPONT'
@@ -58,33 +61,35 @@ def normaliser_prefixes_proprietaire(texte: str) -> str:
     nettoye = " ".join(nettoye.split())
     return nettoye.strip()
 
+
 # motif pour détecter "Nom (CODE)"
 _PATRON_CODE_RE = re.compile(r"^(?P<nom>.+?)\s*\((?P<code>\d+[A-Za-z]?)\)\s*$")
 
-def extraire_lignes_brutes(Html_lot_copro: Union[HTMLParser, str]) -> list[tuple[str, str]]:
+
+def extraire_lignes_brutes(html_lot_copro: HTMLParser | str) -> list[tuple[str, str]]:
     """
     Extrait les lignes pertinentes du HTML de la liste des lots.
-    
+
     Parse le HTML et récupère tous les éléments dont l'ID correspond au pattern
     'A17_X_Y'. Filtre les éléments contenant des mots exclus (boutique, jardin)
     et normalise les préfixes de civilité.
-    
+
     Args:
-        Html_lot_copro: HTML brut ou objet HTMLParser déjà construit.
-    
+        html_lot_copro: HTML brut ou objet HTMLParser déjà construit.
+
     Returns:
         Liste ordonnée de tuples (id_element, texte_normalise).
         Chaque tuple représente soit un propriétaire, soit un lot.
-    
+
     Example:
         >>> lignes = extraire_lignes_brutes(html_content)
         >>> # [('A17_0_1', 'DUPONT (12A)'), ('A17_0_2', 'Lot 0021 Appartement 3P')]
     """
     # Accepte soit une chaîne HTML soit un objet HTMLParser déjà construit.
-    if isinstance(Html_lot_copro, HTMLParser):
-        arbre = Html_lot_copro
+    if isinstance(html_lot_copro, HTMLParser):
+        arbre = html_lot_copro
     else:
-        arbre = HTMLParser(Html_lot_copro)
+        arbre = HTMLParser(html_lot_copro)
     lignes = []
     for noeud in arbre.css("[id]"):
         idv = noeud.attributes.get("id")
@@ -100,20 +105,21 @@ def extraire_lignes_brutes(Html_lot_copro: Union[HTMLParser, str]) -> list[tuple
             lignes.append((idv, texte))
     return lignes
 
+
 def detecter_proprietaire(ligne: str) -> tuple[str, str] | None:
     """
     Détecte si une ligne représente un propriétaire et extrait ses informations.
-    
+
     Recherche le pattern "NOM (CODE)" où CODE est un identifiant numérique
     éventuellement suivi d'une lettre (ex: "12A").
-    
+
     Args:
         ligne: Texte à analyser.
-    
+
     Returns:
         Tuple (nom, code) si la ligne correspond à un propriétaire,
         None sinon.
-    
+
     Example:
         >>> detecter_proprietaire("DUPONT Jean (12A)")
         ('DUPONT Jean', '12A')
@@ -127,20 +133,21 @@ def detecter_proprietaire(ligne: str) -> tuple[str, str] | None:
         return nom, code
     return None
 
+
 def est_ligne_lot(ligne: str) -> bool:
     """
     Détermine si une ligne décrit un lot de copropriété.
-    
+
     Recherche les patterns caractéristiques d'une ligne de lot:
     - "Lot" suivi d'un numéro (ex: "Lot 0021")
     - Présence du mot "Appartement"
-    
+
     Args:
         ligne: Texte à analyser.
-    
+
     Returns:
         True si la ligne décrit un lot, False sinon.
-    
+
     Example:
         >>> est_ligne_lot("Lot 0021 Appartement 3P")
         True
@@ -154,26 +161,28 @@ def est_ligne_lot(ligne: str) -> bool:
     return False
 
 
-def _creer_entree_proprietaire(nom: str | None, code: str | None, num_apt: str = "", type_apt: str = "") -> dict:
+def _creer_entree_proprietaire(
+    nom: str | None, code: str | None, num_apt: str = "", type_apt: str = ""
+) -> dict[str, Any]:
     """
     Crée une entrée propriétaire normalisée.
-    
+
     Si le propriétaire est une SCIC/AB HABITAT, les champs num_apt et type_apt
     sont forcés à "NA" quelle que soit la valeur passée.
-    
+
     Args:
         nom: Nom du propriétaire (peut être None).
         code: Code du propriétaire (peut être None).
         num_apt: Numéro de lot (sera normalisé).
         type_apt: Type d'appartement (sera normalisé en minuscules).
-    
+
     Returns:
         Dictionnaire avec les clés nom_proprietaire, code_proprietaire, num_apt, type_apt.
     """
     # Forcer "NA" pour les SCIC / AB HABITAT
     if est_scic(nom or ""):
         num_apt, type_apt = "NA", "NA"
-    
+
     return {
         "nom_proprietaire": nom,
         "code_proprietaire": code,
@@ -182,13 +191,13 @@ def _creer_entree_proprietaire(nom: str | None, code: str | None, num_apt: str =
     }
 
 
-def _ajouter_entree_owner_sans_lot(consolide: list[dict], owner: dict) -> None:
+def _ajouter_entree_owner_sans_lot(consolide: list[dict[str, Any]], owner: dict[str, Any]) -> None:
     """
     Ajoute une entrée pour un propriétaire sans lot.
-    
+
     Pour les propriétaires sans lot, les champs num_apt et type_apt sont vides,
     sauf pour les SCIC/AB HABITAT où ils sont "NA".
-    
+
     Args:
         consolide: Liste de consolidation à modifier en place.
         owner: Dictionnaire avec les clés "nom" et "code".
@@ -202,7 +211,7 @@ def _ajouter_entree_owner_sans_lot(consolide: list[dict], owner: dict) -> None:
     consolide.append(entry)
 
 
-def consolider_proprietaires_lots(elements) -> list[dict]:
+def consolider_proprietaires_lots(elements: list[Any]) -> list[dict[str, Any]]:
     """
     elements : liste ordonnée de (id, texte)
     retourne : liste ordonnée de dict { 'nom_proprietaire': nom, 'code_proprietaire': code, 'num_apt': num, 'type_apt': type }
@@ -251,7 +260,8 @@ def consolider_proprietaires_lots(elements) -> list[dict]:
 
     return consolide
 
-def extraire_info_lot(texte_lot: str):
+
+def extraire_info_lot(texte_lot: str) -> tuple[str | None, str | None]:
     """
     Extrait (num_lot, type_appt) depuis une chaîne de description de lot.
     - num_lot : chaîne sans zéros initiaux (ex: "59")
@@ -272,20 +282,21 @@ def extraire_info_lot(texte_lot: str):
         numero = str(int(numero)) if numero.isdigit() else numero
     return numero, typ
 
+
 def est_scic(nom_proprietaire: str) -> bool:
     """
     Vérifie si le propriétaire est une SCIC ou AB HABITAT.
-    
+
     Les SCIC et AB HABITAT sont des entités spéciales qui n'ont pas de lots
     attribués de manière standard. Leurs lots sont marqués comme "NA".
-    
+
     Args:
         nom_proprietaire: Nom du propriétaire à vérifier.
-    
+
     Returns:
         True si le nom contient "SCIC", "AB HABITAT" ou "AB-HABITAT"
         (insensible à la casse), False sinon.
-    
+
     Example:
         >>> est_scic("SCIC Habitat")
         True
@@ -297,25 +308,26 @@ def est_scic(nom_proprietaire: str) -> bool:
     u = nom_proprietaire.upper()
     return "SCIC" in u or "AB HABITAT" in u or "AB-HABITAT" in u
 
-def afficher_avec_rich(consolide: list[dict]) -> None:
+
+def afficher_avec_rich(consolide: list[dict[str, Any]]) -> None:
     """
     Affiche les données consolidées dans une table formatée en console.
-    
+
     Utilise la bibliothèque Rich pour afficher un tableau avec les colonnes:
     - Nom propriétaire
     - Code propriétaire
     - Numéro de lot
     - Type d'appartement
-    
+
     Les propriétaires SCIC/AB HABITAT ont leurs lots affichés comme "NA".
-    
+
     Args:
         consolide: Liste de dictionnaires avec les clés:
             - 'nom_proprietaire' ou 'proprietaire': str
             - 'code_proprietaire' ou 'code': str
             - 'num_apt': str (numéro de lot)
             - 'type_apt': str (type d'appartement, ex: "3p")
-    
+
     Returns:
         None (affiche directement dans la console).
     """

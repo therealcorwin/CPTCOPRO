@@ -13,11 +13,8 @@ import streamlit as st
 from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
-    preparer_df_pour_graphe,
-    is_privacy_enabled,
 )
-from cptcopro.utils.ui_components import render_header, apply_plotly_theme
-
+from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 DB_PATH = get_db_path()
 
@@ -103,25 +100,23 @@ derniers_debits = charges_df[charges_df["date"] == derniere_date].copy()
 
 # Enrichir avec les types d'appartements
 derniers_debits_typed = derniers_debits.merge(
-    copro_df[["code_proprietaire", "type_apt"]].rename(
-        columns={"code_proprietaire": "code"}
-    ),
+    copro_df[["code_proprietaire", "type_apt"]].rename(columns={"code_proprietaire": "code"}),
     on="code",
     how="left",
     suffixes=("", "_copro"),
 )
 derniers_debits_typed["type_apt"] = (
-    derniers_debits_typed["type_apt_copro"]
-    .fillna(derniers_debits_typed["type_apt"])
-    .fillna("NA")
+    derniers_debits_typed["type_apt_copro"].fillna(derniers_debits_typed["type_apt"]).fillna("NA")
 )
 
-tab_distrib, tab_risques, tab_recidive, tab_saison = st.tabs([
-    "📊 1. Distribution & Ratios",
-    "⚠️ 2. Détection Précoce (Risques)",
-    "🔁 3. Récidives & Durée",
-    "📅 4. Typologie & Saisonnalité",
-])
+tab_distrib, tab_risques, tab_recidive, tab_saison = st.tabs(
+    [
+        "📊 1. Distribution & Ratios",
+        "⚠️ 2. Détection Précoce (Risques)",
+        "🔁 3. Récidives & Durée",
+        "📅 4. Typologie & Saisonnalité",
+    ]
+)
 
 
 # ============================================================================
@@ -176,8 +171,7 @@ with tab_distrib:
         lambda r: r["credit"] / r["debit"] if r["debit"] > 0 else float("inf"), axis=1
     )
     ratios_valides = derniers_debits_ratio[
-        (derniers_debits_ratio["ratio"] != float("inf"))
-        & (derniers_debits_ratio["ratio"] >= 0)
+        (derniers_debits_ratio["ratio"] != float("inf")) & (derniers_debits_ratio["ratio"] >= 0)
     ]
 
     col_r1, col_r2 = st.columns(2, gap="large")
@@ -190,7 +184,9 @@ with tab_distrib:
             labels={"ratio": "Ratio", "count": "Effectif"},
             color_discrete_sequence=["#10B981"],
         )
-        fig_ratio.add_vline(x=1, line_dash="dash", line_color="#EF4444", annotation_text="Équilibre (1.0)")
+        fig_ratio.add_vline(
+            x=1, line_dash="dash", line_color="#EF4444", annotation_text="Équilibre (1.0)"
+        )
         fig_ratio = apply_plotly_theme(fig_ratio)
         st.plotly_chart(fig_ratio, width="stretch")
 
@@ -199,8 +195,12 @@ with tab_distrib:
         nb_deficit = len(ratios_valides[ratios_valides["ratio"] < 1])
         ratio_moyen = ratios_valides["ratio"].mean() if not ratios_valides.empty else 0.0
 
-        st.metric("Comptes à jour (Crédit ≥ Débit)", nb_equilibre, delta="Normal", delta_color="normal")
-        st.metric("Comptes en retard (Crédit < Débit)", nb_deficit, delta="Déficit", delta_color="inverse")
+        st.metric(
+            "Comptes à jour (Crédit ≥ Débit)", nb_equilibre, delta="Normal", delta_color="normal"
+        )
+        st.metric(
+            "Comptes en retard (Crédit < Débit)", nb_deficit, delta="Déficit", delta_color="inverse"
+        )
         st.metric("Ratio moyen de couverture", f"{ratio_moyen:.2f}")
 
 
@@ -209,7 +209,9 @@ with tab_distrib:
 # ============================================================================
 with tab_risques:
     st.subheader("Surveillance des comptes proches du seuil de rupture")
-    st.caption("Identifiez les copropriétaires dont le solde approche dangereusement du seuil d'alerte.")
+    st.caption(
+        "Identifiez les copropriétaires dont le solde approche dangereusement du seuil d'alerte."
+    )
 
     derniers_debits_risk = derniers_debits_typed.merge(
         config_df[["type_apt", "threshold"]],
@@ -239,7 +241,11 @@ with tab_risques:
 
     col_k1, col_k2 = st.columns(2, gap="medium")
     with col_k1:
-        st.metric("Comptes en zone de vigilance", len(a_risque), help="Entre le pourcentage sélectionné et 100% du seuil.")
+        st.metric(
+            "Comptes en zone de vigilance",
+            len(a_risque),
+            help="Entre le pourcentage sélectionné et 100% du seuil.",
+        )
     with col_k2:
         total_risque = a_risque["debit"].sum() if not a_risque.empty else 0.0
         st.metric("Montant total à risque", f"{total_risque:,.2f} €".replace(",", " "))
@@ -247,7 +253,9 @@ with tab_risques:
     st.space("small")
 
     if not a_risque.empty:
-        display_risk = a_risque[["proprietaire", "type_apt", "debit", "threshold", "pct_seuil"]].copy()
+        display_risk = a_risque[
+            ["proprietaire", "type_apt", "debit", "threshold", "pct_seuil"]
+        ].copy()
         display_risk["pct_seuil"] = display_risk["pct_seuil"].round(1)
 
         st.dataframe(
@@ -280,12 +288,18 @@ with tab_recidive:
         nb_recidivistes = len(alertes_df[alertes_df["occurence"] > 1])
         nb_total_alertes = len(alertes_df)
         taux_recidive = (nb_recidivistes / nb_total_alertes * 100) if nb_total_alertes > 0 else 0
-        duree_moyenne = alertes_df["duree_jours"].mean() if "duree_jours" in alertes_df.columns else 0
+        duree_moyenne = (
+            alertes_df["duree_jours"].mean() if "duree_jours" in alertes_df.columns else 0
+        )
         occ_moyenne = alertes_df["occurence"].mean()
 
         col_m1, col_m2, col_m3 = st.columns(3, gap="medium")
         with col_m1:
-            st.metric("Taux de récidive", f"{taux_recidive:.1f} %", help="Copropriétaires en alerte sur plusieurs relevés.")
+            st.metric(
+                "Taux de récidive",
+                f"{taux_recidive:.1f} %",
+                help="Copropriétaires en alerte sur plusieurs relevés.",
+            )
         with col_m2:
             st.metric("Durée moyenne en alerte", f"{duree_moyenne:.0f} jours")
         with col_m3:
@@ -349,16 +363,57 @@ with tab_saison:
         )
 
         fig_bar = go.Figure()
-        fig_bar.add_trace(go.Bar(name="Moyenne réelle", x=stats_par_type["type_apt"], y=stats_par_type["moyenne_debit"], marker_color="#0284C7"))
-        fig_bar.add_trace(go.Bar(name="Charge de référence", x=stats_par_type["type_apt"], y=stats_par_type["charge_ref"], marker_color="#F59E0B"))
-        fig_bar.add_trace(go.Scatter(name="Seuil d'alerte", x=stats_par_type["type_apt"], y=stats_par_type["threshold"], mode="markers+lines", marker=dict(size=9, color="#EF4444", symbol="diamond"), line=dict(dash="dash", color="#EF4444")))
-        fig_bar.update_layout(title="Moyenne constatée vs Seuils d'alerte (€)", barmode="group", xaxis_title="Type de lot", yaxis_title="Montant (€)")
+        fig_bar.add_trace(
+            go.Bar(
+                name="Moyenne réelle",
+                x=stats_par_type["type_apt"],
+                y=stats_par_type["moyenne_debit"],
+                marker_color="#0284C7",
+            )
+        )
+        fig_bar.add_trace(
+            go.Bar(
+                name="Charge de référence",
+                x=stats_par_type["type_apt"],
+                y=stats_par_type["charge_ref"],
+                marker_color="#F59E0B",
+            )
+        )
+        fig_bar.add_trace(
+            go.Scatter(
+                name="Seuil d'alerte",
+                x=stats_par_type["type_apt"],
+                y=stats_par_type["threshold"],
+                mode="markers+lines",
+                marker=dict(size=9, color="#EF4444", symbol="diamond"),
+                line=dict(dash="dash", color="#EF4444"),
+            )
+        )
+        fig_bar.update_layout(
+            title="Moyenne constatée vs Seuils d'alerte (€)",
+            barmode="group",
+            xaxis_title="Type de lot",
+            yaxis_title="Montant (€)",
+        )
         fig_bar = apply_plotly_theme(fig_bar)
         st.plotly_chart(fig_bar, width="stretch")
 
     with col_t2:
         st.markdown("#### Profil saisonnier moyen des débits")
-        mois_noms = {1: "Janvier", 2: "Février", 3: "Mars", 4: "Avril", 5: "Mai", 6: "Juin", 7: "Juillet", 8: "Août", 9: "Septembre", 10: "Octobre", 11: "Novembre", 12: "Décembre"}
+        mois_noms = {
+            1: "Janvier",
+            2: "Février",
+            3: "Mars",
+            4: "Avril",
+            5: "Mai",
+            6: "Juin",
+            7: "Juillet",
+            8: "Août",
+            9: "Septembre",
+            10: "Octobre",
+            11: "Novembre",
+            12: "Décembre",
+        }
         saisonnalite = charges_df.groupby("mois").agg(debit_moyen=("debit", "mean")).reset_index()
         saisonnalite["mois_nom"] = saisonnalite["mois"].map(mois_noms)
 

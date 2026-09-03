@@ -13,10 +13,8 @@ from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     preparer_df_pour_graphe,
-    is_privacy_enabled,
 )
-from cptcopro.utils.ui_components import render_header, apply_plotly_theme
-
+from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 DB_PATH = get_db_path()
 
@@ -76,7 +74,7 @@ def recup_suivi_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
         SELECT date_releve, nombre_alertes, total_debit,
                nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
                debit_2p, debit_3p, debit_4p, debit_5p, debit_na
-        FROM suivi_alertes 
+        FROM suivi_alertes
         ORDER BY date_releve DESC
     """
     try:
@@ -102,14 +100,22 @@ debits_df = recup_debits_proprietaires_alertes(DB_PATH, db_cache_key)
 date_releve = suivi_alerte["date_releve"].iat[0] if not suivi_alerte.empty else "N/A"
 date_precedent = suivi_alerte["date_releve"].iat[1] if len(suivi_alerte) >= 2 else None
 
-nombre_alerte = int(suivi_alerte["nombre_alertes"].iat[0]) if not suivi_alerte.empty else len(alertes_df)
-dernier_nombre = int(suivi_alerte["nombre_alertes"].iat[1]) if len(suivi_alerte) >= 2 else nombre_alerte
+nombre_alerte = (
+    int(suivi_alerte["nombre_alertes"].iat[0]) if not suivi_alerte.empty else len(alertes_df)
+)
+dernier_nombre = (
+    int(suivi_alerte["nombre_alertes"].iat[1]) if len(suivi_alerte) >= 2 else nombre_alerte
+)
 delta_nombre = nombre_alerte - dernier_nombre
 
-total_debit_alerte = float(suivi_alerte["total_debit"].iat[0]) if not suivi_alerte.empty else (
-    float(alertes_df["Debit"].sum()) if not alertes_df.empty else 0.0
+total_debit_alerte = (
+    float(suivi_alerte["total_debit"].iat[0])
+    if not suivi_alerte.empty
+    else (float(alertes_df["Debit"].sum()) if not alertes_df.empty else 0.0)
 )
-dernier_total = float(suivi_alerte["total_debit"].iat[1]) if len(suivi_alerte) >= 2 else total_debit_alerte
+dernier_total = (
+    float(suivi_alerte["total_debit"].iat[1]) if len(suivi_alerte) >= 2 else total_debit_alerte
+)
 delta_total = total_debit_alerte - dernier_total
 
 # ============================================================================
@@ -138,7 +144,9 @@ with kpi3:
     st.metric(
         "Montant total des impayés critiques",
         value=f"{total_debit_alerte:,.2f} €".replace(",", " "),
-        delta=f"{'+' if delta_total > 0 else ''}{delta_total:,.2f} €".replace(",", " ") if delta_total != 0 else None,
+        delta=f"{'+' if delta_total > 0 else ''}{delta_total:,.2f} €".replace(",", " ")
+        if delta_total != 0
+        else None,
         delta_color="inverse",
         help="Somme cumulée des débits de tous les copropriétaires en situation d'alerte.",
     )
@@ -149,7 +157,9 @@ st.divider()
 # CONTENU PRINCIPAL
 # ============================================================================
 if alertes_df.empty:
-    st.success("🎉 **Excellente nouvelle !** Aucun copropriétaire n'est actuellement en situation d'alerte de débit élevé.")
+    st.success(
+        "🎉 **Excellente nouvelle !** Aucun copropriétaire n'est actuellement en situation d'alerte de débit élevé."
+    )
 else:
     st.subheader(f"📋 Détail des {len(alertes_df)} compte(s) en alerte active")
 
@@ -174,7 +184,9 @@ else:
         column_config={
             "Proprietaire": st.column_config.TextColumn("Copropriétaire", width="large"),
             "Code": st.column_config.TextColumn("Code", width="small"),
-            "Debit": st.column_config.NumberColumn("Débit actuel (€)", format="%.2f €", width="medium"),
+            "Debit": st.column_config.NumberColumn(
+                "Débit actuel (€)", format="%.2f €", width="medium"
+            ),
             "TypeApt": st.column_config.TextColumn("Type Lot", width="small"),
             "Occurence": st.column_config.NumberColumn("Occurrences (relevés)", width="small"),
             "FirstDetection": st.column_config.TextColumn("1ère détection", width="small"),

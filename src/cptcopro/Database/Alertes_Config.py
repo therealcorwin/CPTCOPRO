@@ -7,7 +7,8 @@ Ce module gère :
 """
 
 import sqlite3
-from typing import Dict, List
+from typing import Any
+
 from loguru import logger
 
 from .constants import DEFAULT_ALERT_THRESHOLDS, DEFAULT_THRESHOLD_FALLBACK
@@ -32,7 +33,7 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
         # Récupérer les valeurs globales
         cur.execute(
             """
-            SELECT 
+            SELECT
                 MAX(date_origin) AS date_releve,
                 COUNT(*) AS nombre_alertes,
                 COALESCE(SUM(debit), 0) AS total_debit
@@ -49,7 +50,7 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
         # Récupérer les statistiques par type d'appartement
         cur.execute(
             """
-            SELECT 
+            SELECT
                 LOWER(COALESCE(NULLIF(type_alerte, ''), 'na')) AS type_apt,
                 COUNT(*) AS nb,
                 COALESCE(SUM(debit), 0) AS total
@@ -113,7 +114,7 @@ def sauvegarder_nombre_alertes(db_path: str) -> None:
     return
 
 
-def get_config_alertes(db_path: str) -> List[Dict]:
+def get_config_alertes(db_path: str) -> list[dict[str, Any]]:
     """
     Récupère la configuration des seuils d'alerte depuis la base de données.
 
@@ -218,9 +219,7 @@ def update_config_alerte(
         logger.error(err)
         return False
 
-    threshold, err = _valider_parametre_numerique(
-        threshold, "threshold", allow_zero=True
-    )
+    threshold, err = _valider_parametre_numerique(threshold, "threshold", allow_zero=True)
     if err:
         logger.error(err)
         return False
@@ -236,9 +235,7 @@ def update_config_alerte(
         )
         row = cur.fetchone()
         if not row:
-            logger.error(
-                f"Type d'appartement '{type_apt}' non trouvé dans config_alerte"
-            )
+            logger.error(f"Type d'appartement '{type_apt}' non trouvé dans config_alerte")
             return False
 
         current_charge = row[0]
@@ -254,9 +251,7 @@ def update_config_alerte(
             new_threshold = threshold
         elif charge_moyenne is not None or taux is not None:
             if new_charge is None or new_taux is None:
-                logger.error(
-                    "Impossible de recalculer threshold: charge_moyenne ou taux manquant"
-                )
+                logger.error("Impossible de recalculer threshold: charge_moyenne ou taux manquant")
                 return False
             if new_charge <= 0 or new_taux <= 0:
                 logger.error(
@@ -270,7 +265,7 @@ def update_config_alerte(
         # Mettre à jour
         cur.execute(
             """
-            UPDATE config_alerte 
+            UPDATE config_alerte
             SET charge_moyenne = ?, taux = ?, threshold = ?, last_update = CURRENT_DATE
             WHERE type_apt = ?
             """,
@@ -325,9 +320,7 @@ def get_threshold_for_type(db_path: str, type_apt: str) -> float:
         return DEFAULT_THRESHOLD_FALLBACK
 
     except sqlite3.Error as e:
-        logger.error(
-            f"Erreur SQLite lors de la récupération du seuil pour {type_apt} : {e}"
-        )
+        logger.error(f"Erreur SQLite lors de la récupération du seuil pour {type_apt} : {e}")
         return DEFAULT_THRESHOLD_FALLBACK
     finally:
         if conn:

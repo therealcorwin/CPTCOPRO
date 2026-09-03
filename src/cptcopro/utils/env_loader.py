@@ -6,11 +6,12 @@ Supporte l'exécution normale et les exécutables PyInstaller.
 import os
 import sys
 from pathlib import Path
+from typing import cast
+
 from dotenv import load_dotenv
 from loguru import logger
 
 from cptcopro.utils.paths import get_env_file_path as resolve_env_file_path
-
 
 REQUIRED_CORE_ENV_VARS = [
     "login_site_copro",
@@ -58,7 +59,7 @@ def get_env_file_path() -> Path:
     """
     env_path = resolve_env_file_path()
     if env_path is not None:
-        return env_path
+        return cast(Path, env_path)
     return get_app_base_path() / ".env"
 
 
@@ -73,12 +74,10 @@ def load_env_file() -> bool:
 
     if env_path.exists():
         load_dotenv(env_path)
-        logger.bind(type_log="ENV").info(
-            f"Fichier .env chargé depuis: {env_path}")
+        logger.bind(type_log="ENV").info(f"Fichier .env chargé depuis: {env_path}")
         return True
     else:
-        logger.bind(type_log="ENV").warning(
-            f"Fichier .env non trouvé à: {env_path}")
+        logger.bind(type_log="ENV").warning(f"Fichier .env non trouvé à: {env_path}")
         return False
 
 
@@ -129,8 +128,7 @@ def load_and_validate_env(required_vars: list[str] | None = None) -> dict[str, s
 
     # Vérifier l'existence du fichier
     if not env_path.exists():
-        var_examples = "\n".join(
-            f"  - {var}=VOTRE_VALEUR" for var in required_vars)
+        var_examples = "\n".join(f"  - {var}=VOTRE_VALEUR" for var in required_vars)
         error_msg = (
             f"Fichier .env introuvable!\n"
             f"Chemin attendu: {env_path}\n"
@@ -234,9 +232,7 @@ def get_pcloud_backup_config() -> dict[str, str | int]:
     try:
         location_id = int(env_vars["pcloud_location_id"])
     except ValueError as exc:
-        raise ValueError(
-            "La variable pcloud_location_id doit etre un entier."
-        ) from exc
+        raise ValueError("La variable pcloud_location_id doit etre un entier.") from exc
 
     return {
         "pcloud_location_id": location_id,

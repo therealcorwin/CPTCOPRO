@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-from cptcopro.Database import integrite_db, enregistrer_coproprietaires
+from cptcopro.Database import enregistrer_coproprietaires, integrite_db
 
 
 def read_codes(db_path: str):
@@ -25,7 +25,7 @@ def test_enregistrer_coproprietaires_accepts_dicts(tmp_path: Path):
     ]
 
     # Should not raise and should populate the table
-    res = enregistrer_coproprietaires(rows, db_path)
+    enregistrer_coproprietaires(rows, db_path)
     # implementation may return None; we just check DB state
     codes = read_codes(db_path)
     assert "A1" in codes and "B2" in codes

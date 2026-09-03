@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import streamlit as st
 
-from cptcopro.utils.paths import get_db_path
 from cptcopro.Database import (
-    TEMPLATE_PLACEHOLDERS,
     GENERATION_MODES,
-    list_relance_templates,
+    TEMPLATE_PLACEHOLDERS,
     create_relance_template,
-    update_relance_template,
     delete_relance_template,
     get_relance_config,
+    list_relance_templates,
+    update_relance_template,
 )
+from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.relance_mailer import render_relance_template
 from cptcopro.utils.ui_components import render_header
-
 
 DB_PATH = get_db_path()
 
@@ -37,20 +38,20 @@ _SAMPLE_DATA = {
 
 def _db_cache_key() -> int:
     try:
-        return DB_PATH.stat().st_mtime_ns
+        return int(DB_PATH.stat().st_mtime_ns)
     except OSError:
         return 0
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_templates(db_path: str, cache_key: int) -> list[dict]:
+def _load_templates(db_path: str, cache_key: int) -> list[dict[str, Any]]:
     del cache_key
-    return list_relance_templates(db_path)
+    return cast(list[dict[str, Any]], list_relance_templates(db_path))
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_config(db_path: str) -> dict:
-    return get_relance_config(db_path)
+def _load_config(db_path: str) -> dict[str, Any]:
+    return cast(dict[str, Any], get_relance_config(db_path))
 
 
 render_header(
@@ -66,7 +67,9 @@ with st.expander("ℹ️ Variables dynamiques disponibles", expanded=False):
     st.markdown("Vous pouvez insérer ces variables dans le sujet et le corps de vos messages :")
     chips = [f"`{{{p}}}`" for p in TEMPLATE_PLACEHOLDERS]
     st.markdown(" ".join(chips))
-    st.caption("Exemple : `{nom_proprietaire}`, `{debit_fmt}`, `{num_apt}`, `{date_origin}`, `{sender_name}`.")
+    st.caption(
+        "Exemple : `{nom_proprietaire}`, `{debit_fmt}`, `{num_apt}`, `{date_origin}`, `{sender_name}`."
+    )
 
 st.divider()
 
@@ -89,11 +92,7 @@ else:
     )
 
 is_new = selected_id == _NEW_TEMPLATE_KEY
-selected_template = (
-    {}
-    if is_new
-    else next(t for t in templates if t["template_id"] == selected_id)
-)
+selected_template = {} if is_new else next(t for t in templates if t["template_id"] == selected_id)
 
 col_form, col_prev = st.columns([1.2, 1], gap="large")
 
@@ -106,14 +105,17 @@ with col_form:
             "Mode de rédaction",
             options=list(GENERATION_MODES),
             format_func=lambda m: _MODE_LABELS.get(m, m),
-            index=list(GENERATION_MODES).index(selected_template.get("generation_mode") or "static"),
+            index=list(GENERATION_MODES).index(
+                selected_template.get("generation_mode") or "static"
+            ),
             horizontal=True,
             key="edit_template_mode",
         )
         subject_template = st.text_input(
             "Objet du message",
             value=selected_template.get(
-                "subject_template", "Relance charges copropriété - {nom_proprietaire} ({date_origin})"
+                "subject_template",
+                "Relance charges copropriété - {nom_proprietaire} ({date_origin})",
             ),
         )
         body_template = st.text_area(
@@ -133,7 +135,9 @@ with col_form:
         )
         tone_instruction = st.text_input(
             "Consigne de ton (utilisé par l'IA)",
-            value=str(selected_template.get("tone_instruction") or "courtois, professionnel et ferme"),
+            value=str(
+                selected_template.get("tone_instruction") or "courtois, professionnel et ferme"
+            ),
             help="Guide le style du modèle lors de la rédaction avec l'IA Mistral.",
         )
         is_default = st.checkbox(
@@ -144,10 +148,14 @@ with col_form:
         col_b1, col_b2 = st.columns(2, gap="medium")
         with col_b1:
             submitted = st.form_submit_button(
-                "✨ Créer le modèle" if is_new else "💾 Enregistrer", type="primary", use_container_width=True
+                "✨ Créer le modèle" if is_new else "💾 Enregistrer",
+                type="primary",
+                use_container_width=True,
             )
         with col_b2:
-            deleted = st.form_submit_button("🗑️ Supprimer", type="secondary", disabled=is_new, use_container_width=True)
+            deleted = st.form_submit_button(
+                "🗑️ Supprimer", type="secondary", disabled=is_new, use_container_width=True
+            )
 
         if submitted:
             try:
@@ -192,7 +200,9 @@ with col_prev:
     st.markdown("### 👁️ Aperçu du rendu")
     mode_actuel = selected_template.get("generation_mode") or generation_mode
     if mode_actuel == "llm":
-        st.info("🤖 **Mode Assistant IA** : Le texte ci-dessous servira de guide thématique à Mistral pour générer un message fluide et personnalisé.")
+        st.info(
+            "🤖 **Mode Assistant IA** : Le texte ci-dessous servira de guide thématique à Mistral pour générer un message fluide et personnalisé."
+        )
     else:
         st.caption("Exemple avec un copropriétaire fictif :")
 

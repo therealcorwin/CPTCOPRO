@@ -10,12 +10,13 @@ Ce module centralise :
 from __future__ import annotations
 
 import html
-from typing import Any, Optional, Set
-import streamlit as st
+
 import plotly.graph_objects as go
+import streamlit as st
+
 from cptcopro.utils.privacy import is_privacy_enabled
 
-_ALLOWED_BADGE_VARIANTS: Set[str] = {"info", "warning", "success", "danger"}
+_ALLOWED_BADGE_VARIANTS: set[str] = {"info", "warning", "success", "danger"}
 
 
 def inject_custom_css() -> None:
@@ -26,7 +27,7 @@ def inject_custom_css() -> None:
     .stApp {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
-    
+
     /* Cartes métriques modernes avec bordure douce */
     [data-testid="stMetric"] {
         background-color: #1E293B;
@@ -35,13 +36,13 @@ def inject_custom_css() -> None:
         border: 1px solid #334155;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
     }
-    
+
     [data-testid="stMetricLabel"] {
         font-size: 0.875rem !important;
         font-weight: 500 !important;
         color: #94A3B8 !important;
     }
-    
+
     [data-testid="stMetricValue"] {
         font-size: 1.5rem !important;
         font-weight: 700 !important;
@@ -104,8 +105,8 @@ def inject_custom_css() -> None:
 
 def render_header(
     title: str,
-    subtitle: Optional[str] = None,
-    badge_text: Optional[str] = None,
+    subtitle: str | None = None,
+    badge_text: str | None = None,
     badge_variant: str = "info",
 ) -> None:
     """Affiche un en-tête de page standardisé, fluide et sécurisé contre les injections XSS."""
@@ -117,7 +118,11 @@ def render_header(
     with col_b:
         if badge_text:
             # Sécurisation : validation allowlist + échappement HTML strict
-            variant = badge_variant.lower() if badge_variant.lower() in _ALLOWED_BADGE_VARIANTS else "info"
+            variant = (
+                badge_variant.lower()
+                if badge_variant.lower() in _ALLOWED_BADGE_VARIANTS
+                else "info"
+            )
             safe_text = html.escape(str(badge_text), quote=True)
             st.markdown(
                 f'<div style="text-align: right; padding-top: 1rem;"><span class="badge-pill badge-{variant}">{safe_text}</span></div>',

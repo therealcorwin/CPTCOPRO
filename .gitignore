@@ -235,3 +235,8 @@ CPTCOPRO.code-workspace
 src/cptcopro/BDD2/test.sqlite*
 graphify-out
 
+.agents/rules/cptcopro.md
+.agents/rules/qualite_code.md
+scripts/audit.ps1
+scripts/audit.py
+reports/audit/*

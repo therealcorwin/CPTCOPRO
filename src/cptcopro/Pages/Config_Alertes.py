@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from cptcopro.utils.paths import get_db_path
 from cptcopro.Database import (
+    DEFAULT_THRESHOLD_FALLBACK,
     get_config_alertes,
     update_config_alerte,
-    DEFAULT_ALERT_THRESHOLDS,
-    DEFAULT_THRESHOLD_FALLBACK,
 )
+from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.ui_components import render_header
-
 
 DB_PATH = get_db_path()
 
@@ -79,24 +76,30 @@ with col_t1:
         hide_index=True,
         column_config={
             "Type Apt": st.column_config.TextColumn("Type Lot", width="small"),
-            "Charge Moyenne (€)": st.column_config.NumberColumn("Charge Moyenne (€)", format="%.2f €", width="medium"),
+            "Charge Moyenne (€)": st.column_config.NumberColumn(
+                "Charge Moyenne (€)", format="%.2f €", width="medium"
+            ),
             "Taux": st.column_config.NumberColumn("Coefficient", format="%.2f", width="small"),
-            "Seuil Alerte (€)": st.column_config.NumberColumn("Seuil d'Alerte (€)", format="%.2f €", width="medium"),
-            "Dernière MAJ": st.column_config.DateColumn("Dernière MAJ", format="DD/MM/YYYY", width="medium"),
+            "Seuil Alerte (€)": st.column_config.NumberColumn(
+                "Seuil d'Alerte (€)", format="%.2f €", width="medium"
+            ),
+            "Dernière MAJ": st.column_config.DateColumn(
+                "Dernière MAJ", format="DD/MM/YYYY", width="medium"
+            ),
         },
     )
 
     if not default_row.empty:
-        seuil_def = default_row['Seuil Alerte (€)'].values[0]
+        seuil_def = default_row["Seuil Alerte (€)"].values[0]
         st.info(f"🔄 **Seuil par défaut** (pour lots non classés) : **{seuil_def:.2f} €**")
 
 with col_t2:
     st.subheader("📐 Formule de calcul")
     st.markdown("""
     Une alerte est déclenchée pour un copropriétaire si son débit dépasse le seuil défini :
-    
+
     $$\\text{Seuil} = \\text{Charge Moyenne} \\times \\text{Taux}$$
-    
+
     - **Taux 1.33** = Alerte dès 33% au-dessus de la moyenne
     - **Taux 1.50** = Alerte dès 50% au-dessus de la moyenne
     """)
@@ -117,7 +120,9 @@ with col_sel_type:
     type_selectionne = st.selectbox(
         "Sélectionnez la typologie de lot à ajuster :",
         options=types_disponibles,
-        format_func=lambda x: f"Type {x.upper()}" if x != "default" else "Valeur par défaut (Générique)",
+        format_func=lambda x: (
+            f"Type {x.upper()}" if x != "default" else "Valeur par défaut (Générique)"
+        ),
         key="config_alertes_type_selectionne",
     )
 
@@ -172,11 +177,15 @@ with st.form("form_modifier_seuil"):
             key="config_alertes_threshold",
         )
 
-    st.caption(f"📐 **Simulation** : {new_charge:,.2f} € × {new_taux:.2f} = **{calculated_threshold:,.2f} €**")
+    st.caption(
+        f"📐 **Simulation** : {new_charge:,.2f} € × {new_taux:.2f} = **{calculated_threshold:,.2f} €**"
+    )
 
     col_sub, _ = st.columns([1.5, 3])
     with col_sub:
-        submitted = st.form_submit_button("💾 Enregistrer la modification", type="primary", use_container_width=True)
+        submitted = st.form_submit_button(
+            "💾 Enregistrer la modification", type="primary", use_container_width=True
+        )
 
     if submitted:
         success = update_config_alerte(

@@ -8,17 +8,17 @@ from pathlib import Path
 from unittest.mock import patch
 
 from cptcopro.utils.paths import (
-    is_pyinstaller_bundle,
     get_app_dir,
+    get_backup_dir,
     get_bundle_dir,
-    get_project_root_dir,
     get_data_dir,
     get_db_path,
-    get_log_path,
-    get_backup_dir,
     get_env_file_path,
+    get_log_path,
+    get_project_root_dir,
     get_streamlit_config_dir,
     init_env,
+    is_pyinstaller_bundle,
 )
 
 
@@ -198,9 +198,7 @@ class TestGetEnvFilePath:
         # Mock pour éviter de chercher dans les vrais répertoires
         with patch("cptcopro.utils.paths.get_project_root_dir", return_value=tmp_path / "root"):
             with patch("cptcopro.utils.paths.get_app_dir", return_value=tmp_path / "app"):
-                with patch(
-                    "cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"
-                ):
+                with patch("cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"):
                     result = get_env_file_path()
                     assert result is None
 
@@ -211,9 +209,7 @@ class TestGetEnvFilePath:
 
         with patch("cptcopro.utils.paths.get_app_dir", return_value=tmp_path):
             with patch("cptcopro.utils.paths.get_project_root_dir", return_value=tmp_path / "root"):
-                with patch(
-                    "cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"
-                ):
+                with patch("cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"):
                     result = get_env_file_path()
                     assert result == env_file
 
@@ -226,9 +222,7 @@ class TestGetEnvFilePath:
 
         with patch("cptcopro.utils.paths.get_project_root_dir", return_value=root_dir):
             with patch("cptcopro.utils.paths.get_app_dir", return_value=tmp_path / "app"):
-                with patch(
-                    "cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"
-                ):
+                with patch("cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"):
                     result = get_env_file_path()
                     assert result == env_file
 
@@ -239,9 +233,7 @@ class TestGetStreamlitConfigDir:
     def test_returns_none_if_no_config(self, tmp_path):
         """Retourne None si aucun .streamlit n'est trouvé."""
         with patch("cptcopro.utils.paths.get_app_dir", return_value=tmp_path / "app"):
-            with patch(
-                "cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"
-            ):
+            with patch("cptcopro.utils.paths.get_bundle_dir", return_value=tmp_path / "bundle"):
                 result = get_streamlit_config_dir()
                 assert result is None
 

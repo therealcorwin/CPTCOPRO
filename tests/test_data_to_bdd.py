@@ -3,14 +3,16 @@ from pathlib import Path
 
 import pytest
 
-from cptcopro.Database import integrite_db, enregistrer_coproprietaires
+from cptcopro.Database import enregistrer_coproprietaires, integrite_db
 from cptcopro.Database.Coproprietaires_To_BDD import CollecteCoproprietairesInvalideError
 
 
 def read_all_coproprietaires(db_path: str):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
-    cur.execute("SELECT nom_proprietaire, code_proprietaire, num_apt, type_apt FROM coproprietaires ORDER BY code_proprietaire")
+    cur.execute(
+        "SELECT nom_proprietaire, code_proprietaire, num_apt, type_apt FROM coproprietaires ORDER BY code_proprietaire"
+    )
     rows = cur.fetchall()
     conn.close()
     return rows
@@ -27,8 +29,18 @@ def test_enregistrer_coproprietaires_happy_path(tmp_path: Path):
     # enregistrer_coproprietaires accepte maintenant des tuples (nom, code, num_apt, type_apt)
     # enregistrer_coproprietaires accepte des dicts {proprietaire, code, num_apt, type_apt}
     rows = [
-        {"proprietaire": "Alice Dupont", "code": "A001", "num_apt": "101", "type_apt": "Appartement"},
-        {"proprietaire": "Bob Martin", "code": "B002", "num_apt": "102", "type_apt": "Local commercial"},
+        {
+            "proprietaire": "Alice Dupont",
+            "code": "A001",
+            "num_apt": "101",
+            "type_apt": "Appartement",
+        },
+        {
+            "proprietaire": "Bob Martin",
+            "code": "B002",
+            "num_apt": "102",
+            "type_apt": "Local commercial",
+        },
     ]
 
     inserted = enregistrer_coproprietaires(rows, db_path)
@@ -71,7 +83,9 @@ def test_enregistrer_coproprietaires_without_integrite_db_raises(tmp_path: Path)
     # Do NOT call integrite_db(db_path) - table won't exist
     with pytest.raises(sqlite3.OperationalError):
         # Should raise because table coproprietaires does not exist
-        enregistrer_coproprietaires([{"proprietaire": "X", "code": "X001", "num_apt": "1", "type_apt": "Apt"}], db_path)
+        enregistrer_coproprietaires(
+            [{"proprietaire": "X", "code": "X001", "num_apt": "1", "type_apt": "Apt"}], db_path
+        )
 
 
 def test_enregistrer_coproprietaires_refuse_lot_invalide_and_preserve_existing_data(tmp_path: Path):

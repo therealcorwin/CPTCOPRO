@@ -3,31 +3,35 @@
 from __future__ import annotations
 
 import io
+from contextlib import suppress
+from typing import Any, cast
+
 import pandas as pd
 import streamlit as st
 
 # Charger le .env
 try:
     from cptcopro.utils.paths import init_env
+
     init_env()
 except Exception:
-    try:
+    with suppress(Exception):
         from dotenv import load_dotenv
+
         from cptcopro.utils.paths import get_env_file_path
+
         env_path = get_env_file_path()
         if env_path and env_path.exists():
             load_dotenv(env_path)
-    except Exception:
-        pass
 
-from cptcopro.utils.paths import get_db_path
 from cptcopro.Database import (
     get_relance_config,
     get_relance_drafts,
+    get_relances_tracking_summary,
     mark_relance_draft_status,
     save_relance_draft,
-    get_relances_tracking_summary,
 )
+from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.relance_mailer import (
     build_email_message,
     save_draft_to_imap,
@@ -38,21 +42,21 @@ DB_PATH = get_db_path()
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_all_drafts(db_path: str) -> list[dict]:
+def _load_all_drafts(db_path: str) -> list[dict[str, Any]]:
     """Charge tous les brouillons depuis la base."""
-    return get_relance_drafts(db_path, limit=1000)
+    return cast(list[dict[str, Any]], get_relance_drafts(db_path, limit=1000))
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_tracking_summary(db_path: str) -> list[dict]:
+def _load_tracking_summary(db_path: str) -> list[dict[str, Any]]:
     """Charge la synthèse de suivi consolidée."""
-    return get_relances_tracking_summary(db_path)
+    return cast(list[dict[str, Any]], get_relances_tracking_summary(db_path))
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_config(db_path: str) -> dict:
+def _load_config(db_path: str) -> dict[str, Any]:
     """Charge la configuration de relance."""
-    return get_relance_config(db_path)
+    return cast(dict[str, Any], get_relance_config(db_path))
 
 
 render_header(
@@ -63,11 +67,13 @@ render_header(
 db_path_str = str(DB_PATH)
 cfg = _load_config(db_path_str)
 
-tab_drafts, tab_tracking, tab_history = st.tabs([
-    "📬 Brouillons & Actions en Masse",
-    "📊 Tableau de Bord & Suivi",
-    "📜 Journal Chronologique des Échanges",
-])
+tab_drafts, tab_tracking, tab_history = st.tabs(
+    [
+        "📬 Brouillons & Actions en Masse",
+        "📊 Tableau de Bord & Suivi",
+        "📜 Journal Chronologique des Échanges",
+    ]
+)
 
 
 # ============================================================================
@@ -77,7 +83,9 @@ with tab_drafts:
     all_drafts = _load_all_drafts(db_path_str)
 
     if not all_drafts:
-        st.info("ℹ️ Aucun brouillon trouvé en base de données. Vous pouvez en générer depuis la page **Génération des relances**.")
+        st.info(
+            "ℹ️ Aucun brouillon trouvé en base de données. Vous pouvez en générer depuis la page **Génération des relances**."
+        )
     else:
         df_drafts = pd.DataFrame(all_drafts)
         if "selected" not in df_drafts.columns:
@@ -86,7 +94,7 @@ with tab_drafts:
         # --- Filtres ---
         col_f1, col_f2 = st.columns([1, 2], gap="medium")
         with col_f1:
-            status_options = ["Tous"] + sorted(df_drafts["status"].dropna().unique().tolist())
+            status_options = ["Tous", *sorted(df_drafts["status"].dropna().unique().tolist())]
             selected_status = st.selectbox(
                 "Filtrer par statut",
                 options=status_options,
@@ -94,7 +102,9 @@ with tab_drafts:
                 key="draft_status_filter",
             )
         with col_f2:
-            name_filter = st.text_input("Filtrer par nom ou code copropriétaire", key="draft_name_filter")
+            name_filter = st.text_input(
+                "Filtrer par nom ou code copropriétaire", key="draft_name_filter"
+            )
 
         filtered_df = df_drafts.copy()
         if selected_status != "Tous":
@@ -185,15 +195,21 @@ with tab_drafts:
         col_act1, col_act2, col_act3 = st.columns([2, 1.5, 1], gap="medium")
 
         with col_act1:
-            if st.button("📤 Déposer la sélection dans Hotmail (IMAP)", type="primary", use_container_width=True):
+            if st.button(
+                "📤 Déposer la sélection dans Hotmail (IMAP)",
+                type="primary",
+                use_container_width=True,
+            ):
                 nb_sent = 0
                 nb_error = 0
-                selected_rows = edited_df[edited_df["S"] == True]
+                selected_rows = edited_df[edited_df["S"]]
 
                 if selected_rows.empty:
                     st.warning("Aucun brouillon coché dans le tableau.")
                 else:
-                    with st.spinner(f"Dépôt de {len(selected_rows)} message(s) sur le serveur IMAP..."):
+                    with st.spinner(
+                        f"Dépôt de {len(selected_rows)} message(s) sur le serveur IMAP..."
+                    ):
                         for _, row in selected_rows.iterrows():
                             draft_id = int(row["ID"])
                             matching = filtered_df[filtered_df["draft_id"] == draft_id]
@@ -238,13 +254,15 @@ with tab_drafts:
 
         with col_act2:
             if st.button("🗑️ Supprimer les cochés", type="secondary", use_container_width=True):
-                selected_rows = edited_df[edited_df["S"] == True]
+                selected_rows = edited_df[edited_df["S"]]
                 if selected_rows.empty:
                     st.warning("Aucun brouillon coché pour suppression.")
                 else:
                     nb_deleted = 0
                     for _, row in selected_rows.iterrows():
-                        mark_relance_draft_status(db_path_str, draft_id=int(row["ID"]), status="deleted")
+                        mark_relance_draft_status(
+                            db_path_str, draft_id=int(row["ID"]), status="deleted"
+                        )
                         nb_deleted += 1
                     _load_all_drafts.clear()
                     _load_tracking_summary.clear()
@@ -261,7 +279,9 @@ with tab_drafts:
         st.divider()
         st.subheader("🔍 Inspection & Édition détaillée d'un brouillon")
         draft_names = filtered_df.apply(
-            lambda r: f"#{r['draft_id']} — {r['nom_proprietaire']} ({r.get('debit', 0.0):.2f} €) : {r.get('subject', '')[:45]}...",
+            lambda r: (
+                f"#{r['draft_id']} — {r['nom_proprietaire']} ({r.get('debit', 0.0):.2f} €) : {r.get('subject', '')[:45]}..."
+            ),
             axis=1,
         ).tolist()
 
@@ -277,18 +297,26 @@ with tab_drafts:
             with st.form(key=f"individual_edit_form_{selected_draft['draft_id']}"):
                 col_d1, col_d2 = st.columns(2)
                 with col_d1:
-                    st.markdown(f"**Copropriétaire :** {selected_draft['nom_proprietaire']} (`{selected_draft['code_proprietaire']}`)")
+                    st.markdown(
+                        f"**Copropriétaire :** {selected_draft['nom_proprietaire']} (`{selected_draft['code_proprietaire']}`)"
+                    )
                     st.markdown(f"**Destinataire :** `{selected_draft['email_to']}`")
                 with col_d2:
                     st.markdown(f"**Débit réclamé :** `{selected_draft['debit']:.2f} €`")
                     st.markdown(f"**Statut actuel :** `{selected_draft['status']}`")
 
-                new_subject = st.text_input("Objet / Sujet", value=selected_draft.get("subject", ""))
-                new_body = st.text_area("Corps du message", value=selected_draft.get("body", ""), height=220)
+                new_subject = st.text_input(
+                    "Objet / Sujet", value=selected_draft.get("subject", "")
+                )
+                new_body = st.text_area(
+                    "Corps du message", value=selected_draft.get("body", ""), height=220
+                )
 
                 col_b1, col_b2, col_b3 = st.columns([1.5, 1.5, 1], gap="medium")
                 with col_b1:
-                    if st.form_submit_button("💾 Sauvegarder modifications", type="primary", use_container_width=True):
+                    if st.form_submit_button(
+                        "💾 Sauvegarder modifications", type="primary", use_container_width=True
+                    ):
                         save_relance_draft(
                             db_path_str,
                             code_proprietaire=selected_draft["code_proprietaire"],
@@ -309,7 +337,9 @@ with tab_drafts:
                         st.rerun()
 
                 with col_b2:
-                    if st.form_submit_button("📤 Déposer sur Hotmail (IMAP)", use_container_width=True):
+                    if st.form_submit_button(
+                        "📤 Déposer sur Hotmail (IMAP)", use_container_width=True
+                    ):
                         try:
                             msg = build_email_message(
                                 sender_email=str(cfg.get("sender_email") or ""),
@@ -341,7 +371,9 @@ with tab_drafts:
 
                 with col_b3:
                     if st.form_submit_button("🗑️ Supprimer", use_container_width=True):
-                        mark_relance_draft_status(db_path_str, draft_id=selected_draft["draft_id"], status="deleted")
+                        mark_relance_draft_status(
+                            db_path_str, draft_id=selected_draft["draft_id"], status="deleted"
+                        )
                         st.toast("Brouillon supprimé", icon="🗑️")
                         _load_all_drafts.clear()
                         _load_tracking_summary.clear()
@@ -353,7 +385,9 @@ with tab_drafts:
 # ============================================================================
 with tab_tracking:
     st.subheader("Synthèse chronologique du recouvrement")
-    st.caption("Visualisez les dates clés : premier envoi, dernier envoi, volume de relances et statut d'apurement.")
+    st.caption(
+        "Visualisez les dates clés : premier envoi, dernier envoi, volume de relances et statut d'apurement."
+    )
 
     tracking_data = _load_tracking_summary(db_path_str)
 
@@ -366,7 +400,9 @@ with tab_tracking:
         total_copros = len(df_track)
         copros_relances = len(df_track[df_track["nb_relances_envoyees"] > 0])
         total_relances_envoyees = int(df_track["nb_relances_envoyees"].sum())
-        total_debit_sous_relance = float(df_track[df_track["nb_relances_envoyees"] > 0]["debit_actuel"].sum())
+        total_debit_sous_relance = float(
+            df_track[df_track["nb_relances_envoyees"] > 0]["debit_actuel"].sum()
+        )
 
         kpi1, kpi2, kpi3, kpi4 = st.columns(4, gap="medium")
         with kpi1:
@@ -383,19 +419,30 @@ with tab_tracking:
         # Filtres
         col_t1, col_t2 = st.columns([2, 2], gap="medium")
         with col_t1:
-            track_search = st.text_input("Rechercher un copropriétaire (Nom ou Code)", key="track_search")
+            track_search = st.text_input(
+                "Rechercher un copropriétaire (Nom ou Code)", key="track_search"
+            )
         with col_t2:
             statut_filter = st.selectbox(
                 "Filtrer par historique de relance",
-                options=["Tous", "Déjà relancés (au moins 1 fois)", "Jamais relancés", "Relancés multiples (>= 2 fois)"],
+                options=[
+                    "Tous",
+                    "Déjà relancés (au moins 1 fois)",
+                    "Jamais relancés",
+                    "Relancés multiples (>= 2 fois)",
+                ],
                 key="track_status_filter",
             )
 
         df_track_filtered = df_track.copy()
         if track_search:
             df_track_filtered = df_track_filtered[
-                df_track_filtered["nom_proprietaire"].str.contains(track_search, case=False, na=False)
-                | df_track_filtered["code_proprietaire"].str.contains(track_search, case=False, na=False)
+                df_track_filtered["nom_proprietaire"].str.contains(
+                    track_search, case=False, na=False
+                )
+                | df_track_filtered["code_proprietaire"].str.contains(
+                    track_search, case=False, na=False
+                )
             ]
 
         if statut_filter == "Déjà relancés (au moins 1 fois)":
@@ -437,18 +484,21 @@ with tab_tracking:
         ]
 
         df_track_display = df_track_filtered[display_track_cols].copy()
-        df_track_display.rename(columns={
-            "code_proprietaire": "Code",
-            "nom_proprietaire": "Nom",
-            "num_apt": "Lot",
-            "type_apt": "Type",
-            "debit_actuel": "Débit actuel",
-            "nb_relances_envoyees": "Nb relances",
-            "first_relance_date": "1er envoi",
-            "last_relance_date": "Dernier envoi",
-            "jours_depuis_derniere_relance": "Jours écoulés",
-            "dernier_sujet": "Dernier objet",
-        }, inplace=True)
+        df_track_display.rename(
+            columns={
+                "code_proprietaire": "Code",
+                "nom_proprietaire": "Nom",
+                "num_apt": "Lot",
+                "type_apt": "Type",
+                "debit_actuel": "Débit actuel",
+                "nb_relances_envoyees": "Nb relances",
+                "first_relance_date": "1er envoi",
+                "last_relance_date": "Dernier envoi",
+                "jours_depuis_derniere_relance": "Jours écoulés",
+                "dernier_sujet": "Dernier objet",
+            },
+            inplace=True,
+        )
 
         st.dataframe(
             df_track_display,
@@ -515,7 +565,11 @@ with tab_history:
 
         for _, row in df_hist.iterrows():
             sent_label = row.get("sent_at") or row.get("created_at")
-            status_icon = "✓ (Hotmail)" if row["status"] in ("draft_imap", "sent") else ("⚠️ (Erreur)" if row["status"] == "error" else "📝 (Brouillon)")
+            status_icon = (
+                "✓ (Hotmail)"
+                if row["status"] in ("draft_imap", "sent")
+                else ("⚠️ (Erreur)" if row["status"] == "error" else "📝 (Brouillon)")
+            )
             expander_title = f"{status_icon} [{sent_label}] {row['nom_proprietaire']} ({row.get('debit', 0):.2f} €) : {row.get('subject', '')}"
 
             with st.expander(expander_title, expanded=False):
@@ -525,12 +579,20 @@ with tab_history:
                     st.write(f"**Code copro :** `{row.get('code_proprietaire', '')}`")
                 with col_i2:
                     st.write(f"**Statut :** `{row.get('status', '')}`")
-                    st.write(f"**IA / Provider :** `{row.get('llm_provider', '')} ({row.get('llm_model', '')})`")
+                    st.write(
+                        f"**IA / Provider :** `{row.get('llm_provider', '')} ({row.get('llm_model', '')})`"
+                    )
                 with col_i3:
                     st.write(f"**Date création :** `{row.get('created_at', '')}`")
                     st.write(f"**Date envoi IMAP :** `{row.get('sent_at', 'Non envoyé')}`")
 
                 st.markdown("**Sujet :** " + str(row.get("subject", "")))
-                st.text_area("Contenu de l'email", value=str(row.get("body", "")), height=160, disabled=True, key=f"hist_body_{row['draft_id']}")
+                st.text_area(
+                    "Contenu de l'email",
+                    value=str(row.get("body", "")),
+                    height=160,
+                    disabled=True,
+                    key=f"hist_body_{row['draft_id']}",
+                )
                 if row.get("error_message"):
                     st.error(f"Détail erreur : {row['error_message']}")

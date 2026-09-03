@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
-import sqlite3
 import datetime as dt
+import sqlite3
 from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-import loguru
 
 from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     preparer_df_pour_graphe,
 )
-from cptcopro.utils.ui_components import render_header, apply_plotly_theme
-
+from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 DB_PATH = get_db_path()
 
@@ -44,7 +42,9 @@ def load_data(db_path: Path, db_cache_key: int) -> pd.DataFrame:
     return df
 
 
-def _normalize_date_range(date_val, min_d, max_d) -> tuple[dt.date, dt.date]:
+def _normalize_date_range(
+    date_val: object, min_d: dt.date, max_d: dt.date
+) -> tuple[dt.date, dt.date]:
     if isinstance(date_val, (tuple, list)):
         if len(date_val) >= 2:
             return date_val[0], date_val[1]
@@ -124,9 +124,7 @@ else:
     with st.expander("📋 Données filtrées associées au graphique"):
         st.dataframe(
             appliquer_confidentialite(
-                filtered_df.sort_values(
-                    by=["date", "proprietaire"], ascending=[False, True]
-                )
+                filtered_df.sort_values(by=["date", "proprietaire"], ascending=[False, True])
             ),
             width="stretch",
             hide_index=True,

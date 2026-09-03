@@ -1,6 +1,7 @@
-from selectolax.parser import HTMLParser
 import os
+
 import pytest
+from selectolax.parser import HTMLParser
 
 from cptcopro.Traitement import Charge_Copro as tp
 
@@ -8,7 +9,7 @@ from cptcopro.Traitement import Charge_Copro as tp
 def load_fixture(name: str) -> str:
     base = os.path.join(os.path.dirname(__file__), "fixtures")
     path = os.path.normpath(os.path.join(base, name))
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 

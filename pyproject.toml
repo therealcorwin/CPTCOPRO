@@ -21,6 +21,7 @@ dependencies = [
     "msal (>=1.37.0,<2.0.0)",
     "dotenv (>=0.9.9,<0.10.0)",
     "graphifyy (>=0.9.48,<0.10.0)",
+    "openai (>=3.6.0,<4.0.0)",
 ]
 
 
@@ -31,5 +32,54 @@ build-backend = "poetry.core.masonry.api"
 [dependency-groups]
 dev = [
     "pytest (>=9.1.1,<10.0.0)",
-    "pytest-cov (>=7.1.0,<8.0.0)"
+    "pytest-cov (>=7.1.0,<8.0.0)",
+    "ruff (>=0.16.5,<0.17.0)",
+    "mypy (>=2.3.1,<3.0.0)",
+    "bandit (>=1.9.4,<2.0.0)",
+    "pip-audit (>=2.10.1,<3.0.0)",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "graphify-out", "dist", "build", "tests/fixtures", "__pycache__"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "S", "C90", "ANN", "RUF"]
+ignore = ["S101", "E501", "N999", "RUF001", "N813"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN", "S", "N813"]
+"src/cptcopro/Parsing/**" = ["C901"]
+"src/cptcopro/Parsing/constants.py" = ["S105"]
+"src/cptcopro/Database/Backup_DB_Pcloud.py" = ["S105", "C901"]
+"src/cptcopro/Database/Creation_BDD.py" = ["C901"]
+"src/cptcopro/Database/Coproprietaires_To_BDD.py" = ["C901"]
+"src/cptcopro/Database/Relance_Config.py" = ["S608"]
+"src/cptcopro/Database/Relance_Templates.py" = ["S608", "C901"]
+"src/cptcopro/utils/streamlit_launcher.py" = ["S603", "S607", "C901"]
+"src/cptcopro/utils/browser_launcher.py" = ["S603", "S607"]
+"src/cptcopro/utils/privacy.py" = ["ANN401"]
+"src/cptcopro/utils/relance_mailer.py" = ["S310", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+exclude = ["graphify-out", "tests/fixtures"]
+
+[[tool.mypy.overrides]]
+module = ["numpy.*", "pandas.*", "plotly.*", "streamlit.*", "streamlit_extras.*", "selectolax.*", "playwright.*", "msal.*", "pcloud.*", "graphify.*", "openai.*", "loguru.*"]
+ignore_errors = true
+
+[tool.bandit]
+exclude_dirs = ["tests", "graphify-out", ".venv"]
+skips = ["B101", "B105", "B404", "B603", "B607"]
+

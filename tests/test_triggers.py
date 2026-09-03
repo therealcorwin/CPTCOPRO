@@ -265,7 +265,9 @@ def test_older_insert_does_not_clear_newer_alert(tmp_path):
             ("C600",),
         )
         row = cur.fetchone()
-        assert row is not None, "L'alerte ne doit pas disparaître si la ligne insérée est plus ancienne"
+        assert row is not None, (
+            "L'alerte ne doit pas disparaître si la ligne insérée est plus ancienne"
+        )
         assert row[0] == id_latest
         assert row[1] == 3000.0
     finally:

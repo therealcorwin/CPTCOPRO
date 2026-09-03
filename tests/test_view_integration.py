@@ -1,5 +1,6 @@
 import sqlite3
 from pathlib import Path
+
 from cptcopro.Database import integrite_db
 
 
@@ -26,7 +27,9 @@ def test_vw_charge_coproprietaires_exists_and_returns_columns(tmp_path: Path):
     conn.commit()
 
     # Query the view
-    cur.execute("SELECT code_proprietaire, nom_proprietaire, debit, credit, date, num_apt, type_apt FROM vw_charge_coproprietaires")
+    cur.execute(
+        "SELECT code_proprietaire, nom_proprietaire, debit, credit, date, num_apt, type_apt FROM vw_charge_coproprietaires"
+    )
     rows = cur.fetchall()
     conn.close()
 
