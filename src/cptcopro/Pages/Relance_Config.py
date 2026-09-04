@@ -52,7 +52,12 @@ except ImportError:
         "tone_instruction": "courtois, professionnel et ferme",
     }
 
-    def render_header(title: str, subtitle: str | None = None) -> None:
+    def render_header(
+        title: str,
+        subtitle: str | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> None:
         st.title(title)
         if subtitle:
             st.caption(subtitle)

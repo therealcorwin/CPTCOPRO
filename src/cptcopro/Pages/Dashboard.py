@@ -91,6 +91,7 @@ except ImportError:
         subtitle: str | None = None,
         badge_text: str | None = None,
         badge_variant: str = "info",
+        show_privacy_toggle: bool = True,
     ) -> None:
         st.title(title)
         if subtitle:

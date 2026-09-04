@@ -41,6 +41,16 @@ except ImportError:
         pass
 
 
+try:
+    from cptcopro.utils.privacy import SESSION_KEY_PRIVACY
+except ImportError:
+    SESSION_KEY_PRIVACY = "masquer_donnees_sensibles"
+
+
+if SESSION_KEY_PRIVACY not in st.session_state:
+    st.session_state[SESSION_KEY_PRIVACY] = False
+
+
 # --- Configuration de la page ---
 st.set_page_config(
     page_title="CPTCOPRO - Suivi des Copropriétaires",
@@ -161,20 +171,9 @@ LOGO_PATH = Path(__file__).parent / "Pages" / "Assets" / "gb2.png"
 if LOGO_PATH.exists():
     st.logo(str(LOGO_PATH), size="large")
 
-# Toggle de confidentialité dans la sidebar
-st.sidebar.divider()
-st.sidebar.markdown("### 🔒 Sécurité & Confidentialité")
-privacy_enabled = st.sidebar.toggle(
-    "Masquer données sensibles",
-    key="masquer_donnees_sensibles",
-    help="Anonymise les noms, codes et numéros de lots sur l'ensemble des pages de l'application.",
-)
-if privacy_enabled:
-    st.sidebar.info("🛡️ Mode anonymisé activé")
-
-st.sidebar.divider()
 st.sidebar.caption("🏢 **CPTCOPRO** v2.0")
 st.sidebar.caption("Made with ❤️ by [Therealcorwin](https://github.com/Therealcorwin)")
+
 
 # --- RUN NAVIGATION ---
 menus.run()

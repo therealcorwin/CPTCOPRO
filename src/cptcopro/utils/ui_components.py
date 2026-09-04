@@ -12,11 +12,28 @@ from __future__ import annotations
 import html
 
 import plotly.graph_objects as go
+import st_yled
+import st_yled.constants
 import streamlit as st
 
-from cptcopro.utils.privacy import is_privacy_enabled
+from cptcopro.utils.privacy import SESSION_KEY_PRIVACY, is_privacy_enabled
 
 _ALLOWED_BADGE_VARIANTS: set[str] = {"info", "warning", "success", "danger"}
+
+# Configuration robuste de st-styled pour les boutons (compatible tooltip help et pill design)
+_btn_selector = ".stButton button"
+_btn_p_selector = ".stButton button p"
+st_yled.constants.ELEMENT_STYLES.setdefault("button", {})["css"] = {
+    "background_color": {_btn_selector: {"background-color": None}},
+    "border_color": {_btn_selector: {"border-color": None}},
+    "border_style": {_btn_selector: {"border-style": None}},
+    "border_width": {_btn_selector: {"border-width": None}},
+    "color": {_btn_selector: {"color": None}},
+    "font_size": {_btn_p_selector: {"font-size": None}},
+    "font_weight": {_btn_p_selector: {"font-weight": None}},
+    "border_radius": {_btn_selector: {"border-radius": None}},
+    "padding": {_btn_selector: {"padding": None}},
+}
 
 
 def inject_custom_css() -> None:
@@ -98,8 +115,26 @@ def inject_custom_css() -> None:
         color: #F87171;
         border: 1px solid rgba(239, 68, 68, 0.4);
     }
+
+    /* Bouton badge cliquable de confidentialité dans l'en-tête */
+    div[data-testid="stColumn"]:last-child div.stButton,
+    div[data-testid="column"]:last-child div.stButton,
+    [data-testid="column"]:last-child div.stButton {
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    /* Suppression de l'espace vide sous le menu de navigation dans la barre latérale */
+    [data-testid="stSidebarUserContent"] {
+        padding-top: 0 !important;
+    }
+    [data-testid="stSidebarNav"] {
+        padding-bottom: 0 !important;
+        margin-bottom: 0 !important;
+    }
     </style>
     """
+
     st.markdown(custom_css, unsafe_allow_html=True)
 
 
@@ -108,9 +143,10 @@ def render_header(
     subtitle: str | None = None,
     badge_text: str | None = None,
     badge_variant: str = "info",
+    show_privacy_toggle: bool = True,
 ) -> None:
-    """Affiche un en-tête de page standardisé, fluide et sécurisé contre les injections XSS."""
-    col_t, col_b = st.columns([4, 1])
+    """Affiche un en-tête de page standardisé avec bouton badge de confidentialité persistant."""
+    col_t, col_b = st.columns([0.72, 0.28])
     with col_t:
         st.title(title)
         if subtitle:
@@ -127,6 +163,36 @@ def render_header(
             st.markdown(
                 f'<div style="text-align: right; padding-top: 1rem;"><span class="badge-pill badge-{variant}">{safe_text}</span></div>',
                 unsafe_allow_html=True,
+            )
+        elif show_privacy_toggle:
+            is_active = bool(st.session_state.get(SESSION_KEY_PRIVACY, False))
+
+            def _toggle_privacy() -> None:
+                st.session_state[SESSION_KEY_PRIVACY] = not bool(
+                    st.session_state.get(SESSION_KEY_PRIVACY, False)
+                )
+
+            label = "🛡️ MODE PRIVÉ ACTIF" if is_active else "🔓 DONNÉES VISIBLES"
+            bg_color = "#059669" if is_active else "#DC2626"
+            border_color = "#10B981" if is_active else "#EF4444"
+            help_text = (
+                "Mode privé activé : données sensibles masquées. Cliquez pour désactiver."
+                if is_active
+                else "Données visibles. Cliquez pour activer le masquage des données sensibles."
+            )
+
+            st_yled.button(
+                label,
+                key="_header_privacy_btn",
+                background_color=bg_color,
+                color="#FFFFFF",
+                border_color=border_color,
+                border_radius="9999px",
+                padding="4px 14px",
+                font_weight="700",
+                on_click=_toggle_privacy,
+                help=help_text,
+                use_container_width=False,
             )
         elif is_privacy_enabled():
             st.markdown(
