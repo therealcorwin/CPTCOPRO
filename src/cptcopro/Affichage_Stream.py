@@ -62,6 +62,20 @@ st.set_page_config(
 # Injecter les styles CSS globaux
 inject_custom_css()
 
+# Initialisation et vérification du pool MariaDB
+try:
+    from cptcopro.Database.connection import init_pool, verif_connexion_db
+
+    @st.cache_resource
+    def _init_db_pool() -> object:
+        pool = init_pool()
+        verif_connexion_db()
+        return pool
+
+    _init_db_pool()
+except Exception as exc:
+    st.error(f"Erreur de connexion à la base de données MariaDB : {exc}")
+
 # --- Configuration des pages ---
 Dashboard_page = st.Page(
     "Pages/Dashboard.py",

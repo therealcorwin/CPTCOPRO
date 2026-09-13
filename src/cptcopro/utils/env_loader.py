@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from cptcopro.utils.paths import get_env_file_path as resolve_env_file_path
+from cptcopro.utils.paths import init_env
 
 REQUIRED_CORE_ENV_VARS = [
     "login_site_copro",
@@ -32,10 +33,19 @@ REQUIRED_PCLOUD_BACKUP_ENV_VARS = [
     "pcloud_backup_file",
 ]
 
+REQUIRED_MARIADB_ENV_VARS = [
+    "MARIADB_HOST",
+    "MARIADB_PORT",
+    "MARIADB_USER",
+    "MARIADB_PASSWORD",
+    "MARIADB_DATABASE",
+]
+
 REQUIRED_STARTUP_ENV_VARS = [
     *REQUIRED_CORE_ENV_VARS,
     *REQUIRED_PCLOUD_ENV_VARS,
     *REQUIRED_PCLOUD_BACKUP_ENV_VARS,
+    *REQUIRED_MARIADB_ENV_VARS,
 ]
 
 
@@ -258,3 +268,38 @@ def validate_startup_env() -> dict[str, str]:
         "Validation des variables d'environnement de demarrage reussie"
     )
     return env_vars
+
+
+def get_mariadb_config() -> dict[str, str | int]:
+    """Retourne la configuration de connexion MariaDB depuis les variables d'env.
+
+    Returns:
+        Dictionnaire avec les clés utilisees par pymysql / PooledDB :
+        - host (str)
+        - port (int)
+        - user (str)
+        - password (str)
+        - database (str)
+
+    Raises:
+        ValueError: Si MARIADB_PORT n'est pas un entier valide.
+    """
+    init_env()
+    host = os.environ.get("MARIADB_HOST", "127.0.0.1").strip()
+    port_str = os.environ.get("MARIADB_PORT", "3306").strip()
+    user = os.environ.get("MARIADB_USER", "").strip()
+    password = os.environ.get("MARIADB_PASSWORD", "").strip()
+    database = os.environ.get("MARIADB_DATABASE", "").strip()
+
+    try:
+        port = int(port_str)
+    except ValueError as exc:
+        raise ValueError(f"MARIADB_PORT doit etre un entier valide, recu : '{port_str}'") from exc
+
+    return {
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "database": database,
+    }

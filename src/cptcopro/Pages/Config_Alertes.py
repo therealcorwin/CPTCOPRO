@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 import streamlit as st
 
@@ -12,24 +10,13 @@ from cptcopro.Database import (
     get_config_alertes,
     update_config_alerte,
 )
-from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.ui_components import render_header
-
-DB_PATH = get_db_path()
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_config(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    del db_cache_key
+def load_config() -> pd.DataFrame:
     try:
-        config = get_config_alertes(str(db_path))
+        config = get_config_alertes()
         if config:
             df = pd.DataFrame(config)
             df = df.rename(
@@ -53,8 +40,8 @@ render_header(
     "Définition des montants de charges moyennes et des seuils de déclenchement des alertes d'impayés",
 )
 
-db_cache_key = _get_db_cache_key(DB_PATH)
-config_df = load_config(DB_PATH, db_cache_key)
+config_df = load_config()
+
 
 if config_df.empty:
     st.warning("⚠️ Aucune configuration trouvée dans la base de données.")
@@ -189,12 +176,12 @@ with st.form("form_modifier_seuil"):
 
     if submitted:
         success = update_config_alerte(
-            str(DB_PATH),
             type_selectionne,
             charge_moyenne=new_charge,
             taux=new_taux,
             threshold=new_threshold,
         )
+
         if success:
             load_config.clear()
             st.toast(f"Seuil mis à jour pour {type_selectionne.upper()} !", icon="💾")

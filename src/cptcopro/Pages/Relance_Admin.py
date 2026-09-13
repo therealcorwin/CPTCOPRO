@@ -6,24 +6,28 @@ import pandas as pd
 import streamlit as st
 
 from cptcopro.Database import get_relance_drafts, mark_relance_draft_status
-from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.ui_components import render_header
 
-DB_PATH = get_db_path()
-
-
-def _db_cache_key() -> int:
-    try:
-        return int(DB_PATH.stat().st_mtime_ns)
-    except OSError:
-        return 0
+DRAFT_COLS = [
+    "draft_id",
+    "created_at",
+    "code_proprietaire",
+    "nom_proprietaire",
+    "debit",
+    "email_to",
+    "status",
+    "llm_model",
+    "remote_draft_id",
+    "subject",
+    "body",
+    "error_message",
+]
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_drafts(db_path: str, status: str | None, limit: int, cache_key: int) -> pd.DataFrame:
-    del cache_key
-    rows = get_relance_drafts(db_path, status=status, limit=limit)
-    return pd.DataFrame(rows)
+def _load_drafts(status: str | None, limit: int) -> pd.DataFrame:
+    rows = get_relance_drafts(status=status, limit=limit)
+    return pd.DataFrame(rows) if rows else pd.DataFrame(columns=DRAFT_COLS)
 
 
 render_header(
@@ -42,7 +46,8 @@ with col_f2:
     limit = st.slider("Nombre max", min_value=20, max_value=500, value=150, step=10)
 
 status = None if status_filter == "tous" else status_filter
-df = _load_drafts(str(DB_PATH), status, int(limit), _db_cache_key())
+df = _load_drafts(status, int(limit))
+
 
 if df.empty:
     st.info("ℹ️ Aucun brouillon ne correspond à ce filtre.")
@@ -79,25 +84,32 @@ st.dataframe(
 
 st.divider()
 
-draft_ids = df["draft_id"].astype(int).tolist()
-selected_draft_id = st.selectbox("Sélectionnez un brouillon à inspecter :", options=draft_ids)
-selected = df[df["draft_id"] == selected_draft_id].iloc[0].to_dict()
+draft_ids = df["draft_id"].astype(int).tolist() if "draft_id" in df.columns and not df.empty else []
+if not draft_ids:
+    st.stop()
+else:
+    selected_draft_id = st.selectbox("Sélectionnez un brouillon à inspecter :", options=draft_ids)
+    matching = df[df["draft_id"] == selected_draft_id]
+    if not matching.empty:
+        selected = matching.iloc[0].to_dict()
 
-st.markdown(f"**Objet :** {selected.get('subject', '')}")
-st.text_area("Contenu du message", value=str(selected.get("body") or ""), height=200, disabled=True)
-if selected.get("error_message"):
-    st.warning(f"⚠️ Erreur enregistrée : {selected.get('error_message')}")
+        st.markdown(f"**Objet :** {selected.get('subject', '')}")
+        st.text_area(
+            "Contenu du message", value=str(selected.get("body") or ""), height=200, disabled=True
+        )
+        if selected.get("error_message"):
+            st.warning(f"⚠️ Erreur enregistrée : {selected.get('error_message')}")
 
-col1, col2 = st.columns(2, gap="medium")
-with col1:
-    if st.button("✓ Marquer comme Validé", type="primary", use_container_width=True):
-        mark_relance_draft_status(str(DB_PATH), int(selected_draft_id), "validated")
-        _load_drafts.clear()
-        st.toast("Brouillon marqué comme validé", icon="✅")
-        st.rerun()
-with col2:
-    if st.button("📬 Marquer comme Envoyé", use_container_width=True):
-        mark_relance_draft_status(str(DB_PATH), int(selected_draft_id), "sent")
-        _load_drafts.clear()
-        st.toast("Brouillon marqué comme envoyé", icon="📬")
-        st.rerun()
+        col1, col2 = st.columns(2, gap="medium")
+        with col1:
+            if st.button("✓ Marquer comme Validé", type="primary", use_container_width=True):
+                mark_relance_draft_status(int(selected_draft_id), "validated")
+                _load_drafts.clear()
+                st.toast("Brouillon marqué comme validé", icon="✅")
+                st.rerun()
+        with col2:
+            if st.button("📬 Marquer comme Envoyé", use_container_width=True):
+                mark_relance_draft_status(int(selected_draft_id), "sent")
+                _load_drafts.clear()
+                st.toast("Brouillon marqué comme envoyé", icon="📬")
+                st.rerun()

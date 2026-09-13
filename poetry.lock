@@ -771,6 +771,23 @@ validation = ["jsonschema[format-nongpl] (>=4.25,<5.0)", "lxml (>=4,<7)", "refer
 xml-validation = ["lxml (>=4,<7)"]
 
 [[package]]
+name = "dbutils"
+version = "3.2.0"
+description = "Database connections for multi-threaded environments."
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "dbutils-3.2.0-py3-none-any.whl", hash = "sha256:5b512edbff29697d118359c1a7a48ce9f93b9b6e4ecebad25396b987b4bce947"},
+    {file = "dbutils-3.2.0.tar.gz", hash = "sha256:dfe3f5eb6e383042d68ad07e4e9778b2abbcc4627a283f85efc8210319c075d2"},
+]
+
+[package.extras]
+docs = ["docutils"]
+pg = ["PyGreSQL (>=5)"]
+tests = ["pytest (>=7)", "ruff"]
+
+[[package]]
 name = "defusedxml"
 version = "0.7.1"
 description = "XML bomb protection for Python stdlib modules"
@@ -3141,6 +3158,22 @@ typing_extensions = {version = ">=4.0", markers = "python_version < \"3.11\""}
 crypto = ["cryptography (>=3.4.0)"]
 
 [[package]]
+name = "pymysql"
+version = "1.2.0"
+description = "Pure Python MySQL Driver"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pymysql-1.2.0-py3-none-any.whl", hash = "sha256:62169ce6d5510f08e140c5e7990ee884a9764024e4a9a27b2cc11f1099322ae0"},
+    {file = "pymysql-1.2.0.tar.gz", hash = "sha256:6c7b17ca686988104d7426c27895b455cdeea3e9d3ceb1270f0c3704fead8c33"},
+]
+
+[package.extras]
+ed25519 = ["PyNaCl (>=1.6.2)"]
+rsa = ["cryptography (>=46.0.7)"]
+
+[[package]]
 name = "pyparsing"
 version = "3.3.2"
 description = "pyparsing - Classes and methods to define and execute parsing grammars"
@@ -5421,4 +5454,4 @@ dev = ["pytest", "setuptools"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.15"
-content-hash = "1f2b870d68f85b7d59632aec5eaa915e408ec6bc9b1dd35fa1bafbe86033cd7d"
+content-hash = "add99d86398ecba4000f66b4a212c6d99286f510b4a898d83773a278be9b8e20"

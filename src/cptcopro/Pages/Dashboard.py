@@ -1,111 +1,59 @@
-import sqlite3
-from pathlib import Path
-
 import loguru
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# Import du module de chemins portables
-try:
-    from cptcopro.utils.paths import get_db_path
-
-    DB_PATH = get_db_path()
-except Exception as e:
-    # Fallback si l'import échoue ou si get_db_path() lève une exception
-    loguru.logger.warning(f"Failed to get DB path: {e}. Using fallback path.")
-    DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
+from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.db_helpers import normalize_date_columns
+from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def chargement_somme_debit_global(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    del db_cache_key
+def chargement_somme_debit_global() -> pd.DataFrame:
     query = "SELECT sum(debit) AS 'debit global', date FROM vw_charge_coproprietaires GROUP BY date"
-    conn = sqlite3.connect(str(db_path))
     try:
-        debit_global = pd.read_sql_query(query, conn)
-    finally:
-        conn.close()
-    # Convertir la colonne date en datetime
-    if "date" in debit_global.columns:
-        debit_global["date"] = pd.to_datetime(debit_global["date"], errors="coerce")
-    # Convertir la colonne debit global en numérique, en remplaçant les erreurs par NaN puis en remplissant les NaN par 0
-    if "debit global" in debit_global.columns:
-        debit_global["debit global"] = pd.to_numeric(
-            debit_global["debit global"], errors="coerce"
-        ).fillna(0)
-    # supprimer les lignes sans date valide et trier par date
-    debit_global = debit_global.dropna(subset=["date"]).sort_values("date")
-    return debit_global
+        with get_db_cursor() as cur:
+            cur.execute(query)
+            debit_global = pd.DataFrame(cur.fetchall())
+        debit_global = normalize_date_columns(debit_global, ["date"])
+        if "debit global" in debit_global.columns:
+            debit_global["debit global"] = pd.to_numeric(
+                debit_global["debit global"], errors="coerce"
+            ).fillna(0)
+        debit_global = debit_global.dropna(subset=["date"]).sort_values("date")
+        return debit_global
+    except Exception as e:
+        st.error(f"Erreur chargement debit global : {e}")
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def suivi_nbre_alertes(db_path: Path, db_cache_key: int) -> tuple[int, int]:
+def suivi_nbre_alertes() -> tuple[int, int]:
     """Récupère les deux derniers relevés d'alertes pour calculer le delta.
 
     Returns:
         Tuple (nombre_alertes_actuel, nombre_alertes_precedent)
     """
-    del db_cache_key
     query = "SELECT nombre_alertes FROM suivi_alertes ORDER BY date_releve DESC LIMIT 2;"
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            recup_alerte_df = pd.read_sql_query(query, conn)
-            if recup_alerte_df.empty:
-                return 0, 0
-            # Dernier relevé
-            actuel = (
-                int(recup_alerte_df["nombre_alertes"].iat[0]) if len(recup_alerte_df) >= 1 else 0
-            )
-            # Avant-dernier relevé
-            precedent = (
-                int(recup_alerte_df["nombre_alertes"].iat[1])
-                if len(recup_alerte_df) >= 2
-                else actuel
-            )
-        finally:
-            conn.close()
+        with get_db_cursor() as cur:
+            cur.execute(query)
+            rows = list(cur.fetchall())
+        if not rows:
+            return 0, 0
+        actuel = int(rows[0]["nombre_alertes"]) if len(rows) >= 1 else 0
+        precedent = int(rows[1]["nombre_alertes"]) if len(rows) >= 2 else actuel
         return actuel, precedent
-    except sqlite3.Error as e:
+    except Exception as e:
         st.error(f"Erreur lors de la récupération des alertes : {e}")
         return 0, 0
-    except Exception as e:
-        st.error(f"Erreur inattendue : {e}")
-        return 0, 0
-
-
-try:
-    from cptcopro.utils.ui_components import apply_plotly_theme, render_header
-except ImportError:
-
-    def render_header(
-        title: str,
-        subtitle: str | None = None,
-        badge_text: str | None = None,
-        badge_variant: str = "info",
-        show_privacy_toggle: bool = True,
-    ) -> None:
-        st.title(title)
-        if subtitle:
-            st.caption(subtitle)
-
-    def apply_plotly_theme(fig: object) -> object:
-        return fig
 
 
 loguru.logger.info("Starting Streamlit app for coproprietaires display")
-db_cache_key = _get_db_cache_key(DB_PATH)
-Charge_globale = chargement_somme_debit_global(DB_PATH, db_cache_key)
-nbre_alerte, nbre_alerte_precedent = suivi_nbre_alertes(DB_PATH, db_cache_key)
+Charge_globale = chargement_somme_debit_global()
+nbre_alerte, nbre_alerte_precedent = suivi_nbre_alertes()
 delta_alerte = nbre_alerte - nbre_alerte_precedent
+
 
 render_header(
     "📊 Tableau de bord",

@@ -1,350 +1,276 @@
-import sqlite3
-from pathlib import Path
+"""Tests pour les triggers MariaDB de detection des alertes de debit eleve."""
 
-from cptcopro import Database as dbmod
-
-
-def setup_db(path: Path):
-    """Configure la base de données avec les tables et triggers."""
-    dbmod.integrite_db(str(path))
+from cptcopro.Database.connection import get_db_connection
 
 
-def setup_coproprietaire(conn, code: str, type_apt: str = "3p"):
+def setup_coproprietaire(cur, code: str, type_apt: str = "3p"):
     """Ajoute un copropriétaire avec son type d'appartement pour les tests."""
-    cur = conn.cursor()
     cur.execute(
-        "INSERT OR REPLACE INTO coproprietaires (code_proprietaire, nom_proprietaire, type_apt) VALUES (?, ?, ?)",
+        """
+        INSERT INTO coproprietaires (code_proprietaire, nom_proprietaire, type_apt, last_check)
+        VALUES (%s, %s, %s, CURRENT_DATE)
+        ON DUPLICATE KEY UPDATE type_apt = VALUES(type_apt)
+        """,
         (code, f"Owner {code}", type_apt),
     )
-    conn.commit()
 
 
-def test_insert_creates_and_upserts(tmp_path):
-    """Test que l'insertion d'une charge au-dessus du seuil crée une alerte."""
-    db = tmp_path / "triggers_test.db"
-    setup_db(db)
-    conn = sqlite3.connect(str(db))
-    cur = conn.cursor()
-    try:
-        # Configurer le copropriétaire avec type 3p (seuil 2400€)
-        setup_coproprietaire(conn, "C100", "3p")
+def test_insert_creates_and_upserts():
+    """Test que l'insertion d'une charge au-dessus du seuil cree une alerte."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            setup_coproprietaire(cur, "C100", "3p")
 
-        # insert first qualifying charge -> alert created (seuil 3p = 2400, 2500 > 2400)
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C100", "Owner A", 2500.0, 0.0, "2026-01-01"),
-        )
-        id1 = cur.lastrowid
-        conn.commit()
-        cur.execute(
-            "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C100",),
-        )
-        row = cur.fetchone()
-        assert row is not None and row[0] == id1
+            # insert first qualifying charge -> alert created (seuil 3p = 2400, 2500 > 2400)
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C100", "Owner A", 2500.0, 0.0, "2026-01-01"),
+            )
+            id1 = cur.lastrowid
 
-        # insert second qualifying charge with different date -> alert updated, still one row
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C100", "Owner A", 2600.0, 0.0, "2026-01-02"),
-        )
-        id2 = cur.lastrowid
-        conn.commit()
-        # ensure exactly one alert exists for this proprietor
-        cur.execute(
-            "SELECT COUNT(*) FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C100",),
-        )
-        cnt = cur.fetchone()[0]
-        assert cnt == 1
+            cur.execute(
+                "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C100",),
+            )
+            row = cur.fetchone()
+            assert row is not None and row["id_origin"] == id1
 
-        # fetch the alert's origin id (most recent) and compare to id2
-        cur.execute(
-            "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = ? ORDER BY alerte_id DESC LIMIT 1",
-            ("C100",),
-        )
-        id_origin_row = cur.fetchone()
-        assert id_origin_row is not None and id_origin_row[0] == id2
-    finally:
-        conn.close()
+            # insert second qualifying charge with different date -> alert updated, still one row
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C100", "Owner A", 2600.0, 0.0, "2026-01-02"),
+            )
+            id2 = cur.lastrowid
+
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C100",),
+            )
+            assert cur.fetchone()["cnt"] == 1
+
+            cur.execute(
+                "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = %s ORDER BY alerte_id DESC LIMIT 1",
+                ("C100",),
+            )
+            id_origin_row = cur.fetchone()
+            assert id_origin_row is not None and id_origin_row["id_origin"] == id2
 
 
-def test_insert_low_clears_alert(tmp_path):
+def test_insert_low_clears_alert():
     """Test que l'insertion d'une charge sous le seuil supprime l'alerte existante."""
-    db = tmp_path / "triggers_test2.db"
-    setup_db(db)
-    conn = sqlite3.connect(str(db))
-    cur = conn.cursor()
-    try:
-        # Configurer le copropriétaire avec type 3p (seuil 2400€)
-        setup_coproprietaire(conn, "C200", "3p")
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            setup_coproprietaire(cur, "C200", "3p")
 
-        # create alert (3000 > 2400)
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C200", "Owner B", 3000.0, 0.0, "2026-01-01"),
-        )
-        conn.commit()
-        cur.execute(
-            "SELECT COUNT(*) FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C200",),
-        )
-        assert cur.fetchone()[0] == 1
+            # create alert (3000 > 2400)
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C200", "Owner B", 3000.0, 0.0, "2026-01-01"),
+            )
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C200",),
+            )
+            assert cur.fetchone()["cnt"] == 1
 
-        # insert a low debit as latest with different date -> should clear alert (1000 < 2400)
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C200", "Owner B", 1000.0, 0.0, "2026-01-02"),
-        )
-        conn.commit()
-        cur.execute(
-            "SELECT COUNT(*) FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C200",),
-        )
-        assert cur.fetchone()[0] == 0
-    finally:
-        conn.close()
+            # insert a low debit as latest with different date -> should clear alert (1000 < 2400)
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C200", "Owner B", 1000.0, 0.0, "2026-01-02"),
+            )
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C200",),
+            )
+            assert cur.fetchone()["cnt"] == 0
 
 
-def test_delete_rebuilds_from_previous_latest(tmp_path):
-    """Test que la suppression d'une charge reconstruit l'alerte si la nouvelle dernière dépasse le seuil."""
-    db = tmp_path / "triggers_test3.db"
-    setup_db(db)
-    conn = sqlite3.connect(str(db))
-    cur = conn.cursor()
-    try:
-        # Configurer le copropriétaire avec type 2p (seuil 2000€)
-        setup_coproprietaire(conn, "C300", "2p")
+def test_delete_rebuilds_from_previous_latest():
+    """Test que la suppression d'une charge reconstruit l'alerte si la nouvelle derniere depasse le seuil."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            setup_coproprietaire(cur, "C300", "2p")
 
-        # insert two qualifying charges; latest is id2 (2100 et 2200 > 2000)
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C300", "Owner C", 2100.0, 0.0, "2026-01-01"),
-        )
-        id1 = cur.lastrowid
-        conn.commit()
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C300", "Owner C", 2200.0, 0.0, "2026-01-02"),
-        )
-        id2 = cur.lastrowid
-        conn.commit()
-        # alert should point to id2
-        cur.execute(
-            "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C300",),
-        )
-        assert cur.fetchone()[0] == id2
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C300", "Owner C", 2100.0, 0.0, "2026-01-01"),
+            )
+            id1 = cur.lastrowid
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C300", "Owner C", 2200.0, 0.0, "2026-01-02"),
+            )
+            id2 = cur.lastrowid
 
-        # delete id2 (latest) -> trigger should rebuild alert from new latest (id1)
-        cur.execute("DELETE FROM charge WHERE id = ?", (id2,))
-        conn.commit()
-        cur.execute(
-            "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C300",),
-        )
-        row = cur.fetchone()
-        assert row is not None and row[0] == id1
-    finally:
-        conn.close()
+            cur.execute(
+                "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C300",),
+            )
+            assert cur.fetchone()["id_origin"] == id2
+
+            # delete id2 (latest) -> trigger should rebuild alert from new latest (id1)
+            cur.execute("DELETE FROM charge WHERE id = %s", (id2,))
+            cur.execute(
+                "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C300",),
+            )
+            row = cur.fetchone()
+            assert row is not None and row["id_origin"] == id1
 
 
-def test_threshold_varies_by_type_apt(tmp_path):
+def test_threshold_varies_by_type_apt():
     """Test que le seuil d'alerte varie selon le type d'appartement."""
-    db = tmp_path / "triggers_test4.db"
-    setup_db(db)
-    conn = sqlite3.connect(str(db))
-    cur = conn.cursor()
-    try:
-        # Copropriétaire 2p (seuil 2000€) - 2100 devrait déclencher une alerte
-        setup_coproprietaire(conn, "T2P", "2p")
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("T2P", "Owner 2P", 2100.0, 0.0, "2026-01-01"),
-        )
-        conn.commit()
-        cur.execute(
-            "SELECT COUNT(*) FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("T2P",),
-        )
-        assert cur.fetchone()[0] == 1, (
-            "2100€ devrait déclencher une alerte pour un 2p (seuil 2000€)"
-        )
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # 2p (seuil 2000€) - 2100 declenche une alerte
+            setup_coproprietaire(cur, "T2P", "2p")
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("T2P", "Owner 2P", 2100.0, 0.0, "2026-01-01"),
+            )
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("T2P",),
+            )
+            assert cur.fetchone()["cnt"] == 1
 
-        # Copropriétaire 4p (seuil 2800€) - 2100 ne devrait PAS déclencher d'alerte
-        setup_coproprietaire(conn, "T4P", "4p")
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("T4P", "Owner 4P", 2100.0, 0.0, "2026-01-01"),
-        )
-        conn.commit()
-        cur.execute(
-            "SELECT COUNT(*) FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("T4P",),
-        )
-        assert cur.fetchone()[0] == 0, (
-            "2100€ ne devrait pas déclencher d'alerte pour un 4p (seuil 2800€)"
-        )
+            # 4p (seuil 2800€) - 2100 ne declenche PAS d'alerte
+            setup_coproprietaire(cur, "T4P", "4p")
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("T4P", "Owner 4P", 2100.0, 0.0, "2026-01-01"),
+            )
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("T4P",),
+            )
+            assert cur.fetchone()["cnt"] == 0
 
-        # Copropriétaire 4p avec débit au-dessus du seuil - devrait déclencher
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("T4P", "Owner 4P", 3000.0, 0.0, "2026-01-02"),
-        )
-        conn.commit()
-        cur.execute(
-            "SELECT COUNT(*) FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("T4P",),
-        )
-        assert cur.fetchone()[0] == 1, (
-            "3000€ devrait déclencher une alerte pour un 4p (seuil 2800€)"
-        )
-    finally:
-        conn.close()
+            # 4p avec debit au-dessus du seuil -> declenche alerte
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("T4P", "Owner 4P", 3000.0, 0.0, "2026-01-02"),
+            )
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("T4P",),
+            )
+            assert cur.fetchone()["cnt"] == 1
 
 
-def test_default_threshold_for_unknown_type(tmp_path):
-    """Test que le seuil par défaut est utilisé pour les types d'appartement inconnus."""
-    db = tmp_path / "triggers_test5.db"
-    setup_db(db)
-    conn = sqlite3.connect(str(db))
-    cur = conn.cursor()
-    try:
-        # Copropriétaire sans type défini dans coproprietaires -> seuil default (2000€)
-        # Ne pas ajouter de coproprietaire, le fallback default sera utilisé
-
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, date('now'))",
-            ("UNKNOWN", "Owner Unknown", 2100.0, 0.0),
-        )
-        conn.commit()
-
-        # Avec le seuil default de 2000€, 2100€ devrait déclencher une alerte
-        cur.execute(
-            "SELECT COUNT(*) FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("UNKNOWN",),
-        )
-        assert cur.fetchone()[0] == 1, (
-            "2100€ devrait déclencher une alerte avec le seuil default (2000€)"
-        )
-    finally:
-        conn.close()
+def test_default_threshold_for_unknown_type():
+    """Test que le seuil par defaut est utilise pour les types d'appartement inconnus."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Fallback default = 2000
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, CURRENT_DATE)",
+                ("UNKNOWN", "Owner Unknown", 2100.0, 0.0),
+            )
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("UNKNOWN",),
+            )
+            assert cur.fetchone()["cnt"] == 1
 
 
-def test_older_insert_does_not_clear_newer_alert(tmp_path):
-    """Test qu'une charge plus ancienne insérée après la plus récente ne supprime pas l'alerte active."""
-    db = tmp_path / "triggers_test6.db"
-    setup_db(db)
-    conn = sqlite3.connect(str(db))
-    cur = conn.cursor()
-    try:
-        setup_coproprietaire(conn, "C600", "3p")
+def test_older_insert_does_not_clear_newer_alert():
+    """Test qu'une charge plus ancienne inseree apres la plus recente ne supprime pas l'alerte active."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            setup_coproprietaire(cur, "C600", "3p")
 
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C600", "Owner F", 3000.0, 0.0, "2026-01-02"),
-        )
-        id_latest = cur.lastrowid
-        conn.commit()
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C600", "Owner F", 3000.0, 0.0, "2026-01-02"),
+            )
+            id_latest = cur.lastrowid
 
-        cur.execute(
-            "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C600",),
-        )
-        row = cur.fetchone()
-        assert row is not None and row[0] == id_latest
+            cur.execute(
+                "SELECT id_origin FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C600",),
+            )
+            row = cur.fetchone()
+            assert row is not None and row["id_origin"] == id_latest
 
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C600", "Owner F", 1000.0, 0.0, "2026-01-01"),
-        )
-        conn.commit()
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C600", "Owner F", 1000.0, 0.0, "2026-01-01"),
+            )
 
-        cur.execute(
-            "SELECT id_origin, debit FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C600",),
-        )
-        row = cur.fetchone()
-        assert row is not None, (
-            "L'alerte ne doit pas disparaître si la ligne insérée est plus ancienne"
-        )
-        assert row[0] == id_latest
-        assert row[1] == 3000.0
-    finally:
-        conn.close()
+            cur.execute(
+                "SELECT id_origin, debit FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C600",),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            assert row["id_origin"] == id_latest
+            assert float(row["debit"]) == 3000.0
 
 
-def test_occurrence_not_incremented_on_same_data_rerun(tmp_path):
-    """Le champ occurence ne doit pas augmenter si on rejoue la même donnée (même date)."""
-    db = tmp_path / "triggers_test7.db"
-    setup_db(db)
-    conn = sqlite3.connect(str(db))
-    cur = conn.cursor()
-    try:
-        setup_coproprietaire(conn, "C700", "3p")
+def test_occurrence_not_incremented_on_same_data_rerun():
+    """Le champ occurence ne doit pas augmenter si on rejoue la meme donnee (meme date)."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            setup_coproprietaire(cur, "C700", "3p")
 
-        cur.execute(
-            "INSERT OR REPLACE INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C700", "Owner G", 3000.0, 0.0, "2026-02-01"),
-        )
-        conn.commit()
+            cur.execute(
+                """
+                INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date, last_check)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_DATE)
+                ON DUPLICATE KEY UPDATE debit = VALUES(debit), credit = VALUES(credit)
+                """,
+                ("C700", "Owner G", 3000.0, 0.0, "2026-02-01"),
+            )
 
-        cur.execute(
-            "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C700",),
-        )
-        occ1 = cur.fetchone()[0]
-        assert occ1 == 1
+            cur.execute(
+                "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C700",),
+            )
+            assert cur.fetchone()["occurence"] == 1
 
-        # Même données métier (même date): ne doit pas incrémenter occurence.
-        cur.execute(
-            "INSERT OR REPLACE INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C700", "Owner G", 3000.0, 0.0, "2026-02-01"),
-        )
-        conn.commit()
+            # Meme donnee metier (meme date)
+            cur.execute(
+                """
+                INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date, last_check)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_DATE)
+                ON DUPLICATE KEY UPDATE debit = VALUES(debit), credit = VALUES(credit)
+                """,
+                ("C700", "Owner G", 3000.0, 0.0, "2026-02-01"),
+            )
 
-        cur.execute(
-            "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C700",),
-        )
-        occ2 = cur.fetchone()[0]
-        assert occ2 == 1
-    finally:
-        conn.close()
+            cur.execute(
+                "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C700",),
+            )
+            assert cur.fetchone()["occurence"] == 1
 
 
-def test_occurrence_incremented_only_with_newer_data(tmp_path):
-    """Le champ occurence doit augmenter uniquement quand une date plus récente arrive."""
-    db = tmp_path / "triggers_test8.db"
-    setup_db(db)
-    conn = sqlite3.connect(str(db))
-    cur = conn.cursor()
-    try:
-        setup_coproprietaire(conn, "C800", "3p")
+def test_occurrence_incremented_only_with_newer_data():
+    """Le champ occurence doit augmenter uniquement quand une date plus recente arrive."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            setup_coproprietaire(cur, "C800", "3p")
 
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C800", "Owner H", 3000.0, 0.0, "2026-03-01"),
-        )
-        conn.commit()
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C800", "Owner H", 3000.0, 0.0, "2026-03-01"),
+            )
 
-        cur.execute(
-            "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C800",),
-        )
-        assert cur.fetchone()[0] == 1
+            cur.execute(
+                "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C800",),
+            )
+            assert cur.fetchone()["occurence"] == 1
 
-        # Nouvelle donnée plus récente: incrément attendu.
-        cur.execute(
-            "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (?, ?, ?, ?, ?)",
-            ("C800", "Owner H", 3200.0, 0.0, "2026-03-02"),
-        )
-        conn.commit()
+            # Nouvelle donnee plus recente: increment attendu
+            cur.execute(
+                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date) VALUES (%s, %s, %s, %s, %s)",
+                ("C800", "Owner H", 3200.0, 0.0, "2026-03-02"),
+            )
 
-        cur.execute(
-            "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = ?",
-            ("C800",),
-        )
-        assert cur.fetchone()[0] == 2
-    finally:
-        conn.close()
+            cur.execute(
+                "SELECT occurence FROM alertes_debit_eleve WHERE code_proprietaire = %s",
+                ("C800",),
+            )
+            assert cur.fetchone()["occurence"] == 2

@@ -15,11 +15,8 @@ from cptcopro.Database import (
     list_relance_templates,
     update_relance_template,
 )
-from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.relance_mailer import render_relance_template
 from cptcopro.utils.ui_components import render_header
-
-DB_PATH = get_db_path()
 
 _MODE_LABELS = {
     "static": "Statique (substitution directe des variables)",
@@ -36,22 +33,14 @@ _SAMPLE_DATA = {
 }
 
 
-def _db_cache_key() -> int:
-    try:
-        return int(DB_PATH.stat().st_mtime_ns)
-    except OSError:
-        return 0
-
-
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_templates(db_path: str, cache_key: int) -> list[dict[str, Any]]:
-    del cache_key
-    return cast(list[dict[str, Any]], list_relance_templates(db_path))
+def _load_templates() -> list[dict[str, Any]]:
+    return cast(list[dict[str, Any]], list_relance_templates())
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_config(db_path: str) -> dict[str, Any]:
-    return cast(dict[str, Any], get_relance_config(db_path))
+def _load_config() -> dict[str, Any]:
+    return cast(dict[str, Any], get_relance_config())
 
 
 render_header(
@@ -59,9 +48,8 @@ render_header(
     "Configurez les modèles types et les consignes de rédaction pour l'assistant IA",
 )
 
-db_path_str = str(DB_PATH)
-cfg = _load_config(db_path_str)
-templates = _load_templates(db_path_str, _db_cache_key())
+cfg = _load_config()
+templates = _load_templates()
 
 with st.expander("ℹ️ Variables dynamiques disponibles", expanded=False):
     st.markdown("Vous pouvez insérer ces variables dans le sujet et le corps de vos messages :")
@@ -161,7 +149,6 @@ with col_form:
             try:
                 if is_new:
                     create_relance_template(
-                        db_path_str,
                         name=name,
                         subject_template=subject_template,
                         body_template=body_template,
@@ -172,7 +159,6 @@ with col_form:
                     st.toast("Modèle créé avec succès !", icon="✨")
                 else:
                     update_relance_template(
-                        db_path_str,
                         template_id=selected_id,
                         name=name.strip(),
                         subject_template=subject_template,
@@ -189,7 +175,7 @@ with col_form:
 
         if deleted and not is_new:
             try:
-                delete_relance_template(db_path_str, selected_id)
+                delete_relance_template(template_id=selected_id)
                 _load_templates.clear()
                 st.toast("Modèle supprimé", icon="🗑️")
                 st.rerun()

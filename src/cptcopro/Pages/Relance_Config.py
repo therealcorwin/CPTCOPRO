@@ -3,106 +3,35 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any, cast
 
 import streamlit as st
 
-try:
-    from cptcopro.utils.paths import get_db_path, init_env
+from cptcopro.Database import (
+    DEFAULT_RELANCE_CONFIG,
+    get_relance_config,
+    init_relance_config_if_missing,
+    update_relance_config,
+)
+from cptcopro.utils.hotmail_oauth import (
+    demarrer_device_flow_microsoft,
+    valider_device_flow_microsoft,
+    verifier_statut_token_hotmail,
+)
+from cptcopro.utils.paths import init_env
+from cptcopro.utils.relance_mailer import (
+    tester_connexion_imap,
+    tester_connexion_mistral,
+)
+from cptcopro.utils.ui_components import render_header
 
-    init_env()
-    from cptcopro.Database import (
-        DEFAULT_RELANCE_CONFIG,
-        get_relance_config,
-        init_relance_config_if_missing,
-        update_relance_config,
-    )
-    from cptcopro.utils.hotmail_oauth import (
-        demarrer_device_flow_microsoft,
-        valider_device_flow_microsoft,
-        verifier_statut_token_hotmail,
-    )
-    from cptcopro.utils.relance_mailer import (
-        tester_connexion_imap,
-        tester_connexion_mistral,
-    )
-    from cptcopro.utils.ui_components import render_header
-
-    DB_PATH = get_db_path()
-except ImportError:
-    DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
-    DEFAULT_RELANCE_CONFIG = {
-        "enabled": 1,
-        "frequency_days": 14,
-        "sender_name": "Syndic de copropriété",
-        "sender_email": "",
-        "mailbox_imap_host": "outlook.office365.com",
-        "mailbox_imap_port": 993,
-        "mailbox_imap_user": "",
-        "mailbox_drafts_folder": "Drafts",
-        "mailbox_use_ssl": 1,
-        "mailbox_password_env": "RELANCE_MAILBOX_PASSWORD",
-        "mailbox_access_token_env": "RELANCE_MAILBOX_ACCESS_TOKEN",
-        "llm_provider": "mistral",
-        "llm_model": "mistral-small-latest",
-        "llm_api_base": "https://api.mistral.ai/v1",
-        "llm_api_key_env": "MISTRAL_API_KEY",
-        "llm_temperature": 0.4,
-        "tone_instruction": "courtois, professionnel et ferme",
-    }
-
-    def render_header(
-        title: str,
-        subtitle: str | None = None,
-        *args: object,
-        **kwargs: object,
-    ) -> None:
-        st.title(title)
-        if subtitle:
-            st.caption(subtitle)
-
-    def init_relance_config_if_missing(db_path: str) -> bool:
-        return False
-
-    def get_relance_config(db_path: str) -> dict[str, Any]:
-        del db_path
-        return cast(dict[str, Any], DEFAULT_RELANCE_CONFIG.copy())
-
-    def update_relance_config(db_path: str, **kwargs: object) -> bool:
-        del db_path, kwargs
-        return True
-
-    def verifier_statut_token_hotmail(config: object = None) -> tuple[bool, str]:
-        return False, "Module non chargé"
-
-    def demarrer_device_flow_microsoft(config: object = None) -> dict[str, Any]:
-        return {}
-
-    def valider_device_flow_microsoft(flow: object, config: object = None) -> tuple[bool, str]:
-        return False, "Module non chargé"
-
-    def tester_connexion_mistral(
-        api_key: str | None = None, model: str = "", api_base: str = ""
-    ) -> tuple[bool, str]:
-        return False, "Module non chargé"
-
-    def tester_connexion_imap(config: object) -> tuple[bool, str, list[str]]:
-        return False, "Module non chargé", []
-
-
-def _db_cache_key(db_path: Path) -> int:
-    try:
-        return int(db_path.stat().st_mtime_ns)
-    except OSError:
-        return 0
+init_env()
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_relance_config(db_path: str, cache_key: int) -> dict[str, Any]:
-    del cache_key
-    init_relance_config_if_missing(db_path)
-    return cast(dict[str, Any], get_relance_config(db_path))
+def _load_relance_config() -> dict[str, Any]:
+    init_relance_config_if_missing()
+    return cast(dict[str, Any], get_relance_config())
 
 
 render_header(
@@ -110,8 +39,7 @@ render_header(
     "Paramètres du serveur IMAP Hotmail/Outlook (OAuth2), fréquence et modèle Mistral AI",
 )
 
-db_path_str = str(DB_PATH)
-cfg = _load_relance_config(db_path_str, _db_cache_key(DB_PATH))
+cfg = _load_relance_config()
 
 enabled = bool(int(cfg.get("enabled", 1)))
 frequency_days = int(cfg.get("frequency_days", 14) or 14)
@@ -162,7 +90,6 @@ with tab_rules:
         )
         if submitted_rules:
             update_relance_config(
-                db_path_str,
                 enabled=1 if enabled_new else 0,
                 frequency_days=int(frequency_new),
                 sender_name=sender_name_new.strip(),
@@ -271,7 +198,6 @@ with tab_mailbox:
         )
         if submitted_imap:
             update_relance_config(
-                db_path_str,
                 mailbox_imap_host=mailbox_imap_host.strip(),
                 mailbox_imap_port=int(mailbox_imap_port),
                 mailbox_imap_user=mailbox_imap_user.strip(),
@@ -335,7 +261,6 @@ with tab_llm:
         )
         if submitted_llm:
             update_relance_config(
-                db_path_str,
                 llm_provider=llm_provider,
                 llm_model=llm_model.strip(),
                 llm_api_base=llm_api_base.strip(),

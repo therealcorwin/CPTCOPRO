@@ -10,15 +10,14 @@ from __future__ import annotations
 
 import datetime as dt
 import io
-import sqlite3
-from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from cptcopro.utils.paths import get_db_path
+from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.db_helpers import fetch_dataframe, normalize_date_columns
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     is_privacy_enabled,
@@ -26,28 +25,19 @@ from cptcopro.utils.privacy import (
 )
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
-DB_PATH = get_db_path()
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
-
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_charges(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    """Charger la vue `vw_charge_coproprietaires` depuis SQLite et normaliser la date."""
-    del db_cache_key
-    with sqlite3.connect(db_path) as conn:
-        df = pd.read_sql_query(
+def load_charges() -> pd.DataFrame:
+    """Charger la vue `vw_charge_coproprietaires` depuis MariaDB et normaliser la date."""
+    with get_db_cursor() as cur:
+        cur.execute(
             "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, "
-            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires",
-            conn,
+            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires"
         )
-    df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
-    df = df.dropna(subset=["date"]).sort_values("date")
+        df = fetch_dataframe(cur)
+    df = normalize_date_columns(df, ["date"])
+    if "date" in df.columns:
+        df = df.dropna(subset=["date"]).sort_values("date")
     return df
 
 
@@ -72,8 +62,8 @@ render_header(
     "Consultation détaillée, filtres à facettes et analyse graphique de l'historique financier",
 )
 
-db_cache_key = _get_db_cache_key(DB_PATH)
-df_all = load_charges(DB_PATH, db_cache_key)
+df_all = load_charges()
+
 
 if df_all.empty:
     st.warning("⚠️ Aucune donnée de charge trouvée dans la base de données.")

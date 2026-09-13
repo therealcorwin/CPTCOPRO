@@ -76,3 +76,62 @@ def test_multiheader_and_select_rows_filtered():
     assert data[0][1] == "Dupont Jean"
     assert data[1][0] == "002"
     assert data[1][1] == "Martin Paul"
+
+
+def test_webdev_nested_tables_structure():
+    """Vérifie la robustesse face à la structure réelle WebDev avec sous-tables et conteneurs imbriqués."""
+    html = """
+    <html>
+      <body>
+        <td id="lzA1">Solde des copropriétaires au 10/09/2026 de l'immeuble 0052</td>
+        <table id="ctzA1">
+          <tr><td>Solde des copropriétaires...</td></tr>
+          <tr id="ttA1">
+            <td id="tzclzA1">
+              <table id="A1_TITRES_POS">
+                <tr>
+                  <td><div id="A1_TITRES_1"><table><tr><td class="ttA3">Code</td></tr></table></div></td>
+                  <td><div id="A1_TITRES_2"><table><tr><td class="ttA4">Copropriétaire</td></tr></table></div></td>
+                  <td><div id="A1_TITRES_3"><table><tr><td class="ttA5">Débit</td></tr></table></div></td>
+                  <td><div id="A1_TITRES_4"><table><tr><td class="ttA6">Crédit</td></tr></table></div></td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td id="tzdlzA1">
+              <table id="A1_TB">
+                <tr id="A1_0">
+                  <td class="aligncenter wbcolA3">558A</td>
+                  <td class="wbcolA4">AB-HABITAT</td>
+                  <td class="wbcolA5"></td>
+                  <td class="wbcolA6"></td>
+                </tr>
+                <tr id="A1_1">
+                  <td class="aligncenter wbcolA3">480A</td>
+                  <td class="wbcolA4">ADRIEN J.</td>
+                  <td class="wbcolA5"></td>
+                  <td class="wbcolA6">197,16 €</td>
+                </tr>
+                <tr id="A1_2">
+                  <td class="aligncenter wbcolA3">3485A</td>
+                  <td class="wbcolA4">AOUDOU OUMAROU</td>
+                  <td class="wbcolA5">3 548,12 €</td>
+                  <td class="wbcolA6"></td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+    parser = HTMLParser(html)
+    date_str = tp.recuperer_date_situation_copro(parser)
+    assert date_str == "2026-09-10"
+
+    data = tp.recuperer_situation_copro(parser, date_str)
+    assert len(data) == 3
+    assert data[0] == ("558A", "AB-HABITAT", 0.0, 0.0, "2026-09-10")
+    assert data[1] == ("480A", "ADRIEN J.", 0.0, 197.16, "2026-09-10")
+    assert data[2] == ("3485A", "AOUDOU OUMAROU", 3548.12, 0.0, "2026-09-10")

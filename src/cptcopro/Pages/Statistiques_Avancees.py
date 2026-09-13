@@ -2,39 +2,31 @@
 
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
-
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from cptcopro.utils.paths import get_db_path
+from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.db_helpers import fetch_dataframe
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
 )
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
-DB_PATH = get_db_path()
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
-
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_charges(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    del db_cache_key
-    with sqlite3.connect(str(db_path)) as conn:
-        df = pd.read_sql_query(
+def load_charges() -> pd.DataFrame:
+    with get_db_cursor() as cur:
+        cur.execute(
             "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, "
-            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires",
-            conn,
+            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires"
         )
+        df = fetch_dataframe(cur)
+    if df.empty:
+        df["mois"] = pd.Series(dtype=int)
+        df["annee"] = pd.Series(dtype=int)
+        return df
     df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df = df.dropna(subset=["date"])
     df["mois"] = df["date"].dt.month
@@ -43,15 +35,17 @@ def load_charges(db_path: Path, db_cache_key: int) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    del db_cache_key
-    with sqlite3.connect(str(db_path)) as conn:
-        df = pd.read_sql_query(
+def load_alertes() -> pd.DataFrame:
+    with get_db_cursor() as cur:
+        cur.execute(
             "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, "
             "debit, type_alerte, first_detection, last_detection, occurence "
-            "FROM alertes_debit_eleve",
-            conn,
+            "FROM alertes_debit_eleve"
         )
+        df = fetch_dataframe(cur)
+    if df.empty:
+        df["duree_jours"] = pd.Series(dtype=float)
+        return df
     df["first_detection"] = pd.to_datetime(df["first_detection"], errors="coerce")
     df["last_detection"] = pd.to_datetime(df["last_detection"], errors="coerce")
     df["duree_jours"] = (df["last_detection"] - df["first_detection"]).dt.days
@@ -59,25 +53,17 @@ def load_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_config_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    del db_cache_key
-    with sqlite3.connect(str(db_path)) as conn:
-        df = pd.read_sql_query(
-            "SELECT type_apt, charge_moyenne, taux, threshold FROM config_alerte",
-            conn,
-        )
-    return df
+def load_config_alertes() -> pd.DataFrame:
+    with get_db_cursor() as cur:
+        cur.execute("SELECT type_apt, charge_moyenne, taux, threshold FROM config_alerte")
+        return fetch_dataframe(cur)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_coproprietaires(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    del db_cache_key
-    with sqlite3.connect(str(db_path)) as conn:
-        df = pd.read_sql_query(
-            "SELECT nom_proprietaire, code_proprietaire, type_apt FROM coproprietaires",
-            conn,
-        )
-    return df
+def load_coproprietaires() -> pd.DataFrame:
+    with get_db_cursor() as cur:
+        cur.execute("SELECT nom_proprietaire, code_proprietaire, type_apt FROM coproprietaires")
+        return fetch_dataframe(cur)
 
 
 render_header(
@@ -85,11 +71,11 @@ render_header(
     "Distribution des soldes, ratios de solvabilité, récidives et détection précoce des risques",
 )
 
-db_cache_key = _get_db_cache_key(DB_PATH)
-charges_df = load_charges(DB_PATH, db_cache_key)
-alertes_df = load_alertes(DB_PATH, db_cache_key)
-config_df = load_config_alertes(DB_PATH, db_cache_key)
-copro_df = load_coproprietaires(DB_PATH, db_cache_key)
+charges_df = load_charges()
+alertes_df = load_alertes()
+config_df = load_config_alertes()
+copro_df = load_coproprietaires()
+
 
 if charges_df.empty:
     st.warning("⚠️ Aucune donnée de charges disponible pour l'analyse.")

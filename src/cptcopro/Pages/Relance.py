@@ -30,38 +30,45 @@ from cptcopro.Database import (
     save_relance_draft,
     upsert_relance_destinataire,
 )
-from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.relance_mailer import (
     generate_relance_draft_with_llm,
     render_relance_template,
 )
 from cptcopro.utils.ui_components import render_header
 
-DB_PATH = get_db_path()
-
 if "drafts_to_edit" not in st.session_state:
     st.session_state.drafts_to_edit = []
 
 
-def _db_cache_key() -> int:
-    try:
-        return int(DB_PATH.stat().st_mtime_ns)
-    except OSError:
-        return 0
+DUE_COLS = [
+    "code_proprietaire",
+    "nom_proprietaire",
+    "debit",
+    "type_alerte",
+    "date_origin",
+    "num_apt",
+    "type_apt",
+    "email_to",
+    "contact_name",
+    "first_relance_date",
+    "last_relance_date",
+    "nb_relances_total",
+    "jours_depuis_derniere_relance",
+    "due",
+]
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_due_data(db_path: str, cache_key: int) -> tuple[dict[str, Any], pd.DataFrame]:
-    del cache_key
-    cfg = get_relance_config(db_path)
-    rows = list_relances_due(db_path)
-    return cast(dict[str, Any], cfg), pd.DataFrame(rows)
+def _load_due_data() -> tuple[dict[str, Any], pd.DataFrame]:
+    cfg = get_relance_config()
+    rows = list_relances_due()
+    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=DUE_COLS)
+    return cast(dict[str, Any], cfg), df
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_templates(db_path: str, cache_key: int) -> list[dict[str, Any]]:
-    del cache_key
-    return cast(list[dict[str, Any]], list_relance_templates(db_path))
+def _load_templates() -> list[dict[str, Any]]:
+    return cast(list[dict[str, Any]], list_relance_templates())
 
 
 render_header(
@@ -69,20 +76,18 @@ render_header(
     "Générez des messages de relance personnalisés (via IA Mistral ou modèles types) pour les impayés",
 )
 
-cfg, due_df = _load_due_data(str(DB_PATH), _db_cache_key())
+cfg, due_df = _load_due_data()
+
 
 is_enabled = bool(int(cfg.get("enabled", 1) or 1))
 if not is_enabled:
     st.warning("⚠️ La génération de relances est actuellement désactivée dans les paramètres.")
 
-if due_df.empty:
-    st.success("🎉 Aucun copropriétaire en débit élevé à relancer pour le moment.")
-    st.stop()
-
 frequency_days = int(cfg.get("frequency_days", 14) or 14)
 
-due_df["due"] = due_df["due"].fillna(0).astype(int)
-due_df["debit"] = pd.to_numeric(due_df["debit"], errors="coerce").fillna(0.0)
+if not due_df.empty:
+    due_df["due"] = due_df["due"].fillna(0).astype(int)
+    due_df["debit"] = pd.to_numeric(due_df["debit"], errors="coerce").fillna(0.0)
 
 tab_generation, tab_destinataires = st.tabs(
     [
@@ -95,7 +100,9 @@ tab_generation, tab_destinataires = st.tabs(
 # ONGLET 1: GÉNÉRATION DES RELANCES
 # ============================================================================
 with tab_generation:
-    due_only = due_df[due_df["due"] == 1].copy()
+    due_only = (
+        due_df[due_df["due"] == 1].copy() if not due_df.empty else pd.DataFrame(columns=DUE_COLS)
+    )
 
     # Bandeau d'information
     col_info1, col_info2 = st.columns([3, 1])
@@ -106,10 +113,12 @@ with tab_generation:
     with col_info2:
         st.metric("Impayés à traiter", len(due_only))
 
-    if due_only.empty:
+    if due_df.empty:
+        st.success("🎉 Aucun copropriétaire en débit élevé à relancer pour le moment.")
+    elif due_only.empty:
         st.success("✅ Tous les copropriétaires en alerte ont déjà reçu une relance récente.")
     else:
-        templates = _load_templates(str(DB_PATH), _db_cache_key())
+        templates = _load_templates()
         template_names: list[str] = [str(t["name"]) for t in templates]
         default_template_name = next(
             (t["name"] for t in templates if t["is_default"]),
@@ -239,7 +248,6 @@ with tab_generation:
 
                             # Sauvegarder directement comme brouillon local
                             draft_id = save_relance_draft(
-                                str(DB_PATH),
                                 code_proprietaire=str(payload.get("code_proprietaire") or ""),
                                 nom_proprietaire=str(payload.get("nom_proprietaire") or ""),
                                 debit=float(payload.get("debit") or 0.0),
@@ -324,11 +332,11 @@ with tab_destinataires:
                 if not email_to:
                     continue
                 upsert_relance_destinataire(
-                    str(DB_PATH),
                     code_proprietaire=str(row["code_proprietaire"]),
                     email_to=email_to,
                     contact_name=str(row.get("contact_name") or "").strip() or None,
                 )
+
                 nb_saved += 1
             _load_due_data.clear()
             st.toast(f"{nb_saved} adresse(s) enregistrée(s)", icon="💾")

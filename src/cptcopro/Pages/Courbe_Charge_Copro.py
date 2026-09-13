@@ -3,42 +3,32 @@
 from __future__ import annotations
 
 import datetime as dt
-import sqlite3
-from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from cptcopro.utils.paths import get_db_path
+from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.db_helpers import fetch_dataframe, normalize_date_columns
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     preparer_df_pour_graphe,
 )
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
-DB_PATH = get_db_path()
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
-
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_data(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    """Charge les données des charges depuis SQLite."""
-    del db_cache_key
-    with sqlite3.connect(db_path) as conn:
-        df = pd.read_sql_query(
+def load_data() -> pd.DataFrame:
+    """Charge les données des charges depuis MariaDB."""
+    with get_db_cursor() as cur:
+        cur.execute(
             "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, "
-            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires",
-            conn,
+            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires"
         )
-    df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
-    df = df.dropna(subset=["date"]).sort_values("date")
+        df = fetch_dataframe(cur)
+    df = normalize_date_columns(df, ["date"])
+    if "date" in df.columns:
+        df = df.dropna(subset=["date"]).sort_values("date")
     return df
 
 
@@ -61,8 +51,8 @@ render_header(
     "Comparaison temporelle ciblée des soldes débiteurs entre copropriétaires",
 )
 
-db_cache_key = _get_db_cache_key(DB_PATH)
-df = load_data(DB_PATH, db_cache_key)
+df = load_data()
+
 
 if df.empty:
     st.warning("⚠️ Aucune donnée disponible pour l'analyse graphique.")

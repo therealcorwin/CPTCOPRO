@@ -12,7 +12,6 @@ from cptcopro.utils.paths import (
     get_backup_dir,
     get_bundle_dir,
     get_data_dir,
-    get_db_path,
     get_env_file_path,
     get_log_path,
     get_project_root_dir,
@@ -114,41 +113,6 @@ class TestGetProjectRootDir:
                 with patch.object(sys, "executable", str(fake_exe)):
                     project_root = get_project_root_dir()
                     assert project_root == fake_exe.parent
-
-
-class TestGetDbPath:
-    """Tests pour get_db_path()."""
-
-    def test_default_db_name(self):
-        """Utilise le nom par défaut si non spécifié."""
-        with patch.dict(os.environ, {}, clear=True):
-            db_path = get_db_path()
-            assert db_path.name == "coproprietaires.sqlite"
-            assert "BDD" in str(db_path)
-
-    def test_custom_db_name(self):
-        """Accepte un nom de DB personnalisé."""
-        with patch.dict(os.environ, {}, clear=True):
-            db_path = get_db_path("ma_base.sqlite")
-            assert db_path.name == "ma_base.sqlite"
-
-    def test_env_var_override_new_name(self, tmp_path):
-        """La variable CPTCOPRO_DB_PATH override le chemin par défaut."""
-        custom_path = tmp_path / "custom" / "db.sqlite"
-        with patch.dict(os.environ, {"CPTCOPRO_DB_PATH": str(custom_path)}):
-            db_path = get_db_path()
-            assert db_path == custom_path.resolve()
-            # Le répertoire parent doit être créé
-            assert custom_path.parent.exists()
-
-    def test_creates_parent_directory(self, tmp_path):
-        """Crée le répertoire parent si nécessaire."""
-        custom_path = tmp_path / "niveau1" / "niveau2" / "db.sqlite"
-        assert not custom_path.parent.exists()
-
-        with patch.dict(os.environ, {"CPTCOPRO_DB_PATH": str(custom_path)}):
-            get_db_path()
-            assert custom_path.parent.exists()
 
 
 class TestGetLogPath:

@@ -125,7 +125,8 @@ def tester_connexion_mistral(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=15) as response:  # nosec B310 — schéma https:// validé ligne 103 avant construction de la requête
+        # Schéma https:// validé avant construction de la requête
+        with urllib.request.urlopen(req, timeout=15) as response:  # nosec B310
             raw = response.read().decode("utf-8")
         content = json.loads(raw)
         rep = content.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
@@ -242,8 +243,8 @@ def generate_relance_draft_with_llm(
     )
 
     try:
-        logger.info(f"Appel API Mistral ({model}) pour {copro_nom}...")
-        with urllib.request.urlopen(req, timeout=30) as response:  # nosec B310 — schéma https:// validé ligne 173 avant construction de la requête
+        # Schéma https:// validé avant construction de la requête
+        with urllib.request.urlopen(req, timeout=30) as response:  # nosec B310
             raw = response.read().decode("utf-8")
         content = json.loads(raw)
         body = content.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
@@ -453,3 +454,136 @@ def save_draft_to_imap(config: dict[str, Any], message: EmailMessage) -> str:
     finally:
         with suppress(Exception):
             client.logout()
+
+
+def generer_brouillons_relances(
+    deposer_imap: bool = False,
+    force_llm: bool | None = None,
+) -> dict[str, Any]:
+    """Génère automatiquement les brouillons de relance pour tous les copropriétaires dus.
+
+    Fonction autonome orchestrable en CLI (main.py --auto-relance-drafts) ou via tâche planifiée.
+
+    Parameters:
+        deposer_imap: Si True, dépose également chaque brouillon dans le dossier IMAP Drafts.
+        force_llm: Si bool, force l'utilisation (ou non) de Mistral AI. Si None, se base sur la config et le template.
+
+    Returns:
+        Dictionnaire récapitulatif contenant:
+        - total_dus: nombre total de comptes éligibles
+        - generes: nombre de brouillons générés et persistés
+        - deposes_imap: nombre de brouillons déposés avec succès sur IMAP
+        - erreurs: liste des messages d'erreurs éventuels
+        - draft_ids: liste des identifiants de brouillons créés
+    """
+    from cptcopro.Database import (
+        get_relance_config,
+        list_relance_templates,
+        list_relances_due,
+        mark_relance_draft_status,
+        save_relance_draft,
+    )
+
+    cfg = get_relance_config()
+    enabled = bool(int(cfg.get("enabled", 1)))
+    if not enabled:
+        logger.warning("Génération de relances désactivée dans la configuration.")
+        return {
+            "total_dus": 0,
+            "generes": 0,
+            "deposes_imap": 0,
+            "erreurs": ["Relances désactivées dans la configuration"],
+            "draft_ids": [],
+        }
+
+    frequency_days = int(cfg.get("frequency_days", 14) or 14)
+    due_rows = list_relances_due(frequency_days)
+    if not due_rows:
+        logger.info("Aucun copropriétaire éligible à la relance pour le moment.")
+        return {
+            "total_dus": 0,
+            "generes": 0,
+            "deposes_imap": 0,
+            "erreurs": [],
+            "draft_ids": [],
+        }
+
+    templates = list_relance_templates()
+    default_template = next(
+        (t for t in templates if t.get("is_default")),
+        templates[0] if templates else None,
+    )
+
+    results: dict[str, Any] = {
+        "total_dus": len(due_rows),
+        "generes": 0,
+        "deposes_imap": 0,
+        "erreurs": [],
+        "draft_ids": [],
+    }
+
+    sender_name = str(cfg.get("sender_name") or "Syndic de copropriété")
+    sender_email = str(cfg.get("sender_email") or "")
+
+    for row in due_rows:
+        code_copro = str(row.get("code_proprietaire") or "")
+        try:
+            email_to = str(row.get("email_to") or "").strip()
+            if not email_to:
+                logger.info(f"Copropriétaire {code_copro} ignoré : aucune adresse email de contact.")
+                continue
+
+            template = default_template or {}
+            use_llm = (
+                force_llm
+                if force_llm is not None
+                else (
+                    str(cfg.get("llm_provider") or "mistral") == "mistral"
+                    or template.get("generation_mode") == "llm"
+                )
+            )
+
+            if use_llm:
+                subject, body, provider, model = generate_relance_draft_with_llm(
+                    row, cfg, template=template
+                )
+            else:
+                subject, body = render_relance_template(template, row, cfg)
+                provider, model = ("template", template.get("name", "Standard"))
+
+            draft_id = save_relance_draft(
+                code_proprietaire=code_copro,
+                nom_proprietaire=str(row.get("nom_proprietaire") or ""),
+                debit=float(row.get("debit") or 0.0),
+                email_to=email_to,
+                subject=subject,
+                body=body,
+                llm_provider=provider,
+                llm_model=model,
+                status="draft_local",
+            )
+            results["generes"] += 1
+            results["draft_ids"].append(draft_id)
+
+            if deposer_imap:
+                try:
+                    msg = build_email_message(sender_email, sender_name, email_to, subject, body)
+                    remote_id = save_draft_to_imap(cfg, msg)
+                    mark_relance_draft_status(draft_id, "draft_imap", remote_draft_id=remote_id)
+                    results["deposes_imap"] += 1
+                except Exception as exc_imap:
+                    mark_relance_draft_status(draft_id, "error", error_message=str(exc_imap))
+                    logger.error(f"Échec dépôt IMAP pour {email_to}: {exc_imap}")
+                    results["erreurs"].append(f"IMAP {email_to}: {exc_imap}")
+
+        except Exception as exc:
+            err = f"Erreur génération pour {code_copro}: {exc}"
+            logger.error(err)
+            results["erreurs"].append(err)
+
+    logger.info(
+        f"Génération terminée : {results['generes']}/{results['total_dus']} brouillons générés, "
+        f"{results['deposes_imap']} déposés sur IMAP, {len(results['erreurs'])} erreur(s)."
+    )
+    return results
+

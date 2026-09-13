@@ -1,13 +1,13 @@
-"""Module d'insertion des charges dans la base de données SQLite.
+"""Module d'insertion des charges dans la base de données MariaDB.
 
 Ce module gère l'insertion des données de charges des copropriétaires.
 """
 
-import os
-import sqlite3
 from typing import Any
 
 from loguru import logger
+
+from .connection import get_db_connection
 
 logger = logger.bind(type_log="BDD")
 
@@ -49,45 +49,40 @@ def _normaliser_lignes_charge(data: list[Any]) -> list[tuple[Any, Any, Any, Any,
     return lignes
 
 
-def enregistrer_donnees_sqlite(data: list[Any], db_path: str) -> None:
-    """
-    Enregistre les données extraites dans une base de données SQLite.
+def enregistrer_charges(data: list[Any]) -> None:
+    """Enregistre les données extraites dans la base de données MariaDB.
 
-    La fonction se connecte à la base de données SQLite spécifiée par `db_path`
-    et insère les données fournies dans la table `charge` après validation
-    et normalisation par `_normaliser_lignes_charge`.
+    La fonction se connecte via le pool MariaDB et insère les données fournies
+    dans la table `charge` après validation et normalisation par
+    `_normaliser_lignes_charge`.
+
+    Utilise INSERT ... ON DUPLICATE KEY UPDATE pour préserver la sémantique
+    idempotente : si une entrée (code_proprietaire, date) existe déjà, seule
+    la colonne last_check est mise à jour (les triggers sont ainsi préservés).
 
     Parameters:
-    - data (list[Any]): Une liste de tuples contenant les données de charges à enregistrer.
-      Chaque tuple doit contenir : (code_proprietaire, nom_proprietaire, debit, credit, date).
-      Les éventuelles lignes d'en-tête ou de format invalide sont automatiquement filtrées.
-    - db_path (str): Le chemin vers la base de données SQLite.
-
-    Returns:
-    - None
+        data: Liste de tuples (code_proprietaire, nom_proprietaire, debit, credit, date).
+              Les éventuelles lignes d'en-tête ou de format invalide sont filtrées.
     """
-    if not os.path.exists(db_path):
-        logger.error(
-            f"Base de données '{db_path}' introuvable. Veuillez créer la base avant d'exécuter ce script."
-        )
-        return
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
     lignes = _normaliser_lignes_charge(data)
-    try:
-        # Insertion des données avec INSERT OR REPLACE
-        # Si une entrée avec le même (code_proprietaire, date) existe, elle est mise à jour
-        cur.executemany(
-            """INSERT OR REPLACE INTO charge
-               (code_proprietaire, nom_proprietaire, debit, credit, date, last_check)
-               VALUES (?, ?, ?, ?, ?, CURRENT_DATE)""",
-            lignes,
-        )
-        conn.commit()
-    except Exception as e:
-        logger.error(f"Erreur lors de l'insertion des données : {e}")
-        raise
-    finally:
-        conn.close()
+    if not lignes:
+        logger.info("Aucune donnée de charge à insérer après normalisation.")
+        return
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # INSERT ... ON DUPLICATE KEY UPDATE :
+            # - Contrairement à INSERT OR REPLACE SQLite (DELETE + INSERT), cette forme
+            #   ne réinitialise pas l'id et ne perd pas de données non fournies.
+            # - Les triggers AFTER INSERT sont préservés (pas de DELETE intermédiaire).
+            cur.executemany(
+                """INSERT INTO charge
+                   (code_proprietaire, nom_proprietaire, debit, credit, date, last_check)
+                   VALUES (%s, %s, %s, %s, %s, CURRENT_DATE)
+                   ON DUPLICATE KEY UPDATE
+                       last_check = VALUES(last_check)""",
+                lignes,
+            )
+
     processed_count = len(lignes)
     logger.info(f"{processed_count} enregistrements traités (insérés ou mis à jour).")

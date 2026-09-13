@@ -2,55 +2,40 @@
 
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
-
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from cptcopro.utils.paths import get_db_path
+from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.db_helpers import fetch_dataframe, normalize_date_columns
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     preparer_df_pour_graphe,
 )
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
-DB_PATH = get_db_path()
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
-
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_all_data(
-    db_path: Path, db_cache_key: int
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_all_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Charge les données des charges, copropriétaires et seuils d'alerte."""
-    del db_cache_key
-    with sqlite3.connect(db_path) as conn:
-        charges_df = pd.read_sql_query(
+    with get_db_cursor() as cur:
+        cur.execute(
             "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, "
-            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires",
-            conn,
+            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires"
         )
-        alertes_df = pd.read_sql_query(
+        charges_df = fetch_dataframe(cur)
+        cur.execute(
             "SELECT code_proprietaire AS code, debit, type_alerte, first_detection, "
-            "last_detection, occurence FROM alertes_debit_eleve",
-            conn,
+            "last_detection, occurence FROM alertes_debit_eleve"
         )
-        config_df = pd.read_sql_query(
-            "SELECT type_apt, threshold FROM config_alerte",
-            conn,
-        )
+        alertes_df = fetch_dataframe(cur)
+        cur.execute("SELECT type_apt, threshold FROM config_alerte")
+        config_df = fetch_dataframe(cur)
 
-    charges_df["date"] = pd.to_datetime(charges_df["date"], errors="coerce")
+    charges_df = normalize_date_columns(charges_df, ["date"])
     charges_df = charges_df.dropna(subset=["date"]).sort_values("date")
+    alertes_df = normalize_date_columns(alertes_df, ["first_detection", "last_detection"])
     return charges_df, alertes_df, config_df
 
 
@@ -59,8 +44,8 @@ render_header(
     "Consultez l'historique complet, la situation financière et le statut d'alerte d'un copropriétaire",
 )
 
-db_cache_key = _get_db_cache_key(DB_PATH)
-charges_df, alertes_df, config_df = load_all_data(DB_PATH, db_cache_key)
+charges_df, alertes_df, config_df = load_all_data()
+
 
 if charges_df.empty:
     st.warning("⚠️ Aucune donnée disponible.")
@@ -170,7 +155,10 @@ with tab_fiche:
             date_releve = dernier_releve["date"].strftime("%d/%m/%Y")
 
             # Vérifier si en alerte
-            alerte_info = alertes_df[alertes_df["code"] == code_copro]
+            if not alertes_df.empty and "code" in alertes_df.columns:
+                alerte_info = alertes_df[alertes_df["code"] == code_copro]
+            else:
+                alerte_info = pd.DataFrame()
             is_in_alert = not alerte_info.empty
             seuil_lot = thresholds_by_type.get(
                 str(type_lot).lower(), thresholds_by_type.get("default", 2000.0)
@@ -249,7 +237,7 @@ with tab_fiche:
                 expanded=False,
             ):
                 df_display = df_copro.sort_values("date", ascending=False).copy()
-                df_display["date_str"] = df_display["date"].dt.strftime("%d/%m/%Y")
+                df_display["date_str"] = pd.to_datetime(df_display["date"]).dt.strftime("%d/%m/%Y")
                 st.dataframe(
                     appliquer_confidentialite(df_display),
                     width="stretch",

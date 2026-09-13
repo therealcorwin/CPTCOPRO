@@ -2,33 +2,21 @@
 
 from __future__ import annotations
 
-import sqlite3
-from pathlib import Path
-
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from cptcopro.utils.paths import get_db_path
+from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.db_helpers import normalize_date_columns
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     preparer_df_pour_graphe,
 )
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
-DB_PATH = get_db_path()
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
-
 
 @st.cache_data(ttl=300, show_spinner=False)
-def recup_alertes(db_path: Path, db_cache_key: int) -> tuple[pd.DataFrame, pd.DataFrame]:
-    del db_cache_key
+def recup_alertes() -> tuple[pd.DataFrame, pd.DataFrame]:
     query = (
         "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, "
         "debit AS Debit, type_alerte AS TypeApt, first_detection AS FirstDetection, "
@@ -37,9 +25,12 @@ def recup_alertes(db_path: Path, db_cache_key: int) -> tuple[pd.DataFrame, pd.Da
     )
     query2 = "SELECT SUM(debit) AS TotalDebit FROM alertes_debit_eleve"
     try:
-        with sqlite3.connect(str(db_path)) as conn:
-            recup_alerte = pd.read_sql_query(query, conn)
-            recup_total_debit = pd.read_sql_query(query2, conn)
+        with get_db_cursor() as cur:
+            cur.execute(query)
+            recup_alerte = pd.DataFrame(cur.fetchall())
+            cur.execute(query2)
+            recup_total_debit = pd.DataFrame(cur.fetchall())
+        recup_alerte = normalize_date_columns(recup_alerte, ["FirstDetection", "LastDetection"])
         return recup_alerte, recup_total_debit
     except Exception as e:
         st.error(f"Erreur lors de la récupération des alertes : {e}")
@@ -47,8 +38,7 @@ def recup_alertes(db_path: Path, db_cache_key: int) -> tuple[pd.DataFrame, pd.Da
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def recup_suivi_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    del db_cache_key
+def recup_suivi_alertes() -> pd.DataFrame:
     query = """
         SELECT date_releve, nombre_alertes, total_debit,
                nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
@@ -57,9 +47,10 @@ def recup_suivi_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
         ORDER BY date_releve DESC
     """
     try:
-        with sqlite3.connect(str(db_path)) as conn:
-            suivi_df = pd.read_sql_query(query, conn)
-        return suivi_df
+        with get_db_cursor() as cur:
+            cur.execute(query)
+            suivi_df = pd.DataFrame(cur.fetchall())
+        return normalize_date_columns(suivi_df, ["date_releve"])
     except Exception as e:
         st.error(f"Erreur lors de la récupération du suivi : {e}")
         return pd.DataFrame()
@@ -85,9 +76,9 @@ render_header(
     "Ventilation des anomalies d'impayés par typologie de logement et récurrence",
 )
 
-db_cache_key = _get_db_cache_key(DB_PATH)
-suivi_alerte = recup_suivi_alertes(DB_PATH, db_cache_key)
-alertes_df, total_debit_df = recup_alertes(DB_PATH, db_cache_key)
+suivi_alerte = recup_suivi_alertes()
+alertes_df, total_debit_df = recup_alertes()
+
 
 if not suivi_alerte.empty:
     st.subheader("Répartition des alertes actives par type de lot")

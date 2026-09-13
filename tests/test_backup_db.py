@@ -1,231 +1,166 @@
-"""Tests pour le module Backup_DB.py."""
+"""Tests pour le module Backup_DB.py (Dump logique MariaDB)."""
 
 from __future__ import annotations
 
-import sqlite3
-from datetime import datetime
+import gzip
+import time
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from cptcopro.Database.Backup_DB import backup_db
+from cptcopro.Database.Backup_DB import (
+    _format_sql_value,
+    backup_db,
+    generate_insert_statements,
+)
+from cptcopro.Database.connection import get_db_connection
 
 
-class TestBackupDb:
-    """Tests pour la fonction backup_db()."""
+class TestBackupDbHelpers:
+    """Tests unitaires pour les fonctions utilitaires de Backup_DB."""
 
-    @pytest.fixture
-    def sample_db(self, tmp_path) -> Path:
-        """Crée une base de données SQLite de test."""
-        db_path = tmp_path / "test.sqlite"
-        conn = sqlite3.connect(db_path)
-        conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
-        conn.execute("INSERT INTO test (name) VALUES ('test_data')")
-        conn.commit()
-        conn.close()
-        return db_path
+    def test_format_sql_value_types(self):
+        assert _format_sql_value(None) == "NULL"
+        assert _format_sql_value(True) == "1"
+        assert _format_sql_value(False) == "0"
+        assert _format_sql_value(42) == "42"
+        assert _format_sql_value(3.14) == "3.14"
+        assert _format_sql_value(Decimal("123.45")) == "123.45"
+        assert _format_sql_value(date(2026, 9, 11)) == "'2026-09-11'"
+        assert _format_sql_value("l'appartement") == "'l\\'appartement'"
+        assert _format_sql_value(b"abc") == "X'616263'"
+
+    def test_generate_insert_statements_empty(self):
+        result = generate_insert_statements("coproprietaires", [])
+        assert "-- Table coproprietaires: 0 lignes" in result
+
+    def test_generate_insert_statements_with_data(self):
+        rows = [
+            {"id": 1, "nom": "Dupont", "debit": Decimal("100.50")},
+            {"id": 2, "nom": "Martin", "debit": Decimal("200.00")},
+        ]
+        result = generate_insert_statements("test_table", rows)
+        assert "INSERT INTO `test_table` (`id`, `nom`, `debit`) VALUES" in result
+        assert "(1, 'Dupont', 100.50)" in result
+        assert "(2, 'Martin', 200.00)" in result
+        assert "ON DUPLICATE KEY UPDATE" in result
+        assert "`id` = VALUES(`id`)" in result
+
+
+class TestBackupDbExecution:
+    """Tests d'integration et d'execution pour backup_db()."""
 
     @pytest.fixture
     def backup_dir(self, tmp_path) -> Path:
-        """Retourne un répertoire de backup temporaire."""
-        return tmp_path / "BACKUP"
+        """Repertoire temporaire pour les sauvegardes."""
+        b_dir = tmp_path / "BACKUP"
+        b_dir.mkdir(parents=True, exist_ok=True)
+        return b_dir
 
-    def test_creates_backup_file(self, sample_db, backup_dir):
-        """Crée un fichier de backup avec le bon format de nom."""
-        with patch("cptcopro.Database.Backup_DB.get_backup_dir", return_value=backup_dir):
-            with patch("cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS", True):
-                backup_db(str(sample_db))
-
-        # Vérifier que le backup existe
-        assert backup_dir.exists()
-        backup_files = list(backup_dir.glob("backup_*.sqlite"))
-        assert len(backup_files) == 1
-
-        # Vérifier le format du nom
-        backup_name = backup_files[0].name
-        assert backup_name.startswith("backup_test.sqlite-")
-
-    def test_backup_contains_same_data(self, sample_db, backup_dir):
-        """Le backup contient les mêmes données que l'original."""
-        with patch("cptcopro.Database.Backup_DB.get_backup_dir", return_value=backup_dir):
-            with patch("cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS", True):
-                backup_db(str(sample_db))
-
-        backup_files = list(backup_dir.glob("backup_*.sqlite"))
-        backup_path = backup_files[0]
-
-        # Vérifier les données dans le backup
-        conn = sqlite3.connect(backup_path)
-        cursor = conn.execute("SELECT name FROM test")
-        rows = cursor.fetchall()
-        conn.close()
-
-        assert len(rows) == 1
-        assert rows[0][0] == "test_data"
-
-    def test_creates_backup_dir_if_not_exists(self, sample_db, backup_dir):
-        """Crée le répertoire BACKUP s'il n'existe pas."""
-        assert not backup_dir.exists()
+    def test_creates_backup_file(self, backup_dir: Path):
+        """Genere un fichier .sql.gz avec le bon pattern de nom."""
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO coproprietaires (nom_proprietaire, code_proprietaire, num_apt, type_apt, last_check) "
+                    "VALUES (%s, %s, %s, %s, CURRENT_DATE) ON DUPLICATE KEY UPDATE nom_proprietaire=VALUES(nom_proprietaire)",
+                    ("Test Backup", "TB01", "1", "3p"),
+                )
 
         with patch("cptcopro.Database.Backup_DB.get_backup_dir", return_value=backup_dir):
-            with patch("cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS", True):
-                backup_db(str(sample_db))
+            result = backup_db()
 
-        assert backup_dir.exists()
+        assert result is not None
+        backup_path = Path(result)
+        assert backup_path.exists()
+        assert backup_path.name.startswith("backup_cptcopro-")
+        assert backup_path.name.endswith(".sql.gz")
 
-    def test_handles_nonexistent_db(self, tmp_path, backup_dir):
-        """Gère gracieusement une base de données inexistante."""
-        nonexistent_db = tmp_path / "nonexistent.sqlite"
+        # Verifier le contenu decompresse
+        with gzip.open(backup_path, "rt", encoding="utf-8") as gz:
+            content = gz.read()
+
+        assert "SET FOREIGN_KEY_CHECKS = 0;" in content
+        assert "SET FOREIGN_KEY_CHECKS = 1;" in content
+        assert "coproprietaires" in content
+        assert "TB01" in content
+
+    def test_multiple_backups_have_different_names(self, backup_dir: Path):
+        """Plusieurs sauvegardes espacees d'une seconde ont des noms distincts."""
+        with patch("cptcopro.Database.Backup_DB.get_backup_dir", return_value=backup_dir):
+            res1 = backup_db()
+            time.sleep(1.1)
+            res2 = backup_db()
+
+        assert res1 is not None and res2 is not None
+        assert res1 != res2
+        gz_files = list(backup_dir.glob("*.sql.gz"))
+        assert len(gz_files) == 2
+
+    def test_dump_and_restore_roundtrip(self, backup_dir: Path):
+        """Verifie qu'un dump produit par backup_db peut etre restaure fidelement."""
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO coproprietaires (nom_proprietaire, code_proprietaire, num_apt, type_apt, last_check) "
+                    "VALUES (%s, %s, %s, %s, CURRENT_DATE) ON DUPLICATE KEY UPDATE nom_proprietaire=VALUES(nom_proprietaire)",
+                    ("Restore Roundtrip", "RR01", "99", "5p"),
+                )
 
         with patch("cptcopro.Database.Backup_DB.get_backup_dir", return_value=backup_dir):
-            with patch("cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS", True):
-                # Ne doit pas lever d'exception
-                backup_db(str(nonexistent_db))
+            dump_file = backup_db()
 
-        # Aucun backup ne doit être créé
-        if backup_dir.exists():
-            backup_files = list(backup_dir.glob("backup_*.sqlite"))
-            assert len(backup_files) == 0
+        assert dump_file is not None
+        backup_path = Path(dump_file)
 
-    def test_handles_permission_error_on_backup_dir(self, sample_db, tmp_path):
-        """Gère gracieusement une erreur de permission sur le répertoire."""
-        # Simuler une erreur lors de la création du répertoire
-        with patch("cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS", False):
-            with patch("os.makedirs", side_effect=PermissionError("Access denied")):
-                with patch("os.path.exists", return_value=False):
-                    # Ne doit pas lever d'exception non gérée
-                    backup_db(str(sample_db))
+        # Supprimer la ligne de la BDD
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM coproprietaires WHERE code_proprietaire = 'RR01'")
+                cur.execute(
+                    "SELECT COUNT(*) AS cnt FROM coproprietaires WHERE code_proprietaire = 'RR01'"
+                )
+                assert cur.fetchone()["cnt"] == 0
 
-    def test_multiple_backups_have_different_names(self, sample_db, backup_dir):
-        """Plusieurs backups ont des noms différents (timestamp)."""
+        # Restaurer le dump
+        with gzip.open(backup_path, "rt", encoding="utf-8") as gz:
+            sql_content = gz.read()
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                for stmt in sql_content.split(";"):
+                    stmt_lines = [
+                        line for line in stmt.splitlines() if not line.strip().startswith("--")
+                    ]
+                    stmt_clean = "\n".join(stmt_lines).strip()
+                    if stmt_clean:
+                        cur.execute(stmt_clean)
+
+        # Verifier la restauration
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT nom_proprietaire, type_apt FROM coproprietaires WHERE code_proprietaire = 'RR01'"
+                )
+                row = cur.fetchone()
+                assert row is not None
+                assert row["nom_proprietaire"] == "Restore Roundtrip"
+                assert row["type_apt"] == "5p"
+
+        # Nettoyage
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM coproprietaires WHERE code_proprietaire = 'RR01'")
+
+    def test_handles_connection_error_gracefully(self, backup_dir: Path):
+        """Gere proprement une erreur inattendue et retourne None."""
         with patch("cptcopro.Database.Backup_DB.get_backup_dir", return_value=backup_dir):
-            with patch("cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS", True):
-                # Premier backup
-                backup_db(str(sample_db))
-
-                # Attendre un peu pour avoir un timestamp différent
-                import time
-
-                time.sleep(1.1)
-
-                # Deuxième backup
-                backup_db(str(sample_db))
-
-        backup_files = list(backup_dir.glob("backup_*.sqlite"))
-        assert len(backup_files) == 2
-
-        # Les noms doivent être différents
-        names = [f.name for f in backup_files]
-        assert names[0] != names[1]
-
-    def test_backup_timestamp_format(self, sample_db, backup_dir):
-        """Le timestamp dans le nom du backup est au bon format."""
-        with patch("cptcopro.Database.Backup_DB.get_backup_dir", return_value=backup_dir):
-            with patch("cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS", True):
-                backup_db(str(sample_db))
-
-        backup_files = list(backup_dir.glob("backup_*.sqlite"))
-        backup_name = backup_files[0].name
-
-        # Format attendu: backup_test.sqlite-DD-MM-YY-HH-MM-SS.sqlite
-        # Extraire le timestamp
-        parts = backup_name.replace("backup_test.sqlite-", "").replace(".sqlite", "")
-
-        # Devrait être parsable comme date
-        try:
-            datetime.strptime(parts, "%d-%m-%y-%H-%M-%S")
-        except ValueError:
-            pytest.fail(f"Format de timestamp invalide: {parts}")
-
-    def test_fallback_to_module_dir_when_no_portable_paths(self, sample_db, tmp_path):
-        """Utilise le répertoire du module si paths.py n'est pas disponible."""
-        # Ce test vérifie le comportement quand _USE_PORTABLE_PATHS est False
-        # En mode fallback, backup_db utilise os.path.dirname(__file__) + "BACKUP"
-
-        # Patch uniquement _USE_PORTABLE_PATHS et le chemin __file__ du module
-        import cptcopro.Database.Backup_DB as backup_module
-
-        original_file = backup_module.__file__
-
-        try:
-            # Simuler que le module est dans tmp_path
-            backup_module.__file__ = str(tmp_path / "Backup_DB.py")
-
-            with patch.object(backup_module, "_USE_PORTABLE_PATHS", False):
-                backup_db(str(sample_db))
-
-            # Vérifier que le répertoire BACKUP a été créé dans tmp_path
-            expected_backup_dir = tmp_path / "BACKUP"
-            assert expected_backup_dir.exists(), (
-                f"Le répertoire BACKUP devrait exister dans {tmp_path}"
-            )
-
-            # Vérifier que le chemin contient bien le répertoire tmp_path
-            assert str(tmp_path) in str(expected_backup_dir), (
-                f"Le chemin de backup devrait contenir {tmp_path}"
-            )
-
-            # Trouver le fichier de backup créé
-            backup_files = list(expected_backup_dir.glob("backup_*.sqlite"))
-            assert len(backup_files) == 1, (
-                f"Un seul fichier backup devrait exister, trouvé: {backup_files}"
-            )
-
-            backup_file = backup_files[0]
-
-            # Vérifier que le fichier backup contient les données de sample_db
-            conn = sqlite3.connect(backup_file)
-            cursor = conn.execute("SELECT name FROM test")
-            rows = cursor.fetchall()
-            conn.close()
-
-            assert len(rows) == 1, "Le backup devrait contenir une ligne"
-            assert rows[0][0] == "test_data", (
-                f"Le backup devrait contenir 'test_data', trouvé: {rows[0][0]}"
-            )
-        finally:
-            # Restaurer __file__ original
-            backup_module.__file__ = original_file
-
-
-class TestBackupDbIntegration:
-    """Tests d'intégration pour backup_db() avec le vrai système de fichiers."""
-
-    def test_real_backup_workflow(self, tmp_path):
-        """Test complet du workflow de backup."""
-        # Créer une vraie base de données
-        db_path = tmp_path / "production.sqlite"
-        conn = sqlite3.connect(db_path)
-        conn.execute("""
-            CREATE TABLE coproprietaires (
-                id INTEGER PRIMARY KEY,
-                code TEXT,
-                nom TEXT,
-                debit REAL,
-                credit REAL
-            )
-        """)
-        conn.execute(
-            "INSERT INTO coproprietaires (code, nom, debit, credit) VALUES (?, ?, ?, ?)",
-            ("001", "Dupont", 100.0, 50.0),
-        )
-        conn.commit()
-        conn.close()
-
-        # Créer le backup
-        backup_dir = tmp_path / "BACKUP"
-        with patch("cptcopro.Database.Backup_DB.get_backup_dir", return_value=backup_dir):
-            with patch("cptcopro.Database.Backup_DB._USE_PORTABLE_PATHS", True):
-                backup_db(str(db_path))
-
-        # Vérifier l'intégrité du backup
-        backup_files = list(backup_dir.glob("backup_*.sqlite"))
-        assert len(backup_files) == 1
-
-        backup_conn = sqlite3.connect(backup_files[0])
-        cursor = backup_conn.execute("SELECT code, nom, debit, credit FROM coproprietaires")
-        row = cursor.fetchone()
-        backup_conn.close()
-
-        assert row == ("001", "Dupont", 100.0, 50.0)
+            with patch(
+                "cptcopro.Database.Backup_DB.get_db_connection",
+                side_effect=Exception("Database error"),
+            ):
+                res = backup_db()
+                assert res is None

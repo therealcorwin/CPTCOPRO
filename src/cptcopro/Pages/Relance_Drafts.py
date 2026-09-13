@@ -31,32 +31,29 @@ from cptcopro.Database import (
     mark_relance_draft_status,
     save_relance_draft,
 )
-from cptcopro.utils.paths import get_db_path
 from cptcopro.utils.relance_mailer import (
     build_email_message,
     save_draft_to_imap,
 )
 from cptcopro.utils.ui_components import render_header
 
-DB_PATH = get_db_path()
-
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_all_drafts(db_path: str) -> list[dict[str, Any]]:
+def _load_all_drafts() -> list[dict[str, Any]]:
     """Charge tous les brouillons depuis la base."""
-    return cast(list[dict[str, Any]], get_relance_drafts(db_path, limit=1000))
+    return cast(list[dict[str, Any]], get_relance_drafts(limit=1000))
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _load_tracking_summary(db_path: str) -> list[dict[str, Any]]:
+def _load_tracking_summary() -> list[dict[str, Any]]:
     """Charge la synthèse de suivi consolidée."""
-    return cast(list[dict[str, Any]], get_relances_tracking_summary(db_path))
+    return cast(list[dict[str, Any]], get_relances_tracking_summary())
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_config(db_path: str) -> dict[str, Any]:
+def _load_config() -> dict[str, Any]:
     """Charge la configuration de relance."""
-    return cast(dict[str, Any], get_relance_config(db_path))
+    return cast(dict[str, Any], get_relance_config())
 
 
 render_header(
@@ -64,8 +61,7 @@ render_header(
     "Consultez, modifiez et expédiez vos brouillons vers Hotmail (IMAP), ou analysez le recouvrement",
 )
 
-db_path_str = str(DB_PATH)
-cfg = _load_config(db_path_str)
+cfg = _load_config()
 
 tab_drafts, tab_tracking, tab_history = st.tabs(
     [
@@ -80,7 +76,7 @@ tab_drafts, tab_tracking, tab_history = st.tabs(
 # ONGLET 1: GESTION DES BROUILLONS & ACTIONS EN MASSE
 # ============================================================================
 with tab_drafts:
-    all_drafts = _load_all_drafts(db_path_str)
+    all_drafts = _load_all_drafts()
 
     if not all_drafts:
         st.info(
@@ -183,10 +179,12 @@ with tab_drafts:
                 "Nom": st.column_config.TextColumn(width="medium"),
                 "Email": st.column_config.TextColumn(width="medium"),
                 "Sujet": st.column_config.TextColumn(width="large"),
-                "Débit": st.column_config.NumberColumn(format="%.2f €", width="small"),
-                "Statut": st.column_config.TextColumn(width="medium"),
-                "IA / Modèle": st.column_config.TextColumn(width="small"),
-                "Créé le": st.column_config.TextColumn(width="medium"),
+                "Débit": st.column_config.NumberColumn(format="%.2f €", disabled=True, width="small"),
+                "Statut": st.column_config.TextColumn(disabled=True, width="medium"),
+                "IA / Modèle": st.column_config.TextColumn(disabled=True, width="small"),
+                "Créé le": st.column_config.DatetimeColumn(
+                    "Créé le", format="DD/MM/YYYY HH:mm", disabled=True, width="medium"
+                ),
             },
         )
 
@@ -229,7 +227,6 @@ with tab_drafts:
                                 try:
                                     remote_id = save_draft_to_imap(cfg, message)
                                     mark_relance_draft_status(
-                                        db_path_str,
                                         draft_id=draft_id,
                                         status="draft_imap",
                                         error_message=None,
@@ -238,7 +235,6 @@ with tab_drafts:
                                     nb_sent += 1
                                 except Exception as exc:
                                     mark_relance_draft_status(
-                                        db_path_str,
                                         draft_id=draft_id,
                                         status="error",
                                         error_message=str(exc),
@@ -260,9 +256,7 @@ with tab_drafts:
                 else:
                     nb_deleted = 0
                     for _, row in selected_rows.iterrows():
-                        mark_relance_draft_status(
-                            db_path_str, draft_id=int(row["ID"]), status="deleted"
-                        )
+                        mark_relance_draft_status(draft_id=int(row["ID"]), status="deleted")
                         nb_deleted += 1
                     _load_all_drafts.clear()
                     _load_tracking_summary.clear()
@@ -318,7 +312,6 @@ with tab_drafts:
                         "💾 Sauvegarder modifications", type="primary", use_container_width=True
                     ):
                         save_relance_draft(
-                            db_path_str,
                             code_proprietaire=selected_draft["code_proprietaire"],
                             nom_proprietaire=selected_draft["nom_proprietaire"],
                             debit=selected_draft["debit"],
@@ -350,7 +343,6 @@ with tab_drafts:
                             )
                             remote_id = save_draft_to_imap(cfg, msg)
                             mark_relance_draft_status(
-                                db_path_str,
                                 draft_id=selected_draft["draft_id"],
                                 status="draft_imap",
                                 remote_draft_id=remote_id,
@@ -359,7 +351,6 @@ with tab_drafts:
                             st.toast("Brouillon déposé sur Hotmail !", icon="📬")
                         except Exception as exc:
                             mark_relance_draft_status(
-                                db_path_str,
                                 draft_id=selected_draft["draft_id"],
                                 status="error",
                                 error_message=str(exc),
@@ -372,7 +363,7 @@ with tab_drafts:
                 with col_b3:
                     if st.form_submit_button("🗑️ Supprimer", use_container_width=True):
                         mark_relance_draft_status(
-                            db_path_str, draft_id=selected_draft["draft_id"], status="deleted"
+                            draft_id=selected_draft["draft_id"], status="deleted"
                         )
                         st.toast("Brouillon supprimé", icon="🗑️")
                         _load_all_drafts.clear()
@@ -389,7 +380,7 @@ with tab_tracking:
         "Visualisez les dates clés : premier envoi, dernier envoi, volume de relances et statut d'apurement."
     )
 
-    tracking_data = _load_tracking_summary(db_path_str)
+    tracking_data = _load_tracking_summary()
 
     if not tracking_data:
         st.info("Aucune donnée de relance ou alerte détectée pour le suivi.")
@@ -539,7 +530,7 @@ with tab_history:
     st.subheader("Journal chronologique de toutes les relances")
     st.caption("Consultez l'historique complet de chaque message avec le texte exact rédigé.")
 
-    all_drafts_hist = _load_all_drafts(db_path_str)
+    all_drafts_hist = _load_all_drafts()
     if not all_drafts_hist:
         st.info("Aucun historique disponible.")
     else:

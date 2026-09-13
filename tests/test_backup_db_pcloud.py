@@ -315,7 +315,7 @@ def test_telecharger_dernier_backup_pcloud_selectionne_le_plus_recent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     local_db_path = tmp_path / "BDD" / "coproprietaires.sqlite"
-    monkeypatch.setattr(pcloud_mod, "get_db_path", lambda db_name=None: local_db_path)
+    monkeypatch.setattr(pcloud_mod, "get_backup_dir", lambda: local_db_path.parent)
 
     remote_entries = [
         {"name": "coproprietaires-30-07-2026-21-22.sqlite", "isfolder": False, "fileid": 1},
@@ -356,7 +356,7 @@ def test_telecharger_dernier_backup_pcloud_annule_si_base_locale_et_refus(
     local_db_path = tmp_path / "BDD" / "coproprietaires.sqlite"
     local_db_path.parent.mkdir(parents=True, exist_ok=True)
     local_db_path.write_text("local", encoding="utf-8")
-    monkeypatch.setattr(pcloud_mod, "get_db_path", lambda db_name=None: local_db_path)
+    monkeypatch.setattr(pcloud_mod, "get_backup_dir", lambda: local_db_path.parent)
     monkeypatch.setattr("builtins.input", lambda prompt="": "n")
 
     sdk = DummySDK(folder=DummyFolder(existing=None), file_obj=DummyFile({}))
@@ -378,7 +378,7 @@ def test_telecharger_dernier_backup_pcloud_ecrase_et_supprime_sidecars(
     local_db_path.write_text("local", encoding="utf-8")
     (local_db_path.parent / "coproprietaires.sqlite-wal").write_text("wal", encoding="utf-8")
     (local_db_path.parent / "coproprietaires.sqlite-shm").write_text("shm", encoding="utf-8")
-    monkeypatch.setattr(pcloud_mod, "get_db_path", lambda db_name=None: local_db_path)
+    monkeypatch.setattr(pcloud_mod, "get_backup_dir", lambda: local_db_path.parent)
     monkeypatch.setattr("builtins.input", lambda prompt="": "o")
 
     remote_entries = [

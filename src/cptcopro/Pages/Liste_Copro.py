@@ -3,40 +3,29 @@
 from __future__ import annotations
 
 import io
-import sqlite3
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from cptcopro.utils.paths import get_db_path
+from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.db_helpers import fetch_dataframe, normalize_date_columns
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
 )
 from cptcopro.utils.ui_components import render_header
 
-DB_PATH = get_db_path()
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
-
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_coproprietaires(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    """Charge la liste complète des copropriétaires depuis SQLite."""
-    del db_cache_key
-    with sqlite3.connect(db_path) as conn:
-        df = pd.read_sql_query(
+def load_coproprietaires() -> pd.DataFrame:
+    """Charge la liste complète des copropriétaires depuis MariaDB."""
+    with get_db_cursor() as cur:
+        cur.execute(
             "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, "
             "type_apt AS Type, num_apt AS Numero, last_check AS Date FROM coproprietaires "
-            "ORDER BY nom_proprietaire ASC",
-            conn,
+            "ORDER BY nom_proprietaire ASC"
         )
-    return df
+        df = fetch_dataframe(cur)
+    return normalize_date_columns(df, ["Date"])
 
 
 render_header(
@@ -44,8 +33,8 @@ render_header(
     "Répertoire complet des copropriétaires, lots rattachés et typologies d'appartements",
 )
 
-db_cache_key = _get_db_cache_key(DB_PATH)
-df_copros = load_coproprietaires(DB_PATH, db_cache_key)
+df_copros = load_coproprietaires()
+
 
 if df_copros.empty:
     st.warning("⚠️ Aucun copropriétaire trouvé dans la base de données.")

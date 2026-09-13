@@ -1,19 +1,20 @@
-"""Gestion des templates d'email de relance (sujet + corps parametrables).
+"""Gestion des templates d email de relance (MariaDB).
 
 Un template est un couple (sujet, corps) contenant des placeholders du type
 `{nom_proprietaire}` remplaces par les donnees reelles du coproprietaire au
-moment de la generation du brouillon (voir `utils.relance_mailer.render_relance_template`).
+moment de la generation du brouillon.
 """
 
 from __future__ import annotations
 
-import sqlite3
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-logger = logger.bind(type_log="BDD")
+from .connection import get_db_connection, get_db_cursor
 
+_logger = logger.bind(type_log="BDD")
 
 DEFAULT_TEMPLATE_NAME = "Standard"
 DEFAULT_TEMPLATE_SUBJECT = "Relance charges copropriete - {nom_proprietaire} ({date_origin})"
@@ -28,11 +29,8 @@ DEFAULT_TEMPLATE_BODY = (
 )
 DEFAULT_TEMPLATE_TONE = "courtois, professionnel et ferme"
 
-# 'static': substitution directe des placeholders. 'llm': le sujet/corps servent
-# de guide de contenu et de ton pour la generation par l'assistant IA.
 GENERATION_MODES = ("static", "llm")
 
-# Placeholders disponibles pour la redaction d'un template (documentation UI).
 TEMPLATE_PLACEHOLDERS = [
     "nom_proprietaire",
     "code_proprietaire",
@@ -48,151 +46,194 @@ TEMPLATE_PLACEHOLDERS = [
 ]
 
 
-def init_relance_templates_if_missing(db_path: str) -> bool:
+def init_relance_templates_if_missing(db_path: str | None = None) -> bool:
     """Cree un template par defaut si la table est vide."""
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
     try:
-        cur.execute("SELECT COUNT(*) FROM relance_template")
-        if cur.fetchone()[0] > 0:
-            return False
-        cur.execute(
-            """
-            INSERT INTO relance_template (
-                name, subject_template, body_template, generation_mode, tone_instruction, is_default
-            )
-            VALUES (?, ?, ?, ?, ?, 1)
-            """,
-            (
-                DEFAULT_TEMPLATE_NAME,
-                DEFAULT_TEMPLATE_SUBJECT,
-                DEFAULT_TEMPLATE_BODY,
-                "static",
-                DEFAULT_TEMPLATE_TONE,
-            ),
-        )
-        conn.commit()
-        logger.info("Template de relance par defaut cree.")
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS cnt FROM relance_template")
+                row = cur.fetchone()
+                if row and row["cnt"] > 0:
+                    return False
+                cur.execute(
+                    """
+                    INSERT INTO relance_template (
+                        name, subject_template, body_template, generation_mode, tone_instruction, is_default
+                    )
+                    VALUES (%s, %s, %s, %s, %s, 1)
+                    """,
+                    (
+                        DEFAULT_TEMPLATE_NAME,
+                        DEFAULT_TEMPLATE_SUBJECT,
+                        DEFAULT_TEMPLATE_BODY,
+                        "static",
+                        DEFAULT_TEMPLATE_TONE,
+                    ),
+                )
+        _logger.info("Template de relance par defaut cree.")
         return True
     except Exception as exc:
-        conn.rollback()
-        logger.error(f"Erreur initialisation relance_template: {exc}")
+        _logger.error(f"Erreur initialisation relance_template: {exc}")
         raise
-    finally:
-        conn.close()
 
 
-def list_relance_templates(db_path: str) -> list[dict[str, Any]]:
+def list_relance_templates(db_path: str | None = None) -> list[dict[str, Any]]:
     """Liste tous les templates de relance (le template par defaut en premier)."""
-    init_relance_templates_if_missing(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        rows = conn.execute(
-            "SELECT * FROM relance_template ORDER BY is_default DESC, name ASC"
-        ).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+    init_relance_templates_if_missing()
+    with get_db_cursor() as cur:
+        cur.execute("SELECT * FROM relance_template ORDER BY is_default DESC, name ASC")
+        return list(cur.fetchall())
 
 
-def get_relance_template(db_path: str, template_id: int | None = None) -> dict[str, Any] | None:
+def get_relance_template(
+    *args: Any,
+    template_id: int | None = None,
+    db_path: str | None = None,
+) -> dict[str, Any] | None:
     """Retourne un template par id, ou le template par defaut si `template_id` est None."""
-    init_relance_templates_if_missing(db_path)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
+    pos = list(args)
+    if pos:
+        if (
+            pos[0] is None
+            or isinstance(pos[0], Path)
+            or (
+                isinstance(pos[0], str)
+                and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
+            )
+        ):
+            pos = pos[1:]
+        if pos and template_id is None:
+            template_id = pos[0]
+
+    init_relance_templates_if_missing()
+    with get_db_cursor() as cur:
         if template_id is not None:
-            row = conn.execute(
-                "SELECT * FROM relance_template WHERE template_id = ?",
+            cur.execute(
+                "SELECT * FROM relance_template WHERE template_id = %s",
                 (int(template_id),),
-            ).fetchone()
+            )
+            row = cur.fetchone()
         else:
-            row = conn.execute(
-                "SELECT * FROM relance_template WHERE is_default = 1 LIMIT 1"
-            ).fetchone()
+            cur.execute("SELECT * FROM relance_template WHERE is_default = 1 LIMIT 1")
+            row = cur.fetchone()
             if row is None:
-                row = conn.execute(
-                    "SELECT * FROM relance_template ORDER BY template_id LIMIT 1"
-                ).fetchone()
+                cur.execute("SELECT * FROM relance_template ORDER BY template_id LIMIT 1")
+                row = cur.fetchone()
         return dict(row) if row else None
-    finally:
-        conn.close()
 
 
 def create_relance_template(
-    db_path: str,
-    name: str,
-    subject_template: str,
-    body_template: str,
+    *args: Any,
+    name: str | None = None,
+    subject_template: str | None = None,
+    body_template: str | None = None,
     generation_mode: str = "static",
     tone_instruction: str = "",
     is_default: bool = False,
+    db_path: str | None = None,
 ) -> int:
     """Cree un nouveau template et retourne son identifiant."""
-    name = (name or "").strip()
-    subject_template = subject_template or ""
-    body_template = body_template or ""
-    generation_mode = (generation_mode or "static").strip().lower()
-    if not name:
+    pos = list(args)
+    if pos and (
+        pos[0] is None
+        or isinstance(pos[0], Path)
+        or (
+            isinstance(pos[0], str)
+            and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
+        )
+    ):
+        pos = pos[1:]
+
+    if pos:
+        if len(pos) >= 1 and name is None:
+            name = pos[0]
+        if len(pos) >= 2 and subject_template is None:
+            subject_template = pos[1]
+        if len(pos) >= 3 and body_template is None:
+            body_template = pos[2]
+        if len(pos) >= 4:
+            generation_mode = pos[3]
+        if len(pos) >= 5:
+            tone_instruction = pos[4]
+        if len(pos) >= 6:
+            is_default = bool(pos[5])
+
+    nm = (name or "").strip()
+    subj = subject_template or ""
+    body = body_template or ""
+    gen_mode = (generation_mode or "static").strip().lower()
+    if not nm:
         raise ValueError("name vide")
-    if not subject_template.strip():
+    if not subj.strip():
         raise ValueError("subject_template vide")
-    if not body_template.strip():
+    if not body.strip():
         raise ValueError("body_template vide")
-    if generation_mode not in GENERATION_MODES:
+    if gen_mode not in GENERATION_MODES:
         raise ValueError(f"generation_mode doit etre parmi {GENERATION_MODES}")
 
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
     try:
-        if is_default:
-            cur.execute("UPDATE relance_template SET is_default = 0")
-        cur.execute(
-            """
-            INSERT INTO relance_template (
-                name, subject_template, body_template, generation_mode, tone_instruction, is_default
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                name,
-                subject_template,
-                body_template,
-                generation_mode,
-                (tone_instruction or "").strip(),
-                1 if is_default else 0,
-            ),
-        )
-        conn.commit()
-        if cur.lastrowid is None:
-            raise RuntimeError("INSERT did not return a lastrowid")
-        return int(cur.lastrowid)
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                if is_default:
+                    cur.execute("UPDATE relance_template SET is_default = 0")
+                cur.execute(
+                    """
+                    INSERT INTO relance_template (
+                        name, subject_template, body_template, generation_mode, tone_instruction, is_default
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        nm,
+                        subj,
+                        body,
+                        gen_mode,
+                        (tone_instruction or "").strip(),
+                        1 if is_default else 0,
+                    ),
+                )
+                if cur.lastrowid is None:
+                    raise RuntimeError("INSERT did not return a lastrowid")
+                return int(cur.lastrowid)
     except Exception as exc:
-        conn.rollback()
-        logger.error(f"Erreur create_relance_template: {exc}")
+        _logger.error(f"Erreur create_relance_template: {exc}")
         raise
-    finally:
-        conn.close()
 
 
 def update_relance_template(
-    db_path: str,
-    template_id: int,
+    *args: Any,
+    template_id: int | None = None,
     name: str | None = None,
     subject_template: str | None = None,
     body_template: str | None = None,
     generation_mode: str | None = None,
     tone_instruction: str | None = None,
     is_default: bool | None = None,
+    db_path: str | None = None,
 ) -> bool:
-    """Met a jour un template existant (mise a jour partielle)."""
+    """Met a jour un template existant."""
+    pos = list(args)
+    if pos and (
+        pos[0] is None
+        or isinstance(pos[0], Path)
+        or (
+            isinstance(pos[0], str)
+            and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
+        )
+    ):
+        pos = pos[1:]
+    if pos and template_id is None:
+        template_id = int(pos[0])
+
+    if template_id is None:
+        raise ValueError("template_id manquant")
+
     updates: dict[str, Any] = {}
     if name is not None:
-        name = name.strip()
-        if not name:
+        nm = name.strip()
+        if not nm:
             raise ValueError("name vide")
-        updates["name"] = name
+        updates["name"] = nm
     if subject_template is not None:
         if not subject_template.strip():
             raise ValueError("subject_template vide")
@@ -202,10 +243,10 @@ def update_relance_template(
             raise ValueError("body_template vide")
         updates["body_template"] = body_template
     if generation_mode is not None:
-        generation_mode = generation_mode.strip().lower()
-        if generation_mode not in GENERATION_MODES:
+        gen_mode = generation_mode.strip().lower()
+        if gen_mode not in GENERATION_MODES:
             raise ValueError(f"generation_mode doit etre parmi {GENERATION_MODES}")
-        updates["generation_mode"] = generation_mode
+        updates["generation_mode"] = gen_mode
     if tone_instruction is not None:
         updates["tone_instruction"] = tone_instruction.strip()
     if is_default is not None:
@@ -214,57 +255,70 @@ def update_relance_template(
     if not updates:
         return False
 
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
     try:
-        if updates.get("is_default") == 1:
-            cur.execute("UPDATE relance_template SET is_default = 0")
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = [*updates.values(), int(template_id)]
-        cur.execute(
-            f"UPDATE relance_template SET {set_clause}, updated_at = CURRENT_TIMESTAMP "  # nosec B608 — set_clause = ", ".join(f"{k} = ?" for k in updates) : clés dict interne, valeurs via "?"
-            "WHERE template_id = ?",
-            values,
-        )
-        conn.commit()
-        return cur.rowcount > 0
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                if updates.get("is_default") == 1:
+                    cur.execute("UPDATE relance_template SET is_default = 0")
+                set_clause = ", ".join(f"{k} = %s" for k in updates)
+                values = [*updates.values(), int(template_id)]
+                cur.execute(
+                    f"UPDATE relance_template SET {set_clause}, updated_at = CURRENT_TIMESTAMP "  # nosec B608
+                    "WHERE template_id = %s",
+                    values,
+                )
+                return bool(cur.rowcount > 0)
     except Exception as exc:
-        conn.rollback()
-        logger.error(f"Erreur update_relance_template: {exc}")
+        _logger.error(f"Erreur update_relance_template: {exc}")
         raise
-    finally:
-        conn.close()
 
 
-def delete_relance_template(db_path: str, template_id: int) -> bool:
+def delete_relance_template(
+    *args: Any, template_id: int | None = None, db_path: str | None = None
+) -> bool:
     """Supprime un template. Refuse de supprimer le dernier template restant."""
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT COUNT(*) FROM relance_template")
-        if cur.fetchone()[0] <= 1:
-            raise ValueError("Impossible de supprimer le dernier template restant")
-
-        cur.execute(
-            "SELECT is_default FROM relance_template WHERE template_id = ?",
-            (int(template_id),),
+    pos = list(args)
+    if pos and (
+        pos[0] is None
+        or isinstance(pos[0], Path)
+        or (
+            isinstance(pos[0], str)
+            and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
         )
-        row = cur.fetchone()
-        was_default = bool(row and row[0])
+    ):
+        pos = pos[1:]
+    if pos and template_id is None:
+        template_id = int(pos[0])
 
-        cur.execute("DELETE FROM relance_template WHERE template_id = ?", (int(template_id),))
-        deleted = cur.rowcount > 0
+    if template_id is None:
+        raise ValueError("template_id manquant")
 
-        if deleted and was_default:
-            cur.execute(
-                "UPDATE relance_template SET is_default = 1 "
-                "WHERE template_id = (SELECT MIN(template_id) FROM relance_template)"
-            )
-        conn.commit()
-        return deleted
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) AS cnt FROM relance_template")
+                row = cur.fetchone()
+                if row and row["cnt"] <= 1:
+                    raise ValueError("Impossible de supprimer le dernier template restant")
+
+                cur.execute(
+                    "SELECT is_default FROM relance_template WHERE template_id = %s",
+                    (int(template_id),),
+                )
+                r = cur.fetchone()
+                was_default = bool(r and r["is_default"])
+
+                cur.execute(
+                    "DELETE FROM relance_template WHERE template_id = %s", (int(template_id),)
+                )
+                deleted = cur.rowcount > 0
+
+                if deleted and was_default:
+                    # En MariaDB : UPDATE ... ORDER BY ... LIMIT 1
+                    cur.execute(
+                        "UPDATE relance_template SET is_default = 1 ORDER BY template_id ASC LIMIT 1"
+                    )
+                return bool(deleted)
     except Exception as exc:
-        conn.rollback()
-        logger.error(f"Erreur delete_relance_template: {exc}")
+        _logger.error(f"Erreur delete_relance_template: {exc}")
         raise
-    finally:
-        conn.close()

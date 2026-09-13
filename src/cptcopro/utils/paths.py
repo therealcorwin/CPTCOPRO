@@ -104,59 +104,6 @@ def get_data_dir() -> Path:
     return data_dir
 
 
-_DEFAULT_DB_NAME = "coproprietaires.sqlite"
-
-
-def get_db_path(db_name: str | None = None) -> Path:
-    """Retourne le chemin complet vers la base de données.
-
-    Le nom du fichier est déterminé dans cet ordre de priorité:
-    1. Paramètre `db_name` s'il est fourni
-    2. Variable d'environnement `CPTCOPRO_DB_NAME` (depuis .env)
-    3. Valeur par défaut: coproprietaires.sqlite
-
-    Note: `CPTCOPRO_DB_PATH` permet de surcharger le chemin complet (pour CI/tests),
-    tandis que `CPTCOPRO_DB_NAME` ne change que le nom du fichier.
-
-    Args:
-        db_name: Nom du fichier de base de données (optionnel)
-
-    Returns:
-        Chemin vers le fichier DB dans le sous-dossier BDD/
-
-    Raises:
-        OSError: Si le répertoire parent ne peut pas être créé
-    """
-    # Variable d'environnement pour override du chemin complet (CI, tests, etc.)
-    env_path = os.getenv("CPTCOPRO_DB_PATH")
-    if env_path and env_path.strip():
-        # Convertir en chemin absolu
-        path = Path(env_path).resolve()
-        _LOG.info(f"DB path from environment variable: {path}")
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            _LOG.error(f"Cannot create DB directory '{path.parent}': {e}")
-            raise OSError(f"Cannot create DB directory '{path.parent}': {e}") from e
-        return path
-
-    # Déterminer le nom de la BDD: paramètre > variable d'env > défaut
-    if db_name is None:
-        env_db_name = os.getenv("CPTCOPRO_DB_NAME")
-        if env_db_name and env_db_name.strip():
-            db_name = env_db_name.strip()
-        else:
-            db_name = _DEFAULT_DB_NAME
-
-    db_dir = get_data_dir() / "BDD"
-    try:
-        db_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        _LOG.error(f"Cannot create DB directory '{db_dir}': {e}")
-        raise OSError(f"Cannot create DB directory '{db_dir}': {e}") from e
-    return db_dir / db_name
-
-
 def get_log_path(log_name: str = "cptcopro.log") -> Path:
     """Retourne le chemin complet vers le fichier de log.
 
@@ -269,7 +216,6 @@ if __name__ == "__main__":
     print(f"App dir: {get_app_dir()}")
     print(f"Bundle dir: {get_bundle_dir()}")
     print(f"Data dir: {get_data_dir()}")
-    print(f"DB path: {get_db_path()}")
     print(f"Log path: {get_log_path()}")
     print(f"Backup dir: {get_backup_dir()}")
     print(f"Env file: {get_env_file_path()}")

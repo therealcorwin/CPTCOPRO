@@ -1,12 +1,13 @@
-"""Package Database - Gestion de la base de données SQLite.
+"""Package Database - Gestion de la base de données MariaDB.
 
 Ce package contient les modules pour :
-- Vérification des prérequis (Verif_Prerequis_BDD)
+- Gestion des connexions (connection)
 - Création et intégrité de la base (Creation_BDD)
 - Insertion des charges (Charges_To_BDD)
 - Insertion des copropriétaires (Coproprietaires_To_BDD)
 - Configuration des alertes (Alertes_Config)
 - Sauvegarde de la base (Backup_DB)
+- Gestion des relances (Relance_Config, Relance_Templates)
 """
 
 from .Alertes_Config import (
@@ -17,7 +18,8 @@ from .Alertes_Config import (
     update_config_alerte,
 )
 from .Backup_DB import backup_db
-from .Charges_To_BDD import enregistrer_donnees_sqlite
+from .Charges_To_BDD import enregistrer_charges
+from .connection import get_db_connection, get_db_cursor, verif_connexion_db
 from .constants import DEFAULT_ALERT_THRESHOLDS, DEFAULT_THRESHOLD_FALLBACK
 from .Coproprietaires_To_BDD import enregistrer_coproprietaires
 from .Creation_BDD import (
@@ -50,7 +52,9 @@ from .Relance_Templates import (
     list_relance_templates,
     update_relance_template,
 )
-from .Verif_Prerequis_BDD import verif_repertoire_db
+
+# Alias de compatibilité ascendante pendant la migration
+enregistrer_donnees_sqlite = enregistrer_charges
 
 __all__ = [
     "DEFAULT_ALERT_THRESHOLDS",
@@ -63,9 +67,12 @@ __all__ = [
     "create_relance_template",
     "creer_base_db",
     "delete_relance_template",
+    "enregistrer_charges",
     "enregistrer_coproprietaires",
     "enregistrer_donnees_sqlite",
     "get_config_alertes",
+    "get_db_connection",
+    "get_db_cursor",
     "get_relance_config",
     "get_relance_destinataires",
     "get_relance_drafts",
@@ -86,6 +93,6 @@ __all__ = [
     "update_relance_config",
     "update_relance_template",
     "upsert_relance_destinataire",
+    "verif_connexion_db",
     "verif_presence_db",
-    "verif_repertoire_db",
 ]

@@ -50,6 +50,12 @@ async def recup_charges_coproprietaires(page: Page) -> str:
             return "KO_WAIT_FOR_FINAL_LOAD"
 
     try:
+        await page.wait_for_selector("table#A1_TB tr, table#ctzA1 tr", timeout=TIMEOUT_PAGE_LOAD)
+        logger.info("Tableau des charges détecté dans le DOM")
+    except Exception as e:
+        logger.warning(f"Sélecteur de tableau non détecté dans le délai : {e}")
+
+    try:
         html_content = await page.content()
         logger.info("HTML des charges récupéré")
         return html_content
