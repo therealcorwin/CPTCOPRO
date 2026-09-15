@@ -183,43 +183,45 @@ def upsert_relance_destinataire(
     code_proprietaire: str | None = None,
     email_to: str | None = None,
     contact_name: str | None = None,
+    nom_proprietaire: str | None = None,
     db_path: str | None = None,
 ) -> None:
     """Insere ou met a jour l'adresse email cible d'un coproprietaire (batch UPSERT MariaDB)."""
+    default_contact = contact_name if contact_name is not None else nom_proprietaire
     # Extraction des parametres polymorphes (compatibilite ancien db_path positionnel)
     if len(args) >= 3:
         if "@" in str(args[1]):
             # args = (code_proprietaire, email_to, contact_name)
             code = str(args[0])
             email = str(args[1])
-            contact = str(args[2]) if len(args) > 2 else contact_name
+            contact = str(args[2]) if len(args) > 2 else default_contact
         else:
             # args = (db_path, code_proprietaire, email_to, contact_name?)
             code = str(args[1])
             email = str(args[2])
-            contact = str(args[3]) if len(args) > 3 else contact_name
+            contact = str(args[3]) if len(args) > 3 else default_contact
     elif len(args) == 2:
         if "@" in str(args[1]):
             code = str(args[0])
             email = str(args[1])
-            contact = contact_name
+            contact = default_contact
         else:
             code = str(args[1])
             email = str(email_to or "")
-            contact = contact_name
+            contact = default_contact
     elif len(args) == 1:
         if code_proprietaire is None:
             code = str(args[0])
             email = str(email_to or "")
-            contact = contact_name
+            contact = default_contact
         else:
             code = str(code_proprietaire)
             email = str(email_to or "")
-            contact = contact_name
+            contact = default_contact
     else:
         code = str(code_proprietaire or "")
         email = str(email_to or "")
-        contact = contact_name
+        contact = default_contact
 
     code = (code or "").strip()
     email = (email or "").strip()
@@ -448,6 +450,7 @@ def save_relance_draft(
 def get_relance_drafts(
     *args: Any,
     status: str | None = None,
+    code_proprietaire: str | None = None,
     limit: int = 200,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -496,6 +499,10 @@ def get_relance_drafts(
         else:
             where_clauses.append("status != %s")
             params.append("deleted")
+
+        if code_proprietaire:
+            where_clauses.append("code_proprietaire = %s")
+            params.append(code_proprietaire.strip())
 
         if where_clauses:
             query += " WHERE " + " AND ".join(where_clauses)
