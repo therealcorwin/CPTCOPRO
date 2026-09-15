@@ -202,6 +202,15 @@ def test_cli_options_documented(call_graph_content: str):
     for opt in expected_options:
         assert opt in unique_doc_options, f"L'option CLI '{opt}' n'est pas documentée dans call_graph.md."
 
+    # Vérifier que l'option supprimée --db-path n'est ni documentée ni acceptée par le parser
+    assert "--db-path" not in unique_doc_options, "L'option obsolète '--db-path' ne doit plus être documentée dans call_graph.md."
+    assert not hasattr(args, "db_path"), "L'attribut 'db_path' ne doit plus exister dans args."
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("sys.argv", ["main.py", "--db-path", "custom_path.sqlite"])
+        with pytest.raises(SystemExit):
+            _parse_cli_args()
+
 
 def test_all_streamlit_pages_documented(call_graph_content: str):
     """Vérifie que les 14 pages Streamlit du dossier Pages/ sont mentionnées dans call_graph.md."""

@@ -99,7 +99,6 @@ python -m cptcopro.main [OPTIONS]
 
 Options:
   --no-headless     Lance Playwright en mode visible (debug)
-  --db-path PATH    Surcharge le chemin de la base de données
   --no-serve        Ne pas lancer Streamlit après le traitement
   --serve-port N    Port Streamlit (défaut: 8501)
   --serve-host HOST Host Streamlit (défaut: 127.0.0.1)

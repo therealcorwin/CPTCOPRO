@@ -603,7 +603,6 @@ Cette matrice récapitule les opérations de lecture (**R**) et d'écriture (**W
 | `--no-headless` | Booléen | Exécute Playwright en mode visible (avec fenêtre Chromium active) à des fins d'inspection et de débogage |
 | `--no-backup` | Booléen | Ignore l'envoi de l'archive `.sql.gz` vers pCloud tout en maintenant la génération du dump local |
 | `--deco-pcloud` | Booléen | Révoque la session distante pCloud et supprime le fichier de token local `.pcloud_credentials` |
-| `--db-path` | Chaîne | *Obsolète sous MariaDB* (conservée pour compatibilité ascendante ; la connexion est pilotée par les variables d'environnement) |
 | `--serve-host` | Chaîne | Adresse IP d'écoute de l'interface Streamlit (par défaut `127.0.0.1`) |
 | `--serve-port` | Entier | Port TCP d'écoute de l'interface Streamlit (par défaut `8501`) |
 | `--serve-python` | Chaîne | Chemin vers l'exécutable Python alternatif pour exécuter Streamlit |

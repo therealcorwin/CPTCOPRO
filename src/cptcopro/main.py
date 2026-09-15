@@ -11,7 +11,6 @@ Usage:
 
 Options:
     --no-headless     Lance Playwright en mode visible (debug)
-    --db-path PATH    Option obsolète (conservée pour compatibilité ascendante)
     --no-serve        Ne pas lancer Streamlit après le traitement
     --no-backup           Ne pas envoyer de backup sur pCloud après l'écriture
     --deco-pcloud         Se déconnecter de pCloud et supprimer le token local
@@ -77,12 +76,6 @@ def _parse_cli_args() -> argparse.Namespace:
         "--no-headless",
         action="store_true",
         help="Lancer Playwright en mode visible (pour debugging)",
-    )
-    parser.add_argument(
-        "--db-path",
-        type=str,
-        default=None,
-        help="Option obsolète sous MariaDB (conservée pour compatibilité ascendante)",
     )
     parser.add_argument(
         "--no-serve",
@@ -201,7 +194,7 @@ def _scrape_and_parse(
     return data_charges, data_coproprietaires, date_suivi_copro
 
 
-def _restore_db_from_pcloud_if_missing(db_path: str | None = None) -> bool:
+def _restore_db_from_pcloud_if_missing() -> bool:
     """Restaure la base de données depuis pCloud si elle est absente dans MariaDB."""
     if dtb.verif_presence_db():
         return False
@@ -229,7 +222,6 @@ def _restore_db_from_pcloud_if_missing(db_path: str | None = None) -> bool:
 def _save_data_to_db(
     data_charges: list[Any],
     data_coproprietaires: list[Any],
-    db_path: str | None = None,
 ) -> str | None:
     """Enregistre les données extraites en base MariaDB et met à jour les alertes."""
     restored = _restore_db_from_pcloud_if_missing()
