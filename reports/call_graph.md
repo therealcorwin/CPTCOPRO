@@ -41,7 +41,7 @@ flowchart TB
         L3_conn["Database/connection.py (Pool PooledDB, retry deadlocks, ping=1)"]
         L3_tables["Tables InnoDB : charge (System Versioning), coproprietaires, alertes, relances"]
         L3_backup["Database/Backup_DB.py (Dump logique .sql.gz en Python pur)"]
-        L3_pcloud["Database/Backup_DB_Pcloud.py (Sauvegarde & Restauration distante pCloud)"]
+        L3_pcloud["Database/Backup_DB_Pcloud.py & utils/pcloud_oauth.py (Sauvegarde, Restauration & OAuth Playwright)"]
     end
 
     subgraph LAYER4["Couche 4 : Présentation, IA & Actions"]
@@ -106,8 +106,9 @@ flowchart TB
         r_gen["generer_brouillons_relances()"]
     end
 
-    subgraph PCLOUD[Synchronisation Cloud pCloud SDK]
+    subgraph PCLOUD[Synchronisation Cloud pCloud SDK & OAuth2]
         pc_conn["tester_token_et_connecter_pcloud()"]
+        pc_oauth["pcloud_oauth: obtenir_code_oauth_automatique()"]
         pc_restore["telecharger_dernier_backup_pcloud()"]
         pc_upload["sauvegarder_bdd_pcloud()"]
         pc_deco["deconnecter_pcloud()"]
@@ -140,7 +141,9 @@ flowchart TB
     main -. "--show-console" .-> t_show2
 
     main --> d_pre
-    d_pre -. "absente" .-> pc_conn --> pc_restore
+    d_pre -. "absente" .-> pc_conn
+    pc_conn -. "si token absent/expiré" .-> pc_oauth
+    pc_conn --> pc_restore
     pc_restore -. "si aucun backup" .-> d_cre
     pc_restore -. "si restaure" .-> d_purge
 
@@ -208,6 +211,7 @@ sequenceDiagram
     participant DB as Database (Modules BDD)
     participant RM as utils/relance_mailer
     participant PC as Backup_DB_Pcloud
+    participant PO as utils/pcloud_oauth
     participant SL as streamlit_launcher
 
     M->>E: validate_startup_env()
@@ -244,6 +248,11 @@ sequenceDiagram
     M->>DB: verif_presence_db()
     opt Base / table absente dans MariaDB
         M->>PC: tester_token_et_connecter_pcloud()
+        opt Token pCloud absent ou expiré
+            PC->>PO: obtenir_code_oauth_automatique(auth_url)
+            PO-->>PC: Code OAuth intercepté (Playwright)
+            PC->>PC: sdk.authenticate(code) -> .pcloud_credentials
+        end
         PC-->>M: Client pCloud authentifié
         M->>PC: telecharger_dernier_backup_pcloud()
         alt Backup disponible
@@ -272,6 +281,11 @@ sequenceDiagram
 
     opt Sauf option --no-backup
         M->>PC: tester_token_et_connecter_pcloud()
+        opt Token pCloud absent ou expiré
+            PC->>PO: obtenir_code_oauth_automatique(auth_url)
+            PO-->>PC: Code OAuth intercepté (Playwright)
+            PC->>PC: sdk.authenticate(code) -> .pcloud_credentials
+        end
         M->>PC: sauvegarder_bdd_pcloud(client, backup_path)
         PC-->>M: Téléversement terminé (.sql.gz)
     end
@@ -456,7 +470,9 @@ stateDiagram-v2
 
 ---
 
-## Sécurité & Authentification Hotmail (OAuth2 Device Flow)
+## Sécurité & Authentification OAuth2 (Hotmail & pCloud)
+
+### 1. Authentification Hotmail / Outlook (OAuth2 Microsoft Device Flow)
 
 La configuration de la messagerie pour le dépôt des brouillons s'appuie en priorité sur le protocole **OAuth2 Microsoft (Device Flow)**, éliminant le besoin de stocker des mots de passe en clair.
 
@@ -502,13 +518,69 @@ sequenceDiagram
 
 ---
 
+### 2. Authentification pCloud (OAuth2 avec interception Playwright automatique)
+
+La synchronisation des sauvegardes cloud repose sur le SDK officiel pCloud et un flux **OAuth2 avec interception automatique Playwright** orchestré par `src/cptcopro/utils/pcloud_oauth.py`. Ce mécanisme évite le copier-coller manuel d'URL ou de code de redirection dans la majorité des cas.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Backup_DB_Pcloud
+    participant PO as utils/pcloud_oauth
+    participant PW as Playwright (Chromium)
+    participant PC as Serveur OAuth pCloud
+    participant U as Utilisateur (si interaction requise)
+
+    B->>B: tester_presence_token_pcloud() (.pcloud_credentials)
+    alt Token présent et valide
+        B->>B: connecter_pcloud_via_token()
+    else Token absent ou expiré
+        B->>B: connecter_pcloud_via_oauth()
+        B->>PO: obtenir_code_oauth_automatique(auth_url, redirect_uri)
+        PO->>PW: recuperer_code_oauth_playwright() (Étape 1 : Headless)
+        PW->>PC: Navigation vers auth_url
+        alt Déjà connecté / Session approuvée
+            PC-->>PW: Redirection vers redirect_uri?code=XXX
+            PO-->>B: Code d'autorisation extrait
+        else Interaction utilisateur requise
+            PO->>PW: Étape 2 : Lancement navigateur visible
+            PW->>PC: Chargement page de connexion pCloud
+            U->>PW: Saisie identifiants & Clic "Autoriser"
+            PC-->>PW: Redirection callback (localhost:8000/callback?code=XXX)
+            Note over PO,PW: Interception route réseau & extraction du code
+            PW-->>U: Affichage page HTML stylisée "✓ Authentification réussie"
+            PO-->>B: Code d'autorisation extrait
+        end
+        opt Échec Playwright (repli)
+            B-->>U: Invite console input("Entrez le code...")
+        end
+        B->>PC: sdk.authenticate(authorization_code)
+        PC-->>B: Token OAuth2 & Location ID
+        B->>B: Persistance sécurisée dans .pcloud_credentials
+    end
+```
+
+| Propriété | Comportement & Règle |
+| --- | --- |
+| **URL de redirection** | Callback local `http://localhost:8000/callback` intercepté dynamiquement par Playwright sans serveur HTTP externe requis. |
+| **Interception double canal** | Interception combinée des routes réseau (`page.route`) et des événements de navigation frame (`framenavigated`) pour une capture infaillible du paramètre `?code=`. |
+| **UX transparente** | Tente d'abord une validation invisible en mode *headless*. En cas d'interaction nécessaire, ouvre le navigateur visible puis affiche un écran de succès avant fermeture automatique. |
+| **Persistance du token** | Enregistrement du jeton dans `.pcloud_credentials` à la racine du projet (fichier ignoré par Git). |
+| **Révocation / Déconnexion** | Drapeaux CLI `--deco-pcloud` pour révoquer la session distante et supprimer `.pcloud_credentials`. |
+
+---
+
 ## Confidentialité transversale (Streamlit)
 
 Le module `src/cptcopro/utils/privacy.py` centralise l'anonymisation des informations personnelles (noms, codes propriétaires, numéros de lots) pour permettre des démonstrations ou captures d'écran sans divulgation de données privées.
 
+L'activation du mode confidentiel s'effectue dynamiquement depuis l'en-tête de n'importe quelle page de l'application via le composant standardisé `render_header()` (`src/cptcopro/utils/ui_components.py`).
+
 ```mermaid
 flowchart LR
-    toggle["Toggle UI (st.checkbox)"] --> state["st.session_state['masquer_donnees_sensibles']"]
+    header["render_header() (ui_components.py)"] --> btn["Bouton-badge d'en-tête (st_yled.button)"]
+    btn --> toggle["_toggle_privacy()"]
+    toggle --> state["st.session_state['masquer_donnees_sensibles']"]
     state --> check["is_privacy_enabled()"]
 
     check --> df["appliquer_confidentialite(df)"]
@@ -521,6 +593,13 @@ flowchart LR
 
     anon --> result["Affichage sécurisé (ex: Propriétaire 1, Code ****)"]
 ```
+
+| Propriété | Implémentation technique |
+| --- | --- |
+| **Point de contrôle UI** | Bouton-badge cliquable pill design (`_header_privacy_btn`) affiché en haut à droite via `render_header(show_privacy_toggle=True)`. |
+| **Indicateur visuel** | Vert `🛡️ MODE PRIVÉ ACTIF` quand actif, Rouge `🔓 DONNÉES VISIBLES` quand inactif, avec infobulle explicative. |
+| **Clé de session** | `SESSION_KEY_PRIVACY = 'masquer_donnees_sensibles'`, persistée au cours de la session utilisateur Streamlit. |
+| **Portée d'application** | DataFrames de charges et lots, graphiques Plotly (barres, courbes temporelles), listes de sélection et filtres de recherche. |
 
 ---
 
@@ -536,6 +615,7 @@ flowchart LR
 | `src/cptcopro/utils/privacy.py` | Anonymisation transversale des données sensibles | `is_privacy_enabled()`, `appliquer_confidentialite()`, `preparer_df_pour_graphe()`, `anonymiser()` |
 | `src/cptcopro/utils/relance_mailer.py` | Moteur de relance email, IA Mistral & IMAP | `generate_relance_draft_with_llm()`, `render_relance_template()`, `generer_brouillons_relances()`, `save_draft_to_imap()`, `tester_connexion_mistral()`, `tester_connexion_imap()` |
 | `src/cptcopro/utils/hotmail_oauth.py` | Authentification Microsoft MSAL (Device Flow) | `verifier_statut_token_hotmail()`, `demarrer_device_flow_microsoft()`, `valider_device_flow_microsoft()`, `get_hotmail_access_token()` |
+| `src/cptcopro/utils/pcloud_oauth.py` | Automatisation de l'authentification OAuth2 pCloud avec Playwright | `obtenir_code_oauth_automatique()`, `recuperer_code_oauth_playwright()`, `extraire_code_depuis_url()` |
 | `src/cptcopro/utils/browser_launcher.py` | Initialisation et configuration Playwright | `creer_contexte_navigateur()`, gestion des arguments headless/sandbox |
 | `src/cptcopro/utils/streamlit_launcher.py` | Pilotage du processus Streamlit (dév et PyInstaller) | `start_streamlit()`, `start_streamlit_inprocess()`, `stop_streamlit()` |
 | `src/cptcopro/Parsing/Commun.py` | Orchestration Playwright de la collecte HTML | `recup_all_html_parallel()`, `_recup_html_generic()`, `login_and_open_menu()` |
@@ -551,7 +631,7 @@ flowchart LR
 | `src/cptcopro/Database/Alertes_Config.py` | Calcul des alertes et configuration des seuils | `sauvegarder_nombre_alertes()` (`GROUP BY ... WITH ROLLUP`), `get_config_alertes()`, `update_config_alerte()` |
 | `src/cptcopro/Database/Backup_DB.py` | Dump logique SQL pur Python compressé | `backup_db()` (génération de `.sql.gz` sans `mariadb-dump`), `generate_insert_statements()` |
 | `src/cptcopro/Database/Backup_DB_Pcloud.py` | Sauvegarde et restauration pCloud SDK | `sauvegarder_bdd_pcloud()`, `telecharger_dernier_backup_pcloud()`, `tester_token_et_connecter_pcloud()`, `deconnecter_pcloud()` |
-| `src/cptcopro/Database/Relance_Config.py` | Paramétrage et requêtes des relances | `get_relance_config()`, `update_relance_config()`, `list_relances_due()`, `save_relance_draft()`, `get_relance_drafts()`, `get_relances_tracking_summary()` |
+| `src/cptcopro/Database/Relance_Config.py` | Paramétrage et requêtes des relances | `get_relance_config()`, `update_relance_config()`, `list_relances_due()`, `save_relance_draft()`, `get_relance_drafts()`, `get_relances_tracking_summary()`, `upsert_relance_destinataire()`, `get_relance_destinataires()`, `mark_relance_draft_status()` |
 | `src/cptcopro/Database/Relance_Templates.py` | Gestion des modèles de relance | `list_relance_templates()`, `get_relance_template()`, `create_relance_template()`, `update_relance_template()`, `delete_relance_template()` |
 | `src/cptcopro/Affichage_Stream.py` | Point d'entrée Streamlit & structure de navigation | Configuration multi-pages (5 pôles), injection CSS, initialisation du pool de connexions |
 | `src/cptcopro/Pages/*.py` | 14 pages applicatives Streamlit | Visualisations, dashboards, fiches individuelles, réglages d'alertes et gestion des relances |

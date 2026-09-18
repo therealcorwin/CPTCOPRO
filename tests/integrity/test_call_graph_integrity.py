@@ -161,6 +161,14 @@ def test_documented_functions_exist():
             ],
         ),
         (
+            "cptcopro.utils.pcloud_oauth",
+            [
+                "extraire_code_depuis_url",
+                "recuperer_code_oauth_playwright",
+                "obtenir_code_oauth_automatique",
+            ],
+        ),
+        (
             "cptcopro.utils.privacy",
             [
                 "is_privacy_enabled",

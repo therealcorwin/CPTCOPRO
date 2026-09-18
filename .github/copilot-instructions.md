@@ -142,6 +142,17 @@ exists. Use `graphify path "<A>" "<B>"` for relationship questions and `graphify
 for focused-concept questions. These return a scoped subgraph, usually much smaller than the full
 report or raw grep output.
 
+Before every Graphify command, signal activity in PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force graphify-out | Out-Null
+New-Item -ItemType File -Force graphify-out/.graphify-activity | Out-Null
+```
+
+Use `graphify update .` only after significant changes (5+ files, merge/pull), when the graph is
+stale, or on explicit request. Warn before this potentially long operation. Do not run concurrent
+updates; `graphify-out/` is generated local state and must remain ignored by Git.
+
 Triggers: "how do I…", "where is…", "what does … do", "add/modify a <component>",
 "explain the architecture", or anything that depends on how files or classes relate.
 

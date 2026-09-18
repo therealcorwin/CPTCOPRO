@@ -249,3 +249,6 @@ audit
 scripts/
 GEMINI.md
 .gemini/settings.json
+.github/copilot-instructions.md
+AGENTS.md
+.github/copilot-instructions.md
