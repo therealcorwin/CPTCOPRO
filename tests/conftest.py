@@ -19,7 +19,7 @@ import cptcopro.Database.connection as db_conn  # noqa: E402
 db_conn._pool = None
 
 from cptcopro.Database.connection import get_db_connection  # noqa: E402
-from cptcopro.Database.Creation_BDD import creer_base_db  # noqa: E402
+from cptcopro.Database.Creation_BDD import creer_base_db, verif_presence_db  # noqa: E402
 
 CLEANUP_TABLES = [
     "relance_draft",
@@ -34,9 +34,18 @@ CLEANUP_TABLES = [
 
 
 @pytest.fixture(autouse=True)
-def clean_db():
-    """Nettoie les tables de donnees avant chaque test et s'assure du schema."""
-    creer_base_db()
+def clean_db(request):
+    """Nettoie les tables de donnees avant chaque test BDD et s'assure du schema."""
+    module_path = str(request.fspath).replace("\\", "/")
+    # Les tests unitaires purs (traitement, utils, parsing, integrity) n'ont pas besoin de réinitialiser la BDD
+    needs_db = any(k in module_path for k in ("/bdd/", "/security/"))
+    if not needs_db:
+        yield
+        return
+
+    # Création du schéma uniquement si la table 'charge' est absente
+    if not verif_presence_db():
+        creer_base_db()
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SET FOREIGN_KEY_CHECKS = 0")

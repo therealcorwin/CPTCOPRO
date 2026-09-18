@@ -65,14 +65,14 @@ def test_handle_pcloud_sync_no_backup():
 def test_handle_pcloud_sync_with_backup_and_deco():
     """Vérifie l'envoi vers pCloud et la déconnexion optionnelle."""
     mock_client = MagicMock()
-    with patch(
-        "cptcopro.Database.Backup_DB_Pcloud.tester_token_et_connecter_pcloud",
-        return_value=mock_client,
-    ) as mock_conn, patch(
-        "cptcopro.Database.Backup_DB_Pcloud.sauvegarder_bdd_pcloud"
-    ) as mock_save, patch(
-        "cptcopro.Database.Backup_DB_Pcloud.deconnecter_pcloud"
-    ) as mock_deco:
+    with (
+        patch(
+            "cptcopro.Database.Backup_DB_Pcloud.tester_token_et_connecter_pcloud",
+            return_value=mock_client,
+        ) as mock_conn,
+        patch("cptcopro.Database.Backup_DB_Pcloud.sauvegarder_bdd_pcloud") as mock_save,
+        patch("cptcopro.Database.Backup_DB_Pcloud.deconnecter_pcloud") as mock_deco,
+    ):
         _handle_pcloud_sync("fake_dump.sql", no_backup=False, deco_pcloud=True)
 
         mock_conn.assert_called_once()
@@ -86,3 +86,9 @@ def test_handle_pcloud_sync_without_backup_file():
         _handle_pcloud_sync(None, no_backup=False, deco_pcloud=False)
         mock_conn.assert_not_called()
 
+
+def test_parse_cli_args_unknown_option_exits():
+    """Vérifie qu'un argument inconnu provoque une sortie d'erreur du parser."""
+    with patch.object(sys, "argv", ["main.py", "--option-inconnue-xyz"]):
+        with pytest.raises(SystemExit):
+            _parse_cli_args()
