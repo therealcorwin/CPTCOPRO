@@ -247,3 +247,5 @@ scripts/audit.py
 reports/audit/*
 audit
 scripts/
+GEMINI.md
+.gemini/settings.json
