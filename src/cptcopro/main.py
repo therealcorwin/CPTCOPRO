@@ -177,11 +177,11 @@ def _scrape_and_parse(
     logger.info("Récupération des données des charges des copropriétaires en cours...")
     data_charges = tp.recuperer_situation_copro(parser_charges, date_suivi_copro)
     if not data_charges:
-        logger.warning("Attention : Aucune charge de copropriétaire n'a été extraite !")
-    else:
-        logger.success(
-            f"Données des charges des copropriétaires récupérées : {len(data_charges)} entrées."
-        )
+        logger.error("Erreur critique : Aucune charge de copropriétaire n'a été extraite !")
+        return None, None, None
+    logger.success(
+        f"Données des charges des copropriétaires récupérées : {len(data_charges)} entrées."
+    )
 
     logger.info("Parsing des lots des copropriétaires en cours...")
     lots_coproprietaires = tlc.extraire_lignes_brutes(html_copro)
@@ -191,7 +191,50 @@ def _scrape_and_parse(
     data_coproprietaires = tlc.consolider_proprietaires_lots(lots_coproprietaires)
     logger.success(f"{len(data_coproprietaires)} copropriétaires/groupes consolidés.")
 
+    if len(data_coproprietaires) != dtb.NOMBRE_LOTS_ATTENDU:
+        logger.error(
+            f"Erreur critique : {len(data_coproprietaires)} copropriétaires consolidés au lieu de {dtb.NOMBRE_LOTS_ATTENDU} attendus !"
+        )
+        return None, None, None
+
     return data_charges, data_coproprietaires, date_suivi_copro
+
+
+def _valider_donnees_avant_sauvegarde(
+    data_charges: list[Any] | None,
+    data_copros: list[Any] | None,
+) -> None:
+    """Valide l'intégrité et la complétude des données avant toute opération BDD.
+
+    Règles strictes :
+    1. Lots : obligatoires et décompte exact égal à NOMBRE_LOTS_ATTENDU (64).
+    2. Charges : obligatoires et non vides après normalisation.
+
+    Raises:
+        IncoherenceLotsError: Si les lots sont absents ou != NOMBRE_LOTS_ATTENDU.
+        CollecteChargesVideError: Si les charges sont absentes ou vides.
+    """
+    if not data_copros:
+        logger.critical(
+            f"SÉCURITÉ BDD : Lots absents ou vides (0 trouvé, {dtb.NOMBRE_LOTS_ATTENDU} attendus). Aucune écriture en base."
+        )
+        raise dtb.IncoherenceLotsError(
+            f"Incohérence lots : 0 lot trouvé au lieu de {dtb.NOMBRE_LOTS_ATTENDU} attendus !"
+        )
+
+    if len(data_copros) != dtb.NOMBRE_LOTS_ATTENDU:
+        logger.critical(
+            f"SÉCURITÉ BDD : Nombre de lots incorrect : {len(data_copros)} trouvé(s), {dtb.NOMBRE_LOTS_ATTENDU} attendus. Aucune écriture en base."
+        )
+        raise dtb.IncoherenceLotsError(
+            f"Incohérence lots : {len(data_copros)} lot(s) trouvé(s) au lieu de {dtb.NOMBRE_LOTS_ATTENDU} attendus !"
+        )
+
+    if not data_charges:
+        logger.critical("SÉCURITÉ BDD : Aucune charge extraite. Aucune écriture en base.")
+        raise dtb.CollecteChargesVideError("Échec collecte des charges : aucune donnée extraite.")
+
+    dtb.valider_charges_presentes(data_charges)
 
 
 def _restore_db_from_pcloud_if_missing() -> bool:
@@ -224,6 +267,9 @@ def _save_data_to_db(
     data_coproprietaires: list[Any],
 ) -> str | None:
     """Enregistre les données extraites en base MariaDB et met à jour les alertes."""
+    # Validation stricte en amont : bloque tout si anomalie
+    _valider_donnees_avant_sauvegarde(data_charges, data_coproprietaires)
+
     restored = _restore_db_from_pcloud_if_missing()
     dtb.integrite_db()
     backup_file = dtb.backup_db()
@@ -232,12 +278,8 @@ def _save_data_to_db(
         dtb.purger_alertes_pour_rebuild()
         logger.info("Alertes purgées après restore pCloud (recomputation via triggers).")
 
-    try:
-        dtb.enregistrer_coproprietaires(data_coproprietaires)
-    except Exception as exc_copro:
-        logger.error(f"Insertion copropriétaires échouée (lots invalides) : {exc_copro}")
-        logger.warning("Les charges seront quand même sauvegardées pour cette période.")
-
+    # STRICT : Tout ou rien. Pas d'insertion partielle si l'un des deux échoue !
+    dtb.enregistrer_coproprietaires(data_coproprietaires, nombre_attendu=dtb.NOMBRE_LOTS_ATTENDU)
     dtb.enregistrer_charges(data_charges)
     logger.info("Traitement terminé et données sauvegardées.")
 
@@ -247,6 +289,7 @@ def _save_data_to_db(
         logger.success("Table 'suivi_alertes' mise à jour.")
     except Exception as exc:
         logger.error(f"Erreur lors de la mise à jour de la table 'suivi_alertes' : {exc}")
+        raise
 
     return cast(str | None, backup_file)
 
@@ -339,11 +382,15 @@ def main() -> None:
     logger.info("Démarrage du script principal")
     data_charges, data_copros, date_suivi = _scrape_and_parse(args.no_headless)
 
-    if not data_charges and not data_copros:
-        logger.warning(
-            "Aucune donnée extraite pour les charges et/ou les lots. Arrêt du traitement."
+    if not data_charges or not data_copros:
+        lots_count = len(data_copros) if data_copros else 0
+        charges_count = len(data_charges) if data_charges else 0
+        logger.critical(
+            f"ARRÊT CRITIQUE : Données incomplètes ou manquantes après extraction "
+            f"(charges: {charges_count}, lots: {lots_count}/{dtb.NOMBRE_LOTS_ATTENDU}). "
+            "Aucune modification de la base de données."
         )
-        return
+        sys.exit(1)
 
     if args.show_console:
         if data_charges and date_suivi:
@@ -353,13 +400,12 @@ def main() -> None:
 
     backup_file = None
     try:
-        if data_charges and data_copros:
-            backup_file = _save_data_to_db(data_charges, data_copros)
+        backup_file = _save_data_to_db(data_charges, data_copros)
     except Exception as exc:
-        logger.error(f"Erreur lors des opérations BDD/backup : {exc}")
-        raise RuntimeError(
-            "ECHEC_CRITIQUE_COLLECTE_COPROPRIETAIRES: données lots invalides, base non écrasée."
-        ) from exc
+        logger.critical(
+            f"ÉCHEC CRITIQUE BDD / SAUVEGARDE : {exc}. Base non modifiée ou opération annulée."
+        )
+        sys.exit(1)
 
     if args.auto_relance_drafts:
         try:

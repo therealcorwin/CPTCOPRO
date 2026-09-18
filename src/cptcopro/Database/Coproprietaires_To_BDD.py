@@ -9,12 +9,39 @@ import pymysql.cursors
 from loguru import logger
 
 from .connection import get_db_connection
+from .constants import NOMBRE_LOTS_ATTENDU
 
 _logger = logger.bind(type_log="BDD")
 
 
 class CollecteCoproprietairesInvalideError(RuntimeError):
+    """Erreur de base pour les anomalies de collecte des copropriétaires."""
     pass
+
+
+class IncoherenceLotsError(CollecteCoproprietairesInvalideError):
+    """Erreur levée lorsque le nombre de lots collectés ne correspond pas au nombre attendu."""
+    pass
+
+
+def valider_nombre_lots(
+    data_coproprietaires: list[Any],
+    nombre_attendu: int = NOMBRE_LOTS_ATTENDU,
+) -> None:
+    """Valide strictement que le nombre de copropriétaires/lots correspond au nombre attendu.
+
+    Args:
+        data_coproprietaires: Liste brute ou consolidée des copropriétaires.
+        nombre_attendu: Nombre attendu (par défaut 64).
+
+    Raises:
+        IncoherenceLotsError: Si len(data_coproprietaires) != nombre_attendu.
+    """
+    count = len(data_coproprietaires) if data_coproprietaires is not None else 0
+    if count != nombre_attendu:
+        raise IncoherenceLotsError(
+            f"Incohérence lots : {count} lot(s) trouvé(s) au lieu de {nombre_attendu} attendus !"
+        )
 
 
 def _normaliser_lot_type(num_apt: str, type_apt: str) -> tuple[str, str]:
@@ -26,8 +53,14 @@ def _est_marqueur_non_lot(num_apt: str, type_apt: str) -> bool:
 
 
 def _valider_collecte(
-    data: list[tuple[str, str, str, str]], cur: pymysql.cursors.DictCursor
+    data: list[tuple[str, str, str, str]],
+    cur: pymysql.cursors.DictCursor,
+    nombre_attendu: int | None = None,
 ) -> None:
+    if nombre_attendu is not None and len(data) != nombre_attendu:
+        raise IncoherenceLotsError(
+            f"Incohérence lots : {len(data)} lot(s) trouvé(s) au lieu de {nombre_attendu} attendus !"
+        )
     invalides: list[str] = []
     lots_entrants: list[tuple[str, str]] = []
     for nom, code, num_apt, type_apt in data:
@@ -71,7 +104,10 @@ def _valider_collecte(
         )
 
 
-def enregistrer_coproprietaires(data_coproprietaires: list[Any]) -> None:
+def enregistrer_coproprietaires(
+    data_coproprietaires: list[Any],
+    nombre_attendu: int | None = None,
+) -> None:
     """Insere coproprietaires via batch UPSERT MariaDB (1 seul aller-retour reseau)."""
     _logger.info("Insertion des coproprietaires...")
     data: list[tuple[str, str, str, str]] = []
@@ -80,6 +116,10 @@ def enregistrer_coproprietaires(data_coproprietaires: list[Any]) -> None:
         code = copro.get("code_proprietaire") or copro.get("code") or ""
         data.append((nom, code, copro.get("num_apt") or "", copro.get("type_apt") or ""))
     if not data:
+        if nombre_attendu is not None:
+            raise IncoherenceLotsError(
+                f"Incohérence lots : 0 lot trouvé au lieu de {nombre_attendu} attendus !"
+            )
         _logger.info("Aucune donnee a inserer.")
         return
     upsert_sql = (
@@ -94,6 +134,6 @@ def enregistrer_coproprietaires(data_coproprietaires: list[Any]) -> None:
     )
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            _valider_collecte(data, cur)
+            _valider_collecte(data, cur, nombre_attendu=nombre_attendu)
             cur.executemany(upsert_sql, data)
     _logger.info(f"{len(data)} coproprietaires UPSERT MariaDB.")

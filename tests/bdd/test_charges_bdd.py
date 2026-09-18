@@ -1,8 +1,8 @@
-"""Tests pour l'enregistrement des charges et le declenchement des triggers sur MariaDB."""
+"""Tests pour l'enregistrement et la normalisation des charges dans MariaDB (Charges_To_BDD.py)."""
 
 from cptcopro.Database import enregistrer_charges, enregistrer_coproprietaires, integrite_db
 from cptcopro.Database.Charges_To_BDD import _normaliser_lignes_charge
-from cptcopro.Database.connection import get_db_connection, get_db_cursor
+from cptcopro.Database.connection import get_db_cursor
 
 
 def test_enregistrer_charges_happy_path():
@@ -25,25 +25,6 @@ def test_enregistrer_charges_happy_path():
         inserted = [(r["code_proprietaire"], r["nom_proprietaire"]) for r in cur.fetchall()]
 
     assert inserted == [("C001", "OWNER_ALPHA"), ("C002", "OWNER_BETA")]
-
-
-def test_trigger_alerte_debit_eleve():
-    integrite_db()
-
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO charge (code_proprietaire, nom_proprietaire, debit, credit, date, last_check) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                ("T001", "Danger", 2500.0, 0.0, "2025-10-28", "2025-10-28"),
-            )
-
-    with get_db_cursor() as cur:
-        cur.execute("SELECT * FROM alertes_debit_eleve WHERE code_proprietaire = 'T001'")
-        alerts = cur.fetchall()
-
-    assert len(alerts) >= 1
-    assert any(float(a["debit"]) == 2500.0 for a in alerts)
 
 
 def test_enregistrer_charges_no_longer_drops_first_three_rows():

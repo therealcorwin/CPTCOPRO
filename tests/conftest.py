@@ -50,3 +50,10 @@ def clean_db():
     init_config_alerte_if_missing()
     init_relance_config_if_missing()
     yield
+
+
+def load_fixture(name: str) -> str:
+    """Charge le contenu texte d'une fixture HTML depuis tests/fixtures."""
+    path = os.path.join(os.path.dirname(__file__), "fixtures", name)
+    with open(path, encoding="utf-8") as f:
+        return f.read()

@@ -543,8 +543,8 @@ def test_parse_imap_list_response_rfc3501():
 
 def test_generer_brouillons_relances_automation():
     """Teste l'automatisation de la génération de brouillons de relance."""
-    from cptcopro.utils.relance_mailer import generer_brouillons_relances
     from cptcopro.Database.connection import get_db_connection
+    from cptcopro.utils.relance_mailer import generer_brouillons_relances
 
     dbmod.integrite_db()
     dbmod.update_relance_config(enabled=1, frequency_days=14)
@@ -591,4 +591,3 @@ def test_generer_brouillons_relances_automation():
 
     # Restaurer l'activation
     dbmod.update_relance_config(enabled=1)
-

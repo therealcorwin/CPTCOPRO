@@ -12,6 +12,29 @@ from .connection import get_db_connection
 logger = logger.bind(type_log="BDD")
 
 
+class CollecteChargesVideError(RuntimeError):
+    """Erreur levée lorsque aucune charge valide n'est extraite ou fournie."""
+    pass
+
+
+def valider_charges_presentes(data: list[Any]) -> list[tuple[Any, Any, Any, Any, Any]]:
+    """Vérifie que des charges valides sont présentes après normalisation.
+
+    Raises:
+        CollecteChargesVideError: Si aucune charge valide n'est trouvée.
+    """
+    if not data:
+        raise CollecteChargesVideError(
+            "Échec collecte des charges : la liste des charges est vide."
+        )
+    lignes = _normaliser_lignes_charge(data)
+    if not lignes:
+        raise CollecteChargesVideError(
+            "Échec collecte des charges : aucune ligne de charge valide après filtrage."
+        )
+    return lignes
+
+
 def _normaliser_lignes_charge(data: list[Any]) -> list[tuple[Any, Any, Any, Any, Any]]:
     """Normalise la collecte charges en filtrant les entrées d'en-tête et lignes invalides.
 
@@ -49,7 +72,7 @@ def _normaliser_lignes_charge(data: list[Any]) -> list[tuple[Any, Any, Any, Any,
     return lignes
 
 
-def enregistrer_charges(data: list[Any]) -> None:
+def enregistrer_charges(data: list[Any], allow_empty: bool = False) -> None:
     """Enregistre les données extraites dans la base de données MariaDB.
 
     La fonction se connecte via le pool MariaDB et insère les données fournies
@@ -63,11 +86,20 @@ def enregistrer_charges(data: list[Any]) -> None:
     Parameters:
         data: Liste de tuples (code_proprietaire, nom_proprietaire, debit, credit, date).
               Les éventuelles lignes d'en-tête ou de format invalide sont filtrées.
+        allow_empty: Si False (défaut), lève CollecteChargesVideError si aucune
+                     ligne valide n'est présente.
+
+    Raises:
+        CollecteChargesVideError: Si aucune charge valide n'est extraite et allow_empty=False.
     """
     lignes = _normaliser_lignes_charge(data)
     if not lignes:
-        logger.info("Aucune donnée de charge à insérer après normalisation.")
-        return
+        if allow_empty:
+            logger.info("Aucune donnée de charge à insérer après normalisation.")
+            return
+        raise CollecteChargesVideError(
+            "Échec collecte des charges : aucune ligne de charge valide extraite."
+        )
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:

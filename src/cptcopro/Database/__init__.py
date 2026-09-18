@@ -18,10 +18,23 @@ from .Alertes_Config import (
     update_config_alerte,
 )
 from .Backup_DB import backup_db
-from .Charges_To_BDD import enregistrer_charges
+from .Charges_To_BDD import (
+    CollecteChargesVideError,
+    enregistrer_charges,
+    valider_charges_presentes,
+)
 from .connection import get_db_connection, get_db_cursor, verif_connexion_db
-from .constants import DEFAULT_ALERT_THRESHOLDS, DEFAULT_THRESHOLD_FALLBACK
-from .Coproprietaires_To_BDD import enregistrer_coproprietaires
+from .constants import (
+    DEFAULT_ALERT_THRESHOLDS,
+    DEFAULT_THRESHOLD_FALLBACK,
+    NOMBRE_LOTS_ATTENDU,
+)
+from .Coproprietaires_To_BDD import (
+    CollecteCoproprietairesInvalideError,
+    IncoherenceLotsError,
+    enregistrer_coproprietaires,
+    valider_nombre_lots,
+)
 from .Creation_BDD import (
     creer_base_db,
     integrite_db,
@@ -57,11 +70,15 @@ from .Relance_Templates import (
 enregistrer_donnees_sqlite = enregistrer_charges
 
 __all__ = [
+    "CollecteChargesVideError",
+    "CollecteCoproprietairesInvalideError",
     "DEFAULT_ALERT_THRESHOLDS",
     "DEFAULT_RELANCE_CONFIG",
     "DEFAULT_TEMPLATE_NAME",
     "DEFAULT_THRESHOLD_FALLBACK",
     "GENERATION_MODES",
+    "IncoherenceLotsError",
+    "NOMBRE_LOTS_ATTENDU",
     "TEMPLATE_PLACEHOLDERS",
     "backup_db",
     "create_relance_template",
@@ -70,6 +87,8 @@ __all__ = [
     "enregistrer_charges",
     "enregistrer_coproprietaires",
     "enregistrer_donnees_sqlite",
+    "valider_charges_presentes",
+    "valider_nombre_lots",
     "get_config_alertes",
     "get_db_connection",
     "get_db_cursor",

@@ -1,4 +1,6 @@
-"""Tests pour l'enregistrement des coproprietaires sur MariaDB."""
+"""Tests pour l'enregistrement et la validation des copropriétaires dans MariaDB (Coproprietaires_To_BDD.py)."""
+
+from __future__ import annotations
 
 import pymysql
 import pytest
@@ -116,3 +118,47 @@ def test_enregistrer_coproprietaires_refuse_changed_lot_set() -> None:
 
     after_rows = read_all_coproprietaires()
     assert after_rows == before_rows
+
+
+@pytest.mark.parametrize(
+    "rows, expected_codes",
+    [
+        (
+            [
+                {"proprietaire": "Alice", "code": "A1", "num_apt": "10", "type_apt": "App"},
+                {"proprietaire": "Bob", "code": "B2", "num_apt": "11", "type_apt": "Local"},
+            ],
+            ["A1", "B2"],
+        ),
+    ],
+)
+def test_enregistrer_coproprietaires_accepts_dicts(rows, expected_codes):
+    integrite_db()
+    enregistrer_coproprietaires(rows)
+    with get_db_cursor() as cur:
+        cur.execute("SELECT code_proprietaire FROM coproprietaires ORDER BY code_proprietaire")
+        codes = [r["code_proprietaire"] for r in cur.fetchall()]
+    for ec in expected_codes:
+        assert ec in codes
+
+
+def test_enregistrer_coproprietaires_mixed_tuple_dict_behavior():
+    integrite_db()
+
+    rows = [
+        {"proprietaire": "Claire", "code": "C3", "num_apt": "12", "type_apt": "App"},
+        ("David", "D4", "13", "Local"),
+    ]
+
+    try:
+        enregistrer_coproprietaires(rows)
+    except AttributeError:
+        with get_db_cursor() as cur:
+            cur.execute("SELECT code_proprietaire FROM coproprietaires")
+            codes = [r["code_proprietaire"] for r in cur.fetchall()]
+        assert codes == []
+    else:
+        with get_db_cursor() as cur:
+            cur.execute("SELECT code_proprietaire FROM coproprietaires")
+            codes = [r["code_proprietaire"] for r in cur.fetchall()]
+        assert "C3" in codes and "D4" in codes
