@@ -1,0 +1,62 @@
+﻿# Secrets et variables d'environnement
+.env
+.env.*
+*.env
+.env.example
+.pcloud_credentials
+msal_token_cache.json
+.oauth/
+
+# Fixtures de test et fichiers HTML d'exemple (évite les erreurs d'extraction LLM)
+tests/fixtures/
+tests/fixtures/*
+*.html
+sample*.html
+sample_bad.html
+sample_good.html
+sample_edge_amounts.html
+sample_multiheader.html
+table_with_classes.html
+table_without_classes.html
+no_table.html
+
+# Bases de données et sauvegardes
+*.sqlite
+*.sqlite*
+*.sqlite3
+*.db
+src/cptcopro/BDD/*
+src/cptcopro/BDD2/*
+src/BACKUP/*
+_data*
+
+# Logs, exports et fichiers temporaires
+*.log
+ctpcopro.log
+*.csv
+backup.txt
+trigger parametrable*
+-- Table de configuration*
+
+# Caches et environnements virtuels
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.venv/
+env/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Configuration IDE & CI
+.vscode/
+.idea/
+.github/
+CPTCOPRO.code-workspace
+
+# Sorties graphify
+graphify-out/

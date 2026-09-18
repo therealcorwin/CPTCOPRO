@@ -139,6 +139,10 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+.oauth/
+msal_token_cache.json
+secrets/mariadb_root_password
+secrets/mariadb_app_password
 .venv
 env/
 venv/
@@ -226,6 +230,7 @@ src/BACKUP/*
 *.csv
 src/cptcopro/Lots*
 src/cptcopro/BDD/*
+src/cptcopro/Backup/
 _data*
 trigger parametrable*
 
@@ -233,3 +238,12 @@ CPTCOPRO.code-workspace
 -- Table de configuration (une seule lig.sql
 .pcloud_credentials
 src/cptcopro/BDD2/test.sqlite*
+graphify-out
+
+.agents/rules/cptcopro.md
+.agents/rules/qualite_code.md
+scripts/audit.ps1
+scripts/audit.py
+reports/audit/*
+audit
+scripts/

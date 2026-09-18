@@ -1,64 +1,45 @@
-import sqlite3
+"""Page de suivi des alertes de débit élevé des copropriétaires."""
+
+from __future__ import annotations
+
 import pandas as pd
-import streamlit as st
 import plotly.express as px
-from pathlib import Path
-from streamlit_extras.metric_cards import style_metric_cards
+import streamlit as st
 
-# Import du module de chemins portables
-try:
-    from cptcopro.utils.paths import get_db_path
-    from cptcopro.utils.privacy import (
-        appliquer_confidentialite,
-        preparer_df_pour_graphe,
-    )
-
-    DB_PATH = get_db_path()
-except ImportError:
-    # Fallback pour le mode développement
-    DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
-    from cptcopro.utils.privacy import (
-        appliquer_confidentialite,
-        preparer_df_pour_graphe,
-    )
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
+from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.db_helpers import normalize_date_columns
+from cptcopro.utils.privacy import (
+    appliquer_confidentialite,
+    preparer_df_pour_graphe,
+)
+from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def recup_alertes(
-    db_path: Path, db_cache_key: int
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    del db_cache_key
-    query = "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, debit as Debit, type_alerte AS TypeApt, first_detection AS FirstDetection, last_detection AS LastDetection, occurence AS Occurence FROM alertes_debit_eleve"
-    query2 = "select SUM(debit) as TotalDebit FROM alertes_debit_eleve"
+def recup_alertes() -> tuple[pd.DataFrame, pd.DataFrame]:
+    query = (
+        "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, "
+        "debit AS Debit, type_alerte AS TypeApt, first_detection AS FirstDetection, "
+        "last_detection AS LastDetection, occurence AS Occurence "
+        "FROM alertes_debit_eleve ORDER BY debit DESC"
+    )
+    query2 = "SELECT SUM(debit) AS TotalDebit FROM alertes_debit_eleve"
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            recup_alerte = pd.read_sql_query(query, conn)
-            recup_total_debit = pd.read_sql_query(query2, conn)
-        finally:
-            conn.close()
+        with get_db_cursor() as cur:
+            cur.execute(query)
+            recup_alerte = pd.DataFrame(cur.fetchall())
+            cur.execute(query2)
+            recup_total_debit = pd.DataFrame(cur.fetchall())
+        recup_alerte = normalize_date_columns(recup_alerte, ["FirstDetection", "LastDetection"])
         return recup_alerte, recup_total_debit
-    except sqlite3.Error as e:
+    except Exception as e:
         st.error(f"Erreur lors de la récupération des alertes : {e}")
         return pd.DataFrame(), pd.DataFrame()
-    except Exception as e:
-        st.error(f"Erreur inattendue : {e}")
-        return pd.DataFrame(), pd.DataFrame()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def recup_debits_proprietaires_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    """Récupère les débits par date pour les propriétaires en alerte.
-    Renvoie un DataFrame avec les colonnes ['Code', 'Proprietaire', 'date', 'debit'].
-    """
-    del db_cache_key
+def recup_debits_proprietaires_alertes() -> pd.DataFrame:
+    """Récupère l'historique des débits pour les propriétaires actuellement en alerte."""
     query = (
         "SELECT c.code_proprietaire AS Code, c.nom_proprietaire AS Proprietaire, c.date, c.debit "
         "FROM vw_charge_coproprietaires c "
@@ -66,101 +47,122 @@ def recup_debits_proprietaires_alertes(db_path: Path, db_cache_key: int) -> pd.D
         "ORDER BY c.date ASC"
     )
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            df = pd.read_sql_query(query, conn)
-        finally:
-            conn.close()
-        if "date" in df.columns:
-            df["date"] = pd.to_datetime(df["date"]).dt.date
-        return df
-    except sqlite3.Error as e:
-        st.error(f"Impossible de récupérer les débits : {e}")
-        return pd.DataFrame()
+        with get_db_cursor() as cur:
+            cur.execute(query)
+            df = pd.DataFrame(cur.fetchall())
+        return normalize_date_columns(df, ["date"])
     except Exception as e:
-        st.error(f"Erreur inattendue lors de la récupération des débits : {e}")
+        st.error(f"Impossible de récupérer l'historique des débits : {e}")
         return pd.DataFrame()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def recup_suivi_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
+def recup_suivi_alertes() -> pd.DataFrame:
     query = """
         SELECT date_releve, nombre_alertes, total_debit,
                nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
                debit_2p, debit_3p, debit_4p, debit_5p, debit_na
-        FROM suivi_alertes 
+        FROM suivi_alertes
         ORDER BY date_releve DESC
     """
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            suivi_df = pd.read_sql_query(query, conn)
-        finally:
-            conn.close()
-        return suivi_df
-    except sqlite3.Error as e:
-        st.error(f"Erreur lors de la récupération des alertes : {e}")
-        return pd.DataFrame()
+        with get_db_cursor() as cur:
+            cur.execute(query)
+            suivi_df = pd.DataFrame(cur.fetchall())
+        return normalize_date_columns(suivi_df, ["date_releve"])
     except Exception as e:
-        st.error(f"Erreur inattendue : {e}")
+        st.error(f"Erreur lors de la récupération du suivi des alertes : {e}")
         return pd.DataFrame()
 
 
-st.title("Alertes Débit Élevé des Copropriétaires")
-
-db_cache_key = _get_db_cache_key(DB_PATH)
-alertes_df, sommealertes_df = recup_alertes(DB_PATH, db_cache_key)
-suivi_alerte = recup_suivi_alertes(DB_PATH, db_cache_key)
-
-date_releve = suivi_alerte["date_releve"].iat[0] if not suivi_alerte.empty else "N/A"
-date_dernier_releve = (
-    suivi_alerte["date_releve"].iat[1] if len(suivi_alerte) >= 2 else "N/A"
+render_header(
+    "🚨 Alertes Débit Élevé",
+    "Surveillance en temps réel des copropriétaires dépassant les seuils d'impayés définis",
 )
 
-nombre_alerte = suivi_alerte["nombre_alertes"].iat[0] if not suivi_alerte.empty else 0
-dernier_nombre_alerte = (
-    suivi_alerte["nombre_alertes"].iat[1] if len(suivi_alerte) >= 2 else 0
+alertes_df, sommealertes_df = recup_alertes()
+suivi_alerte = recup_suivi_alertes()
+debits_df = recup_debits_proprietaires_alertes()
+
+
+# Données de synthèse temporelle
+raw_date_releve = suivi_alerte["date_releve"].iat[0] if not suivi_alerte.empty else None
+raw_date_precedent = suivi_alerte["date_releve"].iat[1] if len(suivi_alerte) >= 2 else None
+
+date_releve_str = (
+    raw_date_releve.strftime("%d/%m/%Y")
+    if hasattr(raw_date_releve, "strftime")
+    else (str(raw_date_releve) if raw_date_releve is not None else "N/A")
 )
-delta_nombre_alerte = nombre_alerte - dernier_nombre_alerte
-
-somme_alerte = suivi_alerte["total_debit"].iat[0] if not suivi_alerte.empty else 0
-dernier_somme_alerte = (
-    suivi_alerte["total_debit"].iat[1] if len(suivi_alerte) >= 2 else 0
+date_precedent_str = (
+    raw_date_precedent.strftime("%d/%m/%Y")
+    if hasattr(raw_date_precedent, "strftime")
+    else (str(raw_date_precedent) if raw_date_precedent is not None else None)
 )
-delta_somme_alerte = somme_alerte - dernier_somme_alerte
 
-debits_df = recup_debits_proprietaires_alertes(DB_PATH, db_cache_key)
+nombre_alerte = (
+    int(suivi_alerte["nombre_alertes"].iat[0]) if not suivi_alerte.empty else len(alertes_df)
+)
+dernier_nombre = (
+    int(suivi_alerte["nombre_alertes"].iat[1]) if len(suivi_alerte) >= 2 else nombre_alerte
+)
+delta_nombre = nombre_alerte - dernier_nombre
 
-gauche, centre, droite = st.columns(3, gap=24)
+total_debit_alerte = (
+    float(suivi_alerte["total_debit"].iat[0])
+    if not suivi_alerte.empty
+    else (float(alertes_df["Debit"].sum()) if not alertes_df.empty else 0.0)
+)
+dernier_total = (
+    float(suivi_alerte["total_debit"].iat[1]) if len(suivi_alerte) >= 2 else total_debit_alerte
+)
+delta_total = total_debit_alerte - dernier_total
 
-with st.container():
-    with gauche:
-        st.metric(
-            "Date du dernier relevé",
-            value=date_releve,
-            delta=date_dernier_releve,
-            delta_color="off",
-        )
-        style_metric_cards(background_color="#292D34")
-    with centre:
-        st.metric(
-            "Nombre d'alertes",
-            value=nombre_alerte,
-            delta=delta_nombre_alerte,
-            delta_color="inverse",
-        )
-        style_metric_cards(background_color="#292D34")
-    with droite:
-        st.metric(
-            "Total débit en alerte",
-            value=f"{somme_alerte:.0f} €",
-            delta=f"{delta_somme_alerte:.0f} €",
-            delta_color="inverse",
-        )
-        style_metric_cards(background_color="#292D34")
+# ============================================================================
+# KPIS GLOBAUX
+# ============================================================================
+kpi1, kpi2, kpi3 = st.columns(3, gap="medium")
 
-if not alertes_df.empty:
-    st.markdown("#### Détail des alertes")
+with kpi1:
+    st.metric(
+        "Date du relevé",
+        value=date_releve_str,
+        delta=f"Précédent : {date_precedent_str}" if date_precedent_str else None,
+        delta_color="off",
+    )
+
+with kpi2:
+    st.metric(
+        "Copropriétaires en alerte",
+        value=nombre_alerte,
+        delta=f"{'+' if delta_nombre > 0 else ''}{delta_nombre}" if delta_nombre != 0 else None,
+        delta_color="inverse",
+        help="Nombre de copropriétaires dont le solde débiteur excède le seuil de leur type d'appartement.",
+    )
+
+with kpi3:
+    st.metric(
+        "Montant total des impayés critiques",
+        value=f"{total_debit_alerte:,.2f} €".replace(",", " "),
+        delta=f"{'+' if delta_total > 0 else ''}{delta_total:,.2f} €".replace(",", " ")
+        if delta_total != 0
+        else None,
+        delta_color="inverse",
+        help="Somme cumulée des débits de tous les copropriétaires en situation d'alerte.",
+    )
+
+st.divider()
+
+# ============================================================================
+# CONTENU PRINCIPAL
+# ============================================================================
+if alertes_df.empty:
+    st.success(
+        "🎉 **Excellente nouvelle !** Aucun copropriétaire n'est actuellement en situation d'alerte de débit élevé."
+    )
+else:
+    st.subheader(f"📋 Détail des {len(alertes_df)} compte(s) en alerte active")
+
     alertes_affiche = appliquer_confidentialite(
         alertes_df[
             [
@@ -168,29 +170,39 @@ if not alertes_df.empty:
                 "Code",
                 "Debit",
                 "TypeApt",
+                "Occurence",
                 "FirstDetection",
                 "LastDetection",
-                "Occurence",
             ]
-        ].sort_values(by="Debit", ascending=False)
+        ].copy()
     )
+
     st.dataframe(
         alertes_affiche,
-        column_config={
-            "Proprietaire": "Propriétaire",
-            "TypeApt": "Type Apt",
-            "Debit": st.column_config.NumberColumn("Débit", format="%.2f €"),
-            "FirstDetection": "Première détection",
-            "LastDetection": "Dernière détection",
-            "Occurence": "Occurrences",
-        },
+        width="stretch",
         hide_index=True,
+        column_config={
+            "Proprietaire": st.column_config.TextColumn("Copropriétaire", width="large"),
+            "Code": st.column_config.TextColumn("Code", width="small"),
+            "Debit": st.column_config.NumberColumn(
+                "Débit actuel (€)", format="%.2f €", width="medium"
+            ),
+            "TypeApt": st.column_config.TextColumn("Type Lot", width="small"),
+            "Occurence": st.column_config.NumberColumn("Occurrences (relevés)", width="small"),
+            "FirstDetection": st.column_config.DateColumn(
+                "1ère détection", format="DD/MM/YYYY", width="small"
+            ),
+            "LastDetection": st.column_config.DateColumn(
+                "Dernière détection", format="DD/MM/YYYY", width="small"
+            ),
+        },
     )
 
-    # graphique des débits par date pour les propriétaires ayant une alerte ---
+    st.divider()
 
+    # --- Graphique de suivi temporel des comptes en alerte ---
     if not debits_df.empty:
-        # Agréger le débit par date et par propriétaire
+        st.subheader("📈 Évolution temporelle des comptes en alerte")
         try:
             agg = (
                 debits_df.groupby(["date", "Proprietaire"])["debit"]
@@ -199,16 +211,16 @@ if not alertes_df.empty:
                 .sort_values(["date", "Proprietaire"])
             )
             if not agg.empty:
-                fig2 = px.line(
+                fig = px.line(
                     preparer_df_pour_graphe(agg, "Proprietaire"),
                     x="date",
                     y="debit",
                     color="Proprietaire",
-                    title="Débit des copropriétaires en alerte",
+                    title="Courbes des débits pour les copropriétaires en alerte (€)",
+                    markers=True,
                 )
-                fig2.update_layout(xaxis_title="Date", yaxis_title="Débit (€)")
-                st.plotly_chart(fig2, width="stretch")
+                fig.update_layout(xaxis_title="Date de relevé", yaxis_title="Débit (€)")
+                fig = apply_plotly_theme(fig)
+                st.plotly_chart(fig, width="stretch")
         except Exception as e:
-            st.warning(f"Impossible de générer le graphique des débits : {e}")
-else:
-    st.markdown("Aucune alerte de débit élevé trouvée.")
+            st.warning(f"Impossible de générer le graphique : {e}")

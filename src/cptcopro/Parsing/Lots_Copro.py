@@ -4,8 +4,10 @@ Ce module contient la logique de navigation spécifique pour récupérer
 le HTML des lots depuis le site du syndic.
 La connexion et l'orchestration sont gérées par Parsing.Commun.
 """
-from playwright.async_api import Page
+
 from loguru import logger
+from playwright.async_api import Page
+
 from .constants import TIMEOUT_PAGE_LOAD
 
 logger.remove()
@@ -24,7 +26,7 @@ async def _mesurer_completude_lots(page: Page) -> dict[str, int]:
     total_nodes = await page.locator("[id^='A17_']").count()
     lot_nodes = await page.locator("[id^='A17_']").filter(has_text="Lot").count()
     proprietaires_nodes = await page.locator("[id^='A17_']").evaluate_all(
-        """
+        r"""
         (elements) => elements
           .map((e) => (e.textContent || '').trim())
           .filter((text) => /\(\d+[A-Za-z]?\)\s*$/.test(text))
@@ -65,10 +67,7 @@ async def _attendre_liste_lots_complete(page: Page) -> tuple[bool, dict[str, int
         if len(historique_totaux) > STABILITY_SAMPLES:
             historique_totaux.pop(0)
 
-        stable = (
-            len(historique_totaux) == STABILITY_SAMPLES
-            and len(set(historique_totaux)) == 1
-        )
+        stable = len(historique_totaux) == STABILITY_SAMPLES and len(set(historique_totaux)) == 1
         assez_riche = (
             dernieres_mesures["total_nodes"] >= MIN_EXPECTED_LOTS_NODES
             and dernieres_mesures["lot_nodes"] >= MIN_EXPECTED_LOT_NODES
@@ -98,10 +97,10 @@ async def recup_lots_coproprietaires(page: Page) -> str:
     """
     Navigation spécifique pour récupérer le HTML des lots.
     La page doit être déjà connectée et le menu ouvert.
-    
+
     Args:
         page: Page Playwright avec menu ouvert
-    
+
     Returns:
         Contenu HTML ou code d'erreur (str commençant par 'KO_')
     """
@@ -111,7 +110,7 @@ async def recup_lots_coproprietaires(page: Page) -> str:
     except Exception as e:
         logger.error(f"Erreur lors du clic sur le lien liste copropriétaires : {e}")
         return "KO_CLICK_LISTE_COPRO"
-    
+
     try:
         await page.wait_for_selector("#z_A1_IMG", state="visible", timeout=10000)
         await page.click("#z_A1_IMG", timeout=10000)
@@ -119,7 +118,7 @@ async def recup_lots_coproprietaires(page: Page) -> str:
     except Exception as e:
         logger.error(f"Erreur lors du clic sur le lien liste dépliée : {e}")
         return "KO_CLICK_LISTE_COPRO_EXPANDED"
-    
+
     try:
         await page.wait_for_load_state("networkidle", timeout=TIMEOUT_PAGE_LOAD)
         logger.info("Attente de la fin du chargement après affichage de la liste")
@@ -129,9 +128,7 @@ async def recup_lots_coproprietaires(page: Page) -> str:
             e,
         )
         try:
-            await page.wait_for_load_state(
-                "domcontentloaded", timeout=TIMEOUT_PAGE_LOAD
-            )
+            await page.wait_for_load_state("domcontentloaded", timeout=TIMEOUT_PAGE_LOAD)
             logger.info("Fallback domcontentloaded atteint")
         except Exception as e2:
             logger.error(f"Erreur lors de l'attente du chargement final : {e2}")
@@ -168,7 +165,7 @@ async def recup_lots_coproprietaires(page: Page) -> str:
     except Exception as e:
         logger.error(f"Erreur lors du diagnostic de complétude des lots : {e}")
         return "KO_LOTS_DIAGNOSTIC"
-    
+
     try:
         html_content = await page.content()
         logger.info("HTML des lots récupéré")

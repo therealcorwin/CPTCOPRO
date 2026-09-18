@@ -4,36 +4,35 @@ Ce package regroupe les modules de traitement du HTML récupéré :
 - Charge_Copro : Parsing des charges des copropriétaires
 - Lots_Copro : Parsing des lots et consolidation propriétaires-lots
 """
+
 from .Charge_Copro import (
+    afficher_etat_coproprietaire,
     normalise_somme,
     recuperer_date_situation_copro,
     recuperer_situation_copro,
-    afficher_etat_coproprietaire,
 )
 from .Lots_Copro import (
-    extraire_lignes_brutes,
-    consolider_proprietaires_lots,
     afficher_avec_rich,
+    consolider_proprietaires_lots,
     detecter_proprietaire,
     est_ligne_lot,
-    extraire_info_lot,
     est_scic,
+    extraire_info_lot,
+    extraire_lignes_brutes,
     normaliser_prefixes_proprietaire,
 )
 
 __all__ = [
-    # Charge_Copro
-    "normalise_somme",
-    "recuperer_date_situation_copro",
-    "recuperer_situation_copro",
-    "afficher_etat_coproprietaire",
-    # Lots_Copro
-    "extraire_lignes_brutes",
-    "consolider_proprietaires_lots",
     "afficher_avec_rich",
+    "afficher_etat_coproprietaire",
+    "consolider_proprietaires_lots",
     "detecter_proprietaire",
     "est_ligne_lot",
-    "extraire_info_lot",
     "est_scic",
+    "extraire_info_lot",
+    "extraire_lignes_brutes",
+    "normalise_somme",
     "normaliser_prefixes_proprietaire",
+    "recuperer_date_situation_copro",
+    "recuperer_situation_copro",
 ]

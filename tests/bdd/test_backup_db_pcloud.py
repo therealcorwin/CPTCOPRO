@@ -7,7 +7,9 @@ from cptcopro.Database import Backup_DB_Pcloud as pcloud_mod
 
 
 class DummyFolder:
-    def __init__(self, existing=None, created_folder_id=321, content_by_id=None, root_contents=None):
+    def __init__(
+        self, existing=None, created_folder_id=321, content_by_id=None, root_contents=None
+    ):
         self.existing = existing
         self.created_folder_id = created_folder_id
         self.created_calls = []
@@ -62,7 +64,9 @@ class DummySDK:
         raise NotImplementedError
 
 
-def test_tester_presence_token_pcloud_detects_existing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_tester_presence_token_pcloud_detects_existing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(pcloud_mod, "get_project_root_dir", lambda: tmp_path)
     token_file = tmp_path / ".pcloud_credentials"
     token_file.write_text("{}", encoding="utf-8")
@@ -70,7 +74,9 @@ def test_tester_presence_token_pcloud_detects_existing_file(tmp_path: Path, monk
     assert pcloud_mod.tester_presence_token_pcloud() is True
 
 
-def test_tester_token_et_connecter_pcloud_uses_existing_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_tester_token_et_connecter_pcloud_uses_existing_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     token_file = tmp_path / ".pcloud_credentials"
     token_file.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(pcloud_mod, "get_project_root_dir", lambda: tmp_path)
@@ -91,7 +97,9 @@ def test_tester_token_et_connecter_pcloud_uses_existing_token(tmp_path: Path, mo
     assert pcloud_mod.tester_token_et_connecter_pcloud() is expected_sdk
 
 
-def test_tester_token_et_connecter_pcloud_falls_back_to_oauth_when_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_tester_token_et_connecter_pcloud_falls_back_to_oauth_when_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setattr(pcloud_mod, "get_project_root_dir", lambda: tmp_path)
     monkeypatch.setattr(pcloud_mod, "pcloud_token_path", tmp_path / ".pcloud_credentials")
 
@@ -303,9 +311,11 @@ def test_lister_fichiers_et_dossiers_pcloud_inclut_fichiers_des_sous_dossiers():
     ]
 
 
-def test_telecharger_dernier_backup_pcloud_selectionne_le_plus_recent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_telecharger_dernier_backup_pcloud_selectionne_le_plus_recent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     local_db_path = tmp_path / "BDD" / "coproprietaires.sqlite"
-    monkeypatch.setattr(pcloud_mod, "get_db_path", lambda db_name=None: local_db_path)
+    monkeypatch.setattr(pcloud_mod, "get_backup_dir", lambda: local_db_path.parent)
 
     remote_entries = [
         {"name": "coproprietaires-30-07-2026-21-22.sqlite", "isfolder": False, "fileid": 1},
@@ -325,7 +335,9 @@ def test_telecharger_dernier_backup_pcloud_selectionne_le_plus_recent(tmp_path: 
     monkeypatch.setattr(
         pcloud_mod,
         "lister_fichiers_et_dossiers_pcloud",
-        lambda sdk, folder_name, recursif=True, dossiers_dabord=True, folder_id=None: remote_entries,
+        lambda sdk, folder_name, recursif=True, dossiers_dabord=True, folder_id=None: (
+            remote_entries
+        ),
     )
 
     result = pcloud_mod.telecharger_dernier_backup_pcloud(sdk, overwrite=True)
@@ -338,11 +350,13 @@ def test_telecharger_dernier_backup_pcloud_selectionne_le_plus_recent(tmp_path: 
     assert Path(sdk.file.download_calls[0][1]).name.startswith("pcloud_restore_")
 
 
-def test_telecharger_dernier_backup_pcloud_annule_si_base_locale_et_refus(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_telecharger_dernier_backup_pcloud_annule_si_base_locale_et_refus(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     local_db_path = tmp_path / "BDD" / "coproprietaires.sqlite"
     local_db_path.parent.mkdir(parents=True, exist_ok=True)
     local_db_path.write_text("local", encoding="utf-8")
-    monkeypatch.setattr(pcloud_mod, "get_db_path", lambda db_name=None: local_db_path)
+    monkeypatch.setattr(pcloud_mod, "get_backup_dir", lambda: local_db_path.parent)
     monkeypatch.setattr("builtins.input", lambda prompt="": "n")
 
     sdk = DummySDK(folder=DummyFolder(existing=None), file_obj=DummyFile({}))
@@ -356,13 +370,15 @@ def test_telecharger_dernier_backup_pcloud_annule_si_base_locale_et_refus(tmp_pa
     }
 
 
-def test_telecharger_dernier_backup_pcloud_ecrase_et_supprime_sidecars(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_telecharger_dernier_backup_pcloud_ecrase_et_supprime_sidecars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     local_db_path = tmp_path / "BDD" / "coproprietaires.sqlite"
     local_db_path.parent.mkdir(parents=True, exist_ok=True)
     local_db_path.write_text("local", encoding="utf-8")
     (local_db_path.parent / "coproprietaires.sqlite-wal").write_text("wal", encoding="utf-8")
     (local_db_path.parent / "coproprietaires.sqlite-shm").write_text("shm", encoding="utf-8")
-    monkeypatch.setattr(pcloud_mod, "get_db_path", lambda db_name=None: local_db_path)
+    monkeypatch.setattr(pcloud_mod, "get_backup_dir", lambda: local_db_path.parent)
     monkeypatch.setattr("builtins.input", lambda prompt="": "o")
 
     remote_entries = [
@@ -370,12 +386,16 @@ def test_telecharger_dernier_backup_pcloud_ecrase_et_supprime_sidecars(tmp_path:
     ]
     sdk = DummySDK(
         folder=DummyFolder(existing=None),
-        file_obj=DummyFile({99: {"name": "coproprietaires-31-07-2026-23-37.sqlite", "content": "backup"}}),
+        file_obj=DummyFile(
+            {99: {"name": "coproprietaires-31-07-2026-23-37.sqlite", "content": "backup"}}
+        ),
     )
     monkeypatch.setattr(
         pcloud_mod,
         "lister_fichiers_et_dossiers_pcloud",
-        lambda sdk, folder_name, recursif=True, dossiers_dabord=True, folder_id=None: remote_entries,
+        lambda sdk, folder_name, recursif=True, dossiers_dabord=True, folder_id=None: (
+            remote_entries
+        ),
     )
 
     result = pcloud_mod.telecharger_dernier_backup_pcloud(sdk, overwrite=None)

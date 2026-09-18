@@ -3,7 +3,7 @@
 Ce module orchestre :
 - La récupération parallèle du HTML (charges et lots) via Playwright
 - Le parsing des données avec selectolax
-- La sauvegarde en base SQLite
+- La sauvegarde en base MariaDB
 - Le lancement de l'interface Streamlit
 
 Usage:
@@ -11,15 +11,26 @@ Usage:
 
 Options:
     --no-headless     Lance Playwright en mode visible (debug)
-    --db-path PATH    Surcharge le chemin de la base de données
     --no-serve        Ne pas lancer Streamlit après le traitement
-    --no-backup       Ne pas envoyer de backup sur pCloud après l'écriture
-    --deco-pcloud     Se déconnecter de pCloud et supprimer le token local
-    --show-console    Afficher les données dans la console (rich)
+    --no-backup           Ne pas envoyer de backup sur pCloud après l'écriture
+    --deco-pcloud         Se déconnecter de pCloud et supprimer le token local
+    --show-console        Afficher les données dans la console (rich)
+    --auto-relance-drafts Générer automatiquement les brouillons de relance pour les impayés
+    --relance-imap        Déposer également les brouillons dans le dossier IMAP Drafts
 """
 
+import argparse
 import asyncio
+import atexit
+import pathlib
+import subprocess
 import sys
+import time
+from contextlib import suppress
+from typing import Any, cast
+
+from loguru import logger
+from selectolax.parser import HTMLParser
 
 # Valider toutes les variables d'environnement requises AVANT d'importer les
 # modules applicatifs : certains d'entre eux (ex. Backup_DB_Pcloud) lisent le
@@ -29,19 +40,15 @@ from cptcopro.utils.env_loader import validate_startup_env
 
 validate_startup_env()
 
-from selectolax.parser import HTMLParser
+import cptcopro.Database as dtb
 import cptcopro.Database.Backup_DB_Pcloud as bckp_pcloud
-import pathlib
 import cptcopro.Parsing.Commun as pc
 import cptcopro.Traitement.Charge_Copro as tp
 import cptcopro.Traitement.Lots_Copro as tlc
-import cptcopro.Database as dtb
 import cptcopro.utils.streamlit_launcher as usl
-from cptcopro.utils.paths import get_db_path, get_log_path
-from loguru import logger
-import time
-import atexit
+from cptcopro.utils.paths import get_log_path
 
+dtb.verif_connexion_db()
 # Configurer les logs avec le bon chemin
 LOG_PATH = str(get_log_path("app.log"))
 
@@ -65,64 +72,15 @@ logger.add(
 
 logger = logger.bind(type_log="MAIN")
 
-# Utiliser le chemin de DB portable
-DB_PATH = str(get_db_path())
 
-
-def main() -> None:
-    """
-    Point d'entrée principal de l'application de suivi des copropriétaires.
-
-    Cette fonction orchestre l'ensemble du processus:
-
-    1. **Récupération HTML** : Lance deux navigateurs Playwright en parallèle
-       pour récupérer le HTML des charges et des lots depuis l'extranet.
-
-    2. **Parsing** : Parse le HTML avec selectolax pour extraire:
-       - La date de situation
-       - Les données des charges (nom, code, débit, crédit)
-       - Les lots associés à chaque copropriétaire
-
-    3. **Validation** : Vérifie la cohérence des données (64 copropriétaires).
-
-    4. **Persistance** : Sauvegarde les données en base SQLite après backup.
-
-    5. **Interface** : Lance l'interface Streamlit pour visualisation.
-
-    Options CLI:
-        --no-headless: Mode navigateur visible (debug)
-        --db-path: Surcharge du chemin base de données
-        --no-serve: Désactive le lancement automatique de Streamlit
-        --no-backup: Ignore la sauvegarde pCloud après l'écriture locale
-        --deco-pcloud: Déconnecte pCloud et supprime le token local
-        --show-console: Affiche les données dans la console (rich)
-
-    Returns:
-        None
-
-    Raises:
-        SystemExit: En cas d'erreur de récupération HTML ou de validation.
-
-    Note:
-        Les credentials sont chargés depuis le fichier .env via env_loader.
-    """
-    # CLI: parser minimal pour debug / override
-    import argparse
-
+def _parse_cli_args() -> argparse.Namespace:
+    """Analyse les arguments de ligne de commande."""
     parser = argparse.ArgumentParser(description="Suivi des copropriétaires")
     parser.add_argument(
         "--no-headless",
         action="store_true",
         help="Lancer Playwright en mode visible (pour debugging)",
     )
-    parser.add_argument(
-        "--db-path",
-        type=str,
-        default=None,
-        help="Chemin vers la base de données SQLite",
-    )
-    # Streamlit sera lancé par défaut après le traitement. Utilisez
-    # `--no-serve` pour **désactiver** le lancement automatique de l'UI.
     parser.add_argument(
         "--no-serve",
         action="store_true",
@@ -143,7 +101,6 @@ def main() -> None:
         default=None,
         help="Interpréteur Python à utiliser pour lancer Streamlit (optionnel)",
     )
-    # Options Streamlit supplémentaires (contrôlent le comportement d'affichage)
     parser.add_argument(
         "--streamlit-no-browser",
         action="store_true",
@@ -180,156 +137,183 @@ def main() -> None:
         action="store_true",
         help="Se déconnecter de pCloud et supprimer le token local en fin d'exécution",
     )
-    args = parser.parse_args()
-
-    # override DB_PATH si fourni
-    global DB_PATH
-    if args.db_path:
-        DB_PATH = args.db_path
-
-    logger.info("Démarrage du script principal")
-
-    # Récupération parallèle des deux HTML (charges et lots)
-    logger.info("Récupération parallèle du HTML (charges + lots) en cours...")
-    html_charge, html_copro = asyncio.run(
-        pc.recup_all_html_parallel(headless=not args.no_headless)
+    parser.add_argument(
+        "--auto-relance-drafts",
+        action="store_true",
+        help="Générer automatiquement les brouillons de relance pour les impayés après l'écriture BDD",
     )
+    parser.add_argument(
+        "--relance-imap",
+        action="store_true",
+        help="Déposer également les brouillons générés dans le dossier IMAP Drafts (avec --auto-relance-drafts)",
+    )
+    return parser.parse_args()
+
+
+def _scrape_and_parse(
+    no_headless: bool,
+) -> tuple[list[Any] | None, list[Any] | None, str | None]:
+    """Récupère et parse les données de charges et de lots."""
+    logger.info("Récupération parallèle du HTML (charges + lots) en cours...")
+    html_charge, html_copro = asyncio.run(pc.recup_all_html_parallel(headless=not no_headless))
 
     if not html_charge or html_charge.startswith("KO_"):
         logger.error(f"Erreur récupération HTML charges: {html_charge}")
-        return
+        return None, None, None
     logger.success("HTML des charges des copropriétaires récupéré.")
 
     if not html_copro or html_copro.startswith("KO_"):
         logger.error(f"Erreur récupération HTML lots: {html_copro}")
-        return
+        return None, None, None
     logger.success("HTML des lots des copropriétaires récupéré.")
 
     logger.info("Parsing des charges des copropriétaires en cours...")
     parser_charges = HTMLParser(html_charge)
     logger.success("Parsing des charges des copropriétaires terminé.")
 
-    logger.info(
-        "Récupération de la date de suivi des copropriétaires en cours...")
+    logger.info("Récupération de la date de suivi des copropriétaires en cours...")
     date_suivi_copro = tp.recuperer_date_situation_copro(parser_charges)
     if not date_suivi_copro:
         logger.error("Date de situation introuvable, arrêt du traitement.")
-        return
-    logger.success(
-        f"Date de situation des copropriétaires récupérée : {date_suivi_copro}"
-    )
+        return None, None, None
+    logger.success(f"Date de situation des copropriétaires récupérée : {date_suivi_copro}")
 
-    logger.info(
-        "Récupération des données des charges des copropriétaires en cours...")
-    data_charges = tp.recuperer_situation_copro(
-        parser_charges, date_suivi_copro)
+    logger.info("Récupération des données des charges des copropriétaires en cours...")
+    data_charges = tp.recuperer_situation_copro(parser_charges, date_suivi_copro)
+    if not data_charges:
+        logger.error("Erreur critique : Aucune charge de copropriétaire n'a été extraite !")
+        return None, None, None
     logger.success(
         f"Données des charges des copropriétaires récupérées : {len(data_charges)} entrées."
     )
 
     logger.info("Parsing des lots des copropriétaires en cours...")
     lots_coproprietaires = tlc.extraire_lignes_brutes(html_copro)
-    logger.success(
-        f"{len(lots_coproprietaires)} lots de copropriétaires extraits.")
+    logger.success(f"{len(lots_coproprietaires)} lots de copropriétaires extraits.")
 
     logger.info("Consolidation des lots des copropriétaires en cours...")
-    data_coproprietaires = tlc.consolider_proprietaires_lots(
-        lots_coproprietaires)
-    logger.success(
-        f"{len(data_coproprietaires)} copropriétaires/groupes consolidés.")
+    data_coproprietaires = tlc.consolider_proprietaires_lots(lots_coproprietaires)
+    logger.success(f"{len(data_coproprietaires)} copropriétaires/groupes consolidés.")
 
-    if not data_charges and not data_coproprietaires:
-        logger.warning(
-            "Aucune donnée extraite pour les charges et/ou les lots. Arrêt du traitement."
+    if len(data_coproprietaires) != dtb.NOMBRE_LOTS_ATTENDU:
+        logger.error(
+            f"Erreur critique : {len(data_coproprietaires)} copropriétaires consolidés au lieu de {dtb.NOMBRE_LOTS_ATTENDU} attendus !"
         )
-        return
-    elif args.show_console:
-        tp.afficher_etat_coproprietaire(data_charges, date_suivi_copro)
-        tlc.afficher_avec_rich(data_coproprietaires)
+        return None, None, None
+
+    return data_charges, data_coproprietaires, date_suivi_copro
+
+
+def _valider_donnees_avant_sauvegarde(
+    data_charges: list[Any] | None,
+    data_copros: list[Any] | None,
+) -> None:
+    """Valide l'intégrité et la complétude des données avant toute opération BDD.
+
+    Règles strictes :
+    1. Lots : obligatoires et décompte exact égal à NOMBRE_LOTS_ATTENDU (64).
+    2. Charges : obligatoires et non vides après normalisation.
+
+    Raises:
+        IncoherenceLotsError: Si les lots sont absents ou != NOMBRE_LOTS_ATTENDU.
+        CollecteChargesVideError: Si les charges sont absentes ou vides.
+    """
+    if not data_copros:
+        logger.critical(
+            f"SÉCURITÉ BDD : Lots absents ou vides (0 trouvé, {dtb.NOMBRE_LOTS_ATTENDU} attendus). Aucune écriture en base."
+        )
+        raise dtb.IncoherenceLotsError(
+            f"Incohérence lots : 0 lot trouvé au lieu de {dtb.NOMBRE_LOTS_ATTENDU} attendus !"
+        )
+
+    if len(data_copros) != dtb.NOMBRE_LOTS_ATTENDU:
+        logger.critical(
+            f"SÉCURITÉ BDD : Nombre de lots incorrect : {len(data_copros)} trouvé(s), {dtb.NOMBRE_LOTS_ATTENDU} attendus. Aucune écriture en base."
+        )
+        raise dtb.IncoherenceLotsError(
+            f"Incohérence lots : {len(data_copros)} lot(s) trouvé(s) au lieu de {dtb.NOMBRE_LOTS_ATTENDU} attendus !"
+        )
+
+    if not data_charges:
+        logger.critical("SÉCURITÉ BDD : Aucune charge extraite. Aucune écriture en base.")
+        raise dtb.CollecteChargesVideError("Échec collecte des charges : aucune donnée extraite.")
+
+    dtb.valider_charges_presentes(data_charges)
+
+
+def _restore_db_from_pcloud_if_missing() -> bool:
+    """Restaure la base de données depuis pCloud si elle est absente dans MariaDB."""
+    if dtb.verif_presence_db():
+        return False
+
+    logger.warning(
+        "Base de données absente dans MariaDB. Tentative de restauration depuis pCloud..."
+    )
+    pcloud_client = bckp_pcloud.tester_token_et_connecter_pcloud()
     try:
-        # Ensure path type compatibility: modules expect a string path
-        dtb.verif_repertoire_db(DB_PATH)
-        restored_from_pcloud = False
-        if not dtb.verif_presence_db(DB_PATH):
+        bckp_pcloud.telecharger_dernier_backup_pcloud(
+            pcloud_client,
+            overwrite=True,
+        )
+    except RuntimeError as exc:
+        if "Aucun fichier de backup" in str(exc):
             logger.warning(
-                f"Base locale absente ('{DB_PATH}'). Tentative de restauration depuis pCloud..."
+                "Aucun backup pCloud trouvé. Initialisation d'une nouvelle base MariaDB..."
             )
-            pcloud_client = bckp_pcloud.tester_token_et_connecter_pcloud()
-            try:
-                restore_result = bckp_pcloud.telecharger_dernier_backup_pcloud(
-                    pcloud_client,
-                    local_db_name=pathlib.Path(DB_PATH).name,
-                    overwrite=True,
-                )
-            except RuntimeError as exc:
-                if "Aucun fichier de backup .sqlite" in str(exc):
-                    logger.warning(
-                        "Aucun backup pCloud trouvé. Création d'une nouvelle base locale..."
-                    )
-                    dtb.creer_base_db(DB_PATH)
-                else:
-                    raise
-            else:
-                restored_from_pcloud = True
-                restored_path = pathlib.Path(restore_result["local_path"])
-                target_path = pathlib.Path(DB_PATH)
+            dtb.creer_base_db()
+            return False
+        raise
+    return True
 
-                # Garantir la restauration exactement au chemin demandé (ex: --db-path).
-                if restored_path.resolve() != target_path.resolve():
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    if target_path.exists():
-                        target_path.unlink()
-                    restored_path.replace(target_path)
-                    logger.info(
-                        f"Base restaurée déplacée vers le chemin cible '{target_path}'."
-                    )
-        dtb.integrite_db(DB_PATH)
-        dtb.backup_db(DB_PATH)
-        if restored_from_pcloud:
-            # Les alertes du backup peuvent avoir des type_alerte obsolètes ou
-            # provenir de charges plus récentes que l'extranet ne retourne.
-            # On les purge pour forcer la recomputation par les triggers.
-            dtb.purger_alertes_pour_rebuild(DB_PATH)
-            logger.info("Alertes purgées après restore pCloud (recomputation via triggers).")
-        # coproprietaires en premier : les triggers INSERT sur charge s'appuient dessus.
-        # L'échec de cette étape (lots invalides) ne doit pas empêcher la sauvegarde des charges.
-        try:
-            dtb.enregistrer_coproprietaires(data_coproprietaires, DB_PATH)
-        except Exception as exc_copro:
-            logger.error(f"Insertion copropriétaires échouée (lots invalides) : {exc_copro}")
-            logger.warning("Les charges seront quand même sauvegardées pour cette période.")
-        dtb.enregistrer_donnees_sqlite(data_charges, DB_PATH)
-        logger.info("Traitement terminé et données sauvegardées.")
-    except Exception as exc:
-        logger.error(f"Erreur lors des opérations BDD/backup : {exc}")
-        raise RuntimeError(
-            "ECHEC_CRITIQUE_COLLECTE_COPROPRIETAIRES: données lots invalides, base non écrasée."
-        ) from exc
 
-    # Note: Le dédoublonnage n'est plus nécessaire grâce à l'index UNIQUE
-    # et INSERT OR REPLACE dans enregistrer_donnees_sqlite()
+def _save_data_to_db(
+    data_charges: list[Any],
+    data_coproprietaires: list[Any],
+) -> str | None:
+    """Enregistre les données extraites en base MariaDB et met à jour les alertes."""
+    # Validation stricte en amont : bloque tout si anomalie
+    _valider_donnees_avant_sauvegarde(data_charges, data_coproprietaires)
+
+    restored = _restore_db_from_pcloud_if_missing()
+    dtb.integrite_db()
+    backup_file = dtb.backup_db()
+
+    if restored:
+        dtb.purger_alertes_pour_rebuild()
+        logger.info("Alertes purgées après restore pCloud (recomputation via triggers).")
+
+    # STRICT : Tout ou rien. Pas d'insertion partielle si l'un des deux échoue !
+    dtb.enregistrer_coproprietaires(data_coproprietaires, nombre_attendu=dtb.NOMBRE_LOTS_ATTENDU)
+    dtb.enregistrer_charges(data_charges)
+    logger.info("Traitement terminé et données sauvegardées.")
 
     try:
         logger.info("Mise à jour de la table 'suivi_alertes'...")
-        dtb.sauvegarder_nombre_alertes(DB_PATH)
+        dtb.sauvegarder_nombre_alertes()
         logger.success("Table 'suivi_alertes' mise à jour.")
     except Exception as exc:
-        logger.error(
-            f"Erreur lors de la mise à jour de la table 'suivi_alertes' : {exc}"
-        )
+        logger.error(f"Erreur lors de la mise à jour de la table 'suivi_alertes' : {exc}")
+        raise
 
-    if args.no_backup:
+    return cast(str | None, backup_file)
+
+
+def _handle_pcloud_sync(backup_path: str | None, no_backup: bool, deco_pcloud: bool) -> None:
+    """Gère la sauvegarde vers pCloud et la déconnexion optionnelle."""
+    if no_backup:
         logger.info("Sauvegarde pCloud ignorée via l'option --no-backup.")
-    else:
+    elif backup_path:
         try:
-            logger.info("Sauvegarde pCloud de la base locale en cours...")
+            logger.info("Sauvegarde pCloud du dump local en cours...")
             pcloud_client = bckp_pcloud.tester_token_et_connecter_pcloud()
-            bckp_pcloud.sauvegarder_bdd_pcloud(pcloud_client, pathlib.Path(DB_PATH))
+            bckp_pcloud.sauvegarder_bdd_pcloud(pcloud_client, pathlib.Path(backup_path))
             logger.success("Sauvegarde pCloud terminée avec succès.")
         except Exception as exc:
             logger.error(f"Erreur lors de la sauvegarde pCloud : {exc}")
+    else:
+        logger.info("Aucun backup local généré à synchroniser vers pCloud.")
 
-    if args.deco_pcloud:
+    if deco_pcloud:
         try:
             logger.info("Déconnexion pCloud demandée via --deco-pcloud...")
             bckp_pcloud.deconnecter_pcloud()
@@ -337,57 +321,118 @@ def main() -> None:
         except Exception as exc:
             logger.error(f"Erreur lors de la déconnexion pCloud : {exc}")
 
-    # Par défaut, lancer Streamlit après le traitement, sauf si demandé sinon
-    proc = None
-    if not args.no_serve:
-        try:
-            # Check if running from PyInstaller bundle
-            if usl.is_pyinstaller_bundle():
-                logger.info(
-                    "Lancement de Streamlit in-process (mode PyInstaller)...")
-                # start_streamlit_inprocess is BLOCKING - it runs Streamlit in the main thread
-                # This is required to avoid "signal only works in main thread" error
-                # The function only returns when Streamlit exits
-                usl.start_streamlit_inprocess(
-                    app_path="src/cptcopro/Affichage_Stream.py",
-                    port=args.serve_port,
-                    host=args.serve_host,
-                    open_browser=not args.streamlit_no_browser,
-                )
-                # If we get here, Streamlit has exited
-                logger.info("Streamlit terminé")
-                return  # Exit the application
-            else:
-                logger.info(
-                    "Lancement de Streamlit via utils.streamlit_launcher...")
-                proc = usl.start_streamlit(
-                    app_path="src/cptcopro/Affichage_Stream.py",
-                    python_executable=args.serve_python,
-                    port=args.serve_port,
-                    host=args.serve_host,
-                    show_console=not args.streamlit_no_console,
-                    open_browser=not args.streamlit_no_browser,
-                    use_cmd_start=args.streamlit_use_cmd_start,
-                    log_file=args.streamlit_log_file,
-                )
-                logger.info(f"Streamlit lancé (pid={proc.pid})")
-                # garantir arrêt propre même si main lève une exception
-                atexit.register(lambda p=proc: usl.stop_streamlit(p))
-        except Exception as exc:
-            logger.error(f"Impossible de lancer Streamlit : {exc}")
 
-    # This code only runs when NOT in PyInstaller bundle (subprocess mode)
+def _launch_streamlit_service(args: argparse.Namespace) -> None:
+    """Lance l'interface Streamlit et gère le cycle de vie du processus."""
+    if args.no_serve:
+        return
+
+    proc = None
+    try:
+        if usl.is_pyinstaller_bundle():
+            logger.info("Lancement de Streamlit in-process (mode PyInstaller)...")
+            usl.start_streamlit_inprocess(
+                app_path="src/cptcopro/Affichage_Stream.py",
+                port=args.serve_port,
+                host=args.serve_host,
+                open_browser=not args.streamlit_no_browser,
+            )
+            logger.info("Streamlit terminé")
+            return
+
+        logger.info("Lancement de Streamlit via utils.streamlit_launcher...")
+        proc = usl.start_streamlit(
+            app_path="src/cptcopro/Affichage_Stream.py",
+            python_executable=args.serve_python,
+            port=args.serve_port,
+            host=args.serve_host,
+            show_console=not args.streamlit_no_console,
+            open_browser=not args.streamlit_no_browser,
+            use_cmd_start=args.streamlit_use_cmd_start,
+            log_file=args.streamlit_log_file,
+        )
+        logger.info(f"Streamlit lancé (pid={proc.pid})")
+
+        def _stop_proc(p: subprocess.Popen[bytes] = proc) -> None:
+            usl.stop_streamlit(p)
+
+        atexit.register(_stop_proc)
+    except Exception as exc:
+        logger.error(f"Impossible de lancer Streamlit : {exc}")
+
     if proc is not None:
         try:
             print("Application principale en cours... Ctrl-C pour interrompre.")
-            while True:
-                # exemple : simuler un travail principal
+            while proc.poll() is None:
                 time.sleep(1)
-        except KeyboardInterrupt:
-            print("Interruption reçue, fermeture en cours...")
+        except (KeyboardInterrupt, SystemExit):
+            pass
         finally:
-            usl.stop_streamlit(proc)
+            with suppress(Exception, KeyboardInterrupt):
+                print("\nInterruption reçue, fermeture de Streamlit en cours...")
+            with suppress(Exception, KeyboardInterrupt):
+                usl.stop_streamlit(proc)
+
+
+def main() -> None:
+    """
+    Point d'entrée principal de l'application de suivi des copropriétaires.
+
+    Orchestre la collecte, le parsing, la persistance locale et distante,
+    et enfin le lancement optionnel du dashboard de visualisation Streamlit.
+    """
+    args = _parse_cli_args()
+
+    logger.info("Démarrage du script principal")
+    data_charges, data_copros, date_suivi = _scrape_and_parse(args.no_headless)
+
+    if not data_charges or not data_copros:
+        lots_count = len(data_copros) if data_copros else 0
+        charges_count = len(data_charges) if data_charges else 0
+        logger.critical(
+            f"ARRÊT CRITIQUE : Données incomplètes ou manquantes après extraction "
+            f"(charges: {charges_count}, lots: {lots_count}/{dtb.NOMBRE_LOTS_ATTENDU}). "
+            "Aucune modification de la base de données."
+        )
+        sys.exit(1)
+
+    if args.show_console:
+        if data_charges and date_suivi:
+            tp.afficher_etat_coproprietaire(data_charges, date_suivi)
+        if data_copros:
+            tlc.afficher_avec_rich(data_copros)
+
+    backup_file = None
+    try:
+        backup_file = _save_data_to_db(data_charges, data_copros)
+    except Exception as exc:
+        logger.critical(
+            f"ÉCHEC CRITIQUE BDD / SAUVEGARDE : {exc}. Base non modifiée ou opération annulée."
+        )
+        sys.exit(1)
+
+    if args.auto_relance_drafts:
+        try:
+            logger.info("Génération automatique des brouillons de relance demandée...")
+            from cptcopro.utils.relance_mailer import generer_brouillons_relances
+
+            relance_res = generer_brouillons_relances(deposer_imap=args.relance_imap)
+            logger.success(
+                f"Relances traitées : {relance_res['generes']} brouillon(s) généré(s), "
+                f"{relance_res['deposes_imap']} déposé(s) sur IMAP, "
+                f"{len(relance_res['erreurs'])} erreur(s)."
+            )
+        except Exception as exc_relance:
+            logger.error(f"Erreur lors de la génération automatique des relances : {exc_relance}")
+
+    _handle_pcloud_sync(backup_file, args.no_backup, args.deco_pcloud)
+    _launch_streamlit_service(args)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        with suppress(Exception):
+            print("\nArrêt demandé par l'utilisateur.")
+        sys.exit(0)

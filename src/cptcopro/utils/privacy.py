@@ -16,9 +16,10 @@ Usage:
 
 import hashlib
 import unicodedata
-import streamlit as st
+from typing import Any, Literal
+
 import pandas as pd
-from typing import Literal
+import streamlit as st
 
 # Liste des colonnes sensibles à masquer (noms normalisés en lowercase sans accent)
 COLONNES_SENSIBLES_NORMALIZED = [
@@ -78,10 +79,10 @@ def is_privacy_enabled() -> bool:
     Returns:
         bool: True si le mode confidentiel est activé.
     """
-    return st.session_state.get(SESSION_KEY_PRIVACY, False)
+    return bool(st.session_state.get(SESSION_KEY_PRIVACY, False))
 
 
-def anonymiser(valeur, mode: Literal["masque", "initiales", "hash"] = "masque") -> str:
+def anonymiser(valeur: Any, mode: Literal["masque", "initiales", "hash"] = "masque") -> Any:
     """Anonymise une valeur selon le mode choisi.
 
     Args:
@@ -115,7 +116,7 @@ def anonymiser(valeur, mode: Literal["masque", "initiales", "hash"] = "masque") 
             return " ".join(p[0].upper() + "." for p in parts if p)
         return "●"
     elif mode == "hash":
-        return hashlib.md5(valeur_str.encode()).hexdigest()[:8]
+        return hashlib.md5(valeur_str.encode(), usedforsecurity=False).hexdigest()[:8]
     return valeur_str
 
 
@@ -149,9 +150,7 @@ def appliquer_confidentialite(
     if df.empty:
         return df
 
-    colonnes_a_masquer = (
-        colonnes if colonnes is not None else COLONNES_SENSIBLES_NORMALIZED
-    )
+    colonnes_a_masquer = colonnes if colonnes is not None else COLONNES_SENSIBLES_NORMALIZED
     df_copie = df.copy()
 
     # Comparer en normalisant les noms de colonnes (insensible à la casse et aux accents)
@@ -164,9 +163,9 @@ def appliquer_confidentialite(
 
 
 def masquer_liste(
-    valeurs: list,
+    valeurs: list[Any],
     mode: Literal["masque", "initiales", "hash"] = "masque",
-) -> list:
+) -> list[Any]:
     """Masque une liste de valeurs si le mode confidentiel est activé.
 
     Utile pour masquer les options d'un selectbox ou multiselect.
@@ -189,9 +188,9 @@ def masquer_liste(
 
 
 def creer_mapping_anonymise(
-    valeurs: list,
+    valeurs: list[Any],
     mode: Literal["masque", "initiales", "hash"] = "initiales",
-) -> dict:
+) -> dict[Any, Any]:
     """Crée un mapping entre valeurs originales et anonymisées.
 
     Utile pour les selectbox où on doit pouvoir retrouver la valeur originale.
@@ -207,13 +206,13 @@ def creer_mapping_anonymise(
         return {v: v for v in valeurs}
 
     # Pour éviter les collisions avec le mode masque, on ajoute un index
-    mapping = {}
+    mapping: dict[Any, Any] = {}
     for i, v in enumerate(valeurs):
         if mode == "masque":
             # Ajouter un suffixe numérique pour distinguer les valeurs masquées
             anon = f"●●●●●● ({i + 1})"
         else:
-            anon = anonymiser(v, mode)
+            anon = str(anonymiser(v, mode))
             # Gérer les collisions potentielles
             if anon in mapping:
                 anon = f"{anon} ({i + 1})"

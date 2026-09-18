@@ -15,3 +15,6 @@ DEFAULT_ALERT_THRESHOLDS = {
 
 # Seuil par défaut pour les types non configurés (NA, inconnu, etc.)
 DEFAULT_THRESHOLD_FALLBACK = 2000.0
+
+# Nombre exact de lots de copropriétaires attendu
+NOMBRE_LOTS_ATTENDU = 64

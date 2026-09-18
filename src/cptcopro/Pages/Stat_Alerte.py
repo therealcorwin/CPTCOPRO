@@ -1,166 +1,149 @@
-import sqlite3
+"""Page d'historique et de répartition des alertes par typologie d'appartement."""
+
+from __future__ import annotations
+
 import pandas as pd
-import streamlit as st
 import plotly.express as px
-from pathlib import Path
-from streamlit_extras.metric_cards import style_metric_cards
+import streamlit as st
 
-# Import du module de chemins portables
-try:
-    from cptcopro.utils.paths import get_db_path
-    from cptcopro.utils.privacy import (
-        appliquer_confidentialite,
-        preparer_df_pour_graphe,
-    )
-
-    DB_PATH = get_db_path()
-except ImportError:
-    # Fallback pour le mode développement
-    DB_PATH = Path(__file__).parent.parent / "BDD" / "test.sqlite"
-    from cptcopro.utils.privacy import (
-        appliquer_confidentialite,
-        preparer_df_pour_graphe,
-    )
-
-
-def _get_db_cache_key(db_path: Path) -> int:
-    try:
-        return db_path.stat().st_mtime_ns
-    except OSError:
-        return 0
+from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.db_helpers import normalize_date_columns
+from cptcopro.utils.privacy import (
+    appliquer_confidentialite,
+    preparer_df_pour_graphe,
+)
+from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def recup_alertes(
-    db_path: Path, db_cache_key: int
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    del db_cache_key
-    query = "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, debit as Debit, type_alerte AS TypeApt, first_detection AS FirstDetection, last_detection AS LastDetection, occurence AS Occurence FROM alertes_debit_eleve"
-    query2 = "select SUM(debit) as TotalDebit FROM alertes_debit_eleve"
+def recup_alertes() -> tuple[pd.DataFrame, pd.DataFrame]:
+    query = (
+        "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, "
+        "debit AS Debit, type_alerte AS TypeApt, first_detection AS FirstDetection, "
+        "last_detection AS LastDetection, occurence AS Occurence "
+        "FROM alertes_debit_eleve"
+    )
+    query2 = "SELECT SUM(debit) AS TotalDebit FROM alertes_debit_eleve"
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            recup_alerte = pd.read_sql_query(query, conn)
-            recup_total_debit = pd.read_sql_query(query2, conn)
-        finally:
-            conn.close()
+        with get_db_cursor() as cur:
+            cur.execute(query)
+            recup_alerte = pd.DataFrame(cur.fetchall())
+            cur.execute(query2)
+            recup_total_debit = pd.DataFrame(cur.fetchall())
+        recup_alerte = normalize_date_columns(recup_alerte, ["FirstDetection", "LastDetection"])
         return recup_alerte, recup_total_debit
-    except sqlite3.Error as e:
+    except Exception as e:
         st.error(f"Erreur lors de la récupération des alertes : {e}")
         return pd.DataFrame(), pd.DataFrame()
-    except Exception as e:
-        st.error(f"Erreur inattendue : {e}")
-        return pd.DataFrame(), pd.DataFrame()
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def recup_suivi_alertes(db_path: Path, db_cache_key: int) -> pd.DataFrame:
-    del db_cache_key
+def recup_suivi_alertes() -> pd.DataFrame:
     query = """
         SELECT date_releve, nombre_alertes, total_debit,
                nb_2p, nb_3p, nb_4p, nb_5p, nb_na,
                debit_2p, debit_3p, debit_4p, debit_5p, debit_na
-        FROM suivi_alertes 
+        FROM suivi_alertes
         ORDER BY date_releve DESC
     """
     try:
-        conn = sqlite3.connect(str(db_path))
-        try:
-            suivi_df = pd.read_sql_query(query, conn)
-        finally:
-            conn.close()
-        return suivi_df
-    except sqlite3.Error as e:
-        st.error(f"Erreur lors de la récupération des alertes : {e}")
-        return pd.DataFrame()
+        with get_db_cursor() as cur:
+            cur.execute(query)
+            suivi_df = pd.DataFrame(cur.fetchall())
+        return normalize_date_columns(suivi_df, ["date_releve"])
     except Exception as e:
-        st.error(f"Erreur inattendue : {e}")
+        st.error(f"Erreur lors de la récupération du suivi : {e}")
         return pd.DataFrame()
 
 
-# Récupérer les valeurs du dernier relevé (avec gestion des colonnes manquantes)
-def get_val(col, default=0):
-    if col in suivi_alerte.columns and not suivi_alerte.empty:
-        val = suivi_alerte[col].iat[0]
-        return val if pd.notna(val) else default
+def get_val(df: pd.DataFrame, col: str, default: int = 0) -> int:
+    if col in df.columns and not df.empty:
+        val = df[col].iat[0]
+        return int(val) if pd.notna(val) else default
     return default
 
 
-def get_delta(col):
-    if col in suivi_alerte.columns and len(suivi_alerte) >= 2:
-        curr = suivi_alerte[col].iat[0] or 0
-        prev = suivi_alerte[col].iat[1] or 0
-        return curr - prev
+def get_delta(df: pd.DataFrame, col: str) -> int:
+    if col in df.columns and len(df) >= 2:
+        curr = df[col].iat[0] or 0
+        prev = df[col].iat[1] or 0
+        return int(curr - prev)
     return 0
 
 
-db_cache_key = _get_db_cache_key(DB_PATH)
-suivi_alerte = recup_suivi_alertes(DB_PATH, db_cache_key)
-alertes_df, total_debit_df = recup_alertes(DB_PATH, db_cache_key)
+render_header(
+    "📈 Historique & Répartition des Alertes",
+    "Ventilation des anomalies d'impayés par typologie de logement et récurrence",
+)
 
-# Section statistiques par type d'appartement
+suivi_alerte = recup_suivi_alertes()
+alertes_df, total_debit_df = recup_alertes()
+
+
 if not suivi_alerte.empty:
-    st.markdown("#### Répartition par type d'appartement")
-    col1, col2, col3, col4, col5 = st.columns(5, gap=24)
+    st.subheader("Répartition des alertes actives par type de lot")
+    col1, col2, col3, col4, col5 = st.columns(5, gap="small")
 
     with col1:
+        d2 = get_delta(suivi_alerte, "nb_2p")
         st.metric(
-            "2 pièces",
-            value=int(get_val("nb_2p")),
-            delta=int(get_delta("nb_2p")),
+            "2 pièces (T2)",
+            value=get_val(suivi_alerte, "nb_2p"),
+            delta=f"{'+' if d2 > 0 else ''}{d2}" if d2 != 0 else None,
             delta_color="inverse",
         )
-        style_metric_cards(background_color="#292D34")
     with col2:
+        d3 = get_delta(suivi_alerte, "nb_3p")
         st.metric(
-            "3 pièces",
-            value=int(get_val("nb_3p")),
-            delta=int(get_delta("nb_3p")),
+            "3 pièces (T3)",
+            value=get_val(suivi_alerte, "nb_3p"),
+            delta=f"{'+' if d3 > 0 else ''}{d3}" if d3 != 0 else None,
             delta_color="inverse",
         )
-        style_metric_cards(background_color="#292D34")
     with col3:
+        d4 = get_delta(suivi_alerte, "nb_4p")
         st.metric(
-            "4 pièces",
-            value=int(get_val("nb_4p")),
-            delta=int(get_delta("nb_4p")),
+            "4 pièces (T4)",
+            value=get_val(suivi_alerte, "nb_4p"),
+            delta=f"{'+' if d4 > 0 else ''}{d4}" if d4 != 0 else None,
             delta_color="inverse",
         )
-        style_metric_cards(background_color="#292D34")
     with col4:
+        d5 = get_delta(suivi_alerte, "nb_5p")
         st.metric(
-            "5 pièces",
-            value=int(get_val("nb_5p")),
-            delta=int(get_delta("nb_5p")),
+            "5 pièces (T5+)",
+            value=get_val(suivi_alerte, "nb_5p"),
+            delta=f"{'+' if d5 > 0 else ''}{d5}" if d5 != 0 else None,
             delta_color="inverse",
         )
-        style_metric_cards(background_color="#292D34")
     with col5:
+        dna = get_delta(suivi_alerte, "nb_na")
         st.metric(
             "Non classé",
-            value=int(get_val("nb_na")),
-            delta=int(get_delta("nb_na")),
+            value=get_val(suivi_alerte, "nb_na"),
+            delta=f"{'+' if dna > 0 else ''}{dna}" if dna != 0 else None,
             delta_color="inverse",
         )
-        style_metric_cards(background_color="#292D34")
 
+st.divider()
 
 if not alertes_df.empty:
-    # Filtre par type d'appartement
-    types_disponibles = ["Tous"] + sorted(
-        alertes_df["TypeApt"].dropna().unique().tolist()
-    )
-    type_selectionne = st.selectbox(
-        "Filtrer par type d'appartement", types_disponibles, key="stat_alerte_filtre_type"
-    )
+    col_sel, _ = st.columns([1.5, 2])
+    with col_sel:
+        types_disponibles = ["Tous", *sorted(alertes_df["TypeApt"].dropna().unique().tolist())]
+        type_selectionne = st.selectbox(
+            "Filtrer par type de lot :",
+            options=types_disponibles,
+            index=0,
+            key="stat_alerte_filtre_type",
+        )
 
     if type_selectionne != "Tous":
-        alertes_filtrees = alertes_df[alertes_df["TypeApt"]
-                                      == type_selectionne]
+        alertes_filtrees = alertes_df[alertes_df["TypeApt"] == type_selectionne]
     else:
         alertes_filtrees = alertes_df
 
-    st.markdown("#### Détail des alertes")
+    st.subheader("Détail des occurrences par copropriétaire")
     alertes_affiche = appliquer_confidentialite(
         alertes_filtrees[
             [
@@ -168,46 +151,58 @@ if not alertes_df.empty:
                 "Code",
                 "Debit",
                 "TypeApt",
+                "Occurence",
                 "FirstDetection",
                 "LastDetection",
-                "Occurence",
             ]
         ].sort_values(by="Debit", ascending=False)
     )
+
     st.dataframe(
         alertes_affiche,
-        column_config={
-            "Proprietaire": "Propriétaire",
-            "TypeApt": "Type Apt",
-            "Debit": st.column_config.NumberColumn("Débit", format="%.2f €"),
-            "FirstDetection": "Première détection",
-            "LastDetection": "Dernière détection",
-            "Occurence": "Occurrences",
-        },
+        width="stretch",
         hide_index=True,
+        column_config={
+            "Proprietaire": st.column_config.TextColumn("Copropriétaire"),
+            "Code": st.column_config.TextColumn("Code", width="small"),
+            "Debit": st.column_config.NumberColumn("Débit (€)", format="%.2f €"),
+            "TypeApt": st.column_config.TextColumn("Type", width="small"),
+            "Occurence": st.column_config.NumberColumn("Occurrences", width="small"),
+            "FirstDetection": st.column_config.TextColumn("1ère détection"),
+            "LastDetection": st.column_config.TextColumn("Dernière détection"),
+        },
     )
 
-    # Graphique des occurrences par copropriétaire
-    fig = px.bar(
-        preparer_df_pour_graphe(alertes_filtrees, "Proprietaire"),
-        x="Proprietaire",
-        y="Occurence",
-        color="TypeApt",
-        title="Nombre d'occurrences par copropriétaire",
-    )
-    st.plotly_chart(fig, width="stretch")
+    st.divider()
 
-    # Graphique de répartition par type d'appartement
-    if len(alertes_df["TypeApt"].unique()) > 1:
-        repartition = (
-            alertes_df.groupby("TypeApt")
-            .agg(NbAlertes=("TypeApt", "count"), TotalDebit=("Debit", "sum"))
-            .reset_index()
+    col_g1, col_g2 = st.columns(2, gap="large")
+
+    with col_g1:
+        fig_bar = px.bar(
+            preparer_df_pour_graphe(alertes_filtrees, "Proprietaire"),
+            x="Proprietaire",
+            y="Occurence",
+            color="TypeApt",
+            title="Nombre de relevés en situation d'alerte",
         )
-        fig_pie = px.pie(
-            repartition,
-            values="NbAlertes",
-            names="TypeApt",
-            title="Répartition des alertes par type d'appartement",
-        )
-        st.plotly_chart(fig_pie, width="stretch")
+        fig_bar = apply_plotly_theme(fig_bar)
+        st.plotly_chart(fig_bar, width="stretch")
+
+    with col_g2:
+        if len(alertes_df["TypeApt"].unique()) > 1:
+            st.markdown("#### Part des alertes par typologie de lot")
+            repartition = (
+                alertes_df.groupby("TypeApt")
+                .agg(NbAlertes=("TypeApt", "count"), TotalDebit=("Debit", "sum"))
+                .reset_index()
+            )
+            fig_pie = px.pie(
+                repartition,
+                values="NbAlertes",
+                names="TypeApt",
+                color_discrete_sequence=px.colors.qualitative.Safe,
+            )
+            fig_pie = apply_plotly_theme(fig_pie)
+            st.plotly_chart(fig_pie, width="stretch")
+else:
+    st.info("Aucune alerte active à afficher.")

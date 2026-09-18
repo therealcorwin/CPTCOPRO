@@ -1,0 +1,19 @@
+[theme]
+base = "dark"
+primaryColor = "#0284C7"
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#1E293B"
+textColor = "#F8FAFC"
+font = "sans serif"
+
+[server]
+runOnSave = true
+fileWatcherType = "none"
+maxWidgetStateSize = 25
+
+[client]
+disableDataExport = false
+
+[browser]
+gatherUsageStats = false
+

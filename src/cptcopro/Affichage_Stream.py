@@ -21,8 +21,9 @@ Note:
     dans Pages/Assets/.
 """
 
-import streamlit as st
 from pathlib import Path
+
+import streamlit as st
 
 # Charger les variables d'environnement
 try:
@@ -32,97 +33,161 @@ try:
 except ImportError:
     pass  # Fallback si l'import échoue
 
-# --- Configuration de la page ---
-st.set_page_config(page_title="Suivi Charges Copropriétaires", layout="wide")
+try:
+    from cptcopro.utils.ui_components import inject_custom_css
+except ImportError:
 
-# --- COnfiguration de la navigation ---
+    def inject_custom_css() -> None:
+        pass
+
+
+try:
+    from cptcopro.utils.privacy import SESSION_KEY_PRIVACY
+except ImportError:
+    SESSION_KEY_PRIVACY = "masquer_donnees_sensibles"
+
+
+if SESSION_KEY_PRIVACY not in st.session_state:
+    st.session_state[SESSION_KEY_PRIVACY] = False
+
+
+# --- Configuration de la page ---
+st.set_page_config(
+    page_title="CPTCOPRO - Suivi des Copropriétaires",
+    page_icon="🏢",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# Injecter les styles CSS globaux
+inject_custom_css()
+
+# Initialisation et vérification du pool MariaDB
+try:
+    from cptcopro.Database.connection import init_pool, verif_connexion_db
+
+    @st.cache_resource
+    def _init_db_pool() -> object:
+        pool = init_pool()
+        verif_connexion_db()
+        return pool
+
+    _init_db_pool()
+except Exception as exc:
+    st.error(f"Erreur de connexion à la base de données MariaDB : {exc}")
+
+# --- Configuration des pages ---
 Dashboard_page = st.Page(
     "Pages/Dashboard.py",
-    title="Dashboard Suivi Charges",
-    icon=":material/account_circle:",
+    title="Tableau de bord",
+    icon=":material/dashboard:",
     default=True,
 )
+
+# Pôle Charges
 Liste_Charge_page = st.Page(
     "Pages/Liste_Charge.py",
     title="Suivi détaillé des charges",
-    icon=":material/bar_chart:",
-)
-Liste_Copro_page = st.Page(
-    "Pages/Liste_Copro.py",
-    title="Liste des copropriétaires",
-    icon=":material/smart_toy:",
+    icon=":material/table_chart:",
 )
 Courbe_Charge_Corpo_page = st.Page(
     "Pages/Courbe_Charge_Copro.py",
-    title="Analyse des débits",
-    icon=":material/trending_up:",
+    title="Évolution & Analyse des débits",
+    icon=":material/show_chart:",
 )
 
-Alerte_page = st.Page(
-    "Pages/Alerte.py",
-    title="Alertes",
-    icon=":material/warning:",
-)
-
-Stat_Alerte_page = st.Page(
-    "Pages/Stat_Alerte.py",
-    title="Statistiques Alertes",
-    icon=":material/area_chart:",
-)
-
-Statistiques_Avancees_page = st.Page(
-    "Pages/Statistiques_Avancees.py",
-    title="Statistiques Avancées",
-    icon=":material/area_chart:",
-)
-
-Config_Alertes_page = st.Page(
-    "Pages/Config_Alertes.py",
-    title="Configuration Alertes",
-    icon=":material/settings:",
-)
+# Pôle Copropriétaires
 Recherche_Copro_page = st.Page(
     "Pages/Rechercher_Copro.py",
-    title="Recherche Info Copropriétaires",
-    icon=":material/search:",
+    title="Recherche & Fiche copropriétaire",
+    icon=":material/person_search:",
+)
+Liste_Copro_page = st.Page(
+    "Pages/Liste_Copro.py",
+    title="Annuaire des copropriétaires",
+    icon=":material/group:",
+)
+
+# Pôle Alertes & Risques
+Alerte_page = st.Page(
+    "Pages/Alerte.py",
+    title="Alertes actives",
+    icon=":material/warning:",
+)
+Statistiques_Avancees_page = st.Page(
+    "Pages/Statistiques_Avancees.py",
+    title="Analyses & Statistiques avancées",
+    icon=":material/insights:",
+)
+Stat_Alerte_page = st.Page(
+    "Pages/Stat_Alerte.py",
+    title="Historique & Répartition",
+    icon=":material/pie_chart:",
+)
+Config_Alertes_page = st.Page(
+    "Pages/Config_Alertes.py",
+    title="Configuration des seuils",
+    icon=":material/tune:",
+)
+
+# Pôle Relances & Notifications
+Relance_page = st.Page(
+    "Pages/Relance.py",
+    title="Génération des relances (IA)",
+    icon=":material/mark_email_unread:",
+)
+Relance_Drafts_page = st.Page(
+    "Pages/Relance_Drafts.py",
+    title="Brouillons & Boîte d'envoi",
+    icon=":material/drafts:",
+)
+Relance_Templates_page = st.Page(
+    "Pages/Relance_Templates.py",
+    title="Modèles d'emails",
+    icon=":material/description:",
+)
+Relance_Config_page = st.Page(
+    "Pages/Relance_Config.py",
+    title="Paramètres messagerie & IA",
+    icon=":material/settings:",
+)
+Relance_Admin_page = st.Page(
+    "Pages/Relance_Admin.py",
+    title="Administration",
+    icon=":material/admin_panel_settings:",
 )
 
 # --- NAVIGATION SETUP [WITH SECTIONS]---
 menus = st.navigation(
     {
-        "Dashboard Général": [Dashboard_page],
-        "Suivi des Charges": [Liste_Charge_page, Courbe_Charge_Corpo_page],
-        "Suivi Alerte": [
+        "📊 Vue d'ensemble": [Dashboard_page],
+        "💳 Charges & Débits": [Liste_Charge_page, Courbe_Charge_Corpo_page],
+        "👥 Copropriétaires": [Recherche_Copro_page, Liste_Copro_page],
+        "🚨 Centre d'Alertes": [
             Alerte_page,
-            Stat_Alerte_page,
             Statistiques_Avancees_page,
+            Stat_Alerte_page,
             Config_Alertes_page,
         ],
-        "Liste des Copropriétaires": [Liste_Copro_page],
-        "Recherche Info Copropriétaires": [Recherche_Copro_page],
+        "✉️ Relances & Messagerie": [
+            Relance_page,
+            Relance_Drafts_page,
+            Relance_Templates_page,
+            Relance_Config_page,
+            Relance_Admin_page,
+        ],
     },
     expanded=True,
 )
 
-# --- SHARED ON ALL PAGES ---
-# Construire un chemin absolu vers l'image du logo
-# pour éviter les problèmes de chemin relatif.
+# --- SIDEBAR BRANDING & CONTROLS ---
 LOGO_PATH = Path(__file__).parent / "Pages" / "Assets" / "gb2.png"
-st.logo(str(LOGO_PATH), size="large")
+if LOGO_PATH.exists():
+    st.logo(str(LOGO_PATH), size="large")
 
-# Toggle de confidentialité dans la sidebar (visible sur toutes les pages)
-st.sidebar.divider()
-st.sidebar.subheader("🔒 Confidentialité")
-privacy_enabled = st.sidebar.checkbox(
-    "Masquer données sensibles",
-    key="masquer_donnees_sensibles",
-    help="Masque les noms, codes et numéros d'appartement des copropriétaires",
-)
-if privacy_enabled:
-    st.sidebar.success("Mode confidentiel actif")
-st.sidebar.divider()
+st.sidebar.caption("🏢 **CPTCOPRO** v2.0")
+st.sidebar.caption("Made with ❤️ by [Therealcorwin](https://github.com/Therealcorwin)")
 
-st.sidebar.markdown("Made with ❤️ by [Therealcorwin](https://github.com/Therealcorwin)")
 
 # --- RUN NAVIGATION ---
 menus.run()

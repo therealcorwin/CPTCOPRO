@@ -6,7 +6,7 @@ from pathlib import Path
 
 from cptcopro.utils.env_loader import REQUIRED_STARTUP_ENV_VARS
 
-ENV_EXAMPLE_PATH = Path(__file__).resolve().parents[1] / "src" / "cptcopro" / ".env.example"
+ENV_EXAMPLE_PATH = Path(__file__).resolve().parents[2] / "src" / "cptcopro" / ".env.example"
 
 
 def _parse_env_example_keys() -> set[str]:
@@ -25,3 +25,4 @@ def test_env_example_documents_all_required_startup_vars():
     documented = _parse_env_example_keys()
     missing = set(REQUIRED_STARTUP_ENV_VARS) - documented
     assert not missing, f"Variables requises absentes de .env.example: {sorted(missing)}"
+

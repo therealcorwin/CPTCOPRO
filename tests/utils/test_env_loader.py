@@ -9,13 +9,13 @@ from unittest.mock import patch
 import pytest
 
 from cptcopro.utils.env_loader import (
-    get_app_base_path,
-    get_env_file_path,
-    load_env_file,
     check_env_file_exists,
-    validate_required_env_vars,
-    load_and_validate_env,
+    get_app_base_path,
     get_credentials,
+    get_env_file_path,
+    load_and_validate_env,
+    load_env_file,
+    validate_required_env_vars,
     validate_startup_env,
 )
 
@@ -44,6 +44,7 @@ class TestGetAppBasePath:
     def test_returns_exe_dir_in_frozen_mode(self, tmp_path):
         """En mode PyInstaller (frozen), retourne le répertoire de l'exe."""
         import importlib
+
         import cptcopro.utils.env_loader as env_loader
 
         fake_exe = tmp_path / "dist" / "my_app.exe"
@@ -93,8 +94,7 @@ class TestValidateRequiredEnvVars:
     def test_some_vars_missing(self):
         """Retourne (False, [missing]) si des variables manquent."""
         with patch.dict(os.environ, {"VAR1": "val1"}, clear=True):
-            success, missing = validate_required_env_vars(
-                ["VAR1", "VAR2", "VAR3"])
+            success, missing = validate_required_env_vars(["VAR1", "VAR2", "VAR3"])
             assert success is False
             assert "VAR2" in missing
             assert "VAR3" in missing
@@ -129,9 +129,7 @@ class TestLoadEnvFile:
         env_file = tmp_path / ".env"
         env_file.write_text("TEST_VAR=test_value\n")
 
-        with patch(
-            "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
-        ):
+        with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=env_file):
             result = load_env_file()
             assert result is True
             assert os.environ.get("TEST_VAR") == "test_value"
@@ -143,9 +141,7 @@ class TestLoadEnvFile:
         """Retourne False si le fichier .env n'existe pas."""
         missing_file = tmp_path / ".env"
 
-        with patch(
-            "cptcopro.utils.env_loader.get_env_file_path", return_value=missing_file
-        ):
+        with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=missing_file):
             result = load_env_file()
             assert result is False
 
@@ -157,9 +153,7 @@ class TestLoadAndValidateEnv:
         """Lève FileNotFoundError si .env n'existe pas."""
         missing_file = tmp_path / ".env"
 
-        with patch(
-            "cptcopro.utils.env_loader.get_env_file_path", return_value=missing_file
-        ):
+        with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=missing_file):
             with pytest.raises(FileNotFoundError) as exc_info:
                 load_and_validate_env()
             assert "introuvable" in str(exc_info.value)
@@ -187,16 +181,14 @@ class TestLoadAndValidateEnv:
             for var in vars_to_clean:
                 os.environ.pop(var, None)
 
-            with patch(
-                "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
-            ):
+            with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=env_file):
                 with pytest.raises(ValueError) as exc_info:
                     load_and_validate_env()
                 assert "manquantes" in str(exc_info.value)
                 # Vérifier que les variables manquantes sont mentionnées
-                assert "password_site_copro" in str(
+                assert "password_site_copro" in str(exc_info.value) or "url_site_copro" in str(
                     exc_info.value
-                ) or "url_site_copro" in str(exc_info.value)
+                )
         finally:
             # Restaurer les valeurs originales
             for var, value in original_values.items():
@@ -233,9 +225,7 @@ class TestLoadAndValidateEnv:
             for var in vars_to_clean:
                 os.environ.pop(var, None)
 
-            with patch(
-                "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
-            ):
+            with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=env_file):
                 result = load_and_validate_env()
 
                 # Vérifier que les valeurs viennent bien du fichier .env
@@ -269,9 +259,7 @@ class TestLoadAndValidateEnv:
         try:
             os.environ.pop("CUSTOM_VAR", None)
 
-            with patch(
-                "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
-            ):
+            with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=env_file):
                 result = load_and_validate_env(required_vars=["CUSTOM_VAR"])
 
                 # Vérifier que la valeur vient du fichier .env
@@ -301,8 +289,7 @@ class TestGetCredentials:
         )
 
         # Nettoyer les variables existantes pour s'assurer qu'elles viennent du fichier
-        vars_to_clean = ["login_site_copro",
-                         "password_site_copro", "url_site_copro"]
+        vars_to_clean = ["login_site_copro", "password_site_copro", "url_site_copro"]
         original_values = {var: os.environ.get(var) for var in vars_to_clean}
 
         try:
@@ -310,9 +297,7 @@ class TestGetCredentials:
             for var in vars_to_clean:
                 os.environ.pop(var, None)
 
-            with patch(
-                "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
-            ):
+            with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=env_file):
                 result = get_credentials()
 
                 # Vérifier que les valeurs viennent bien du fichier .env
@@ -331,9 +316,7 @@ class TestGetCredentials:
         """Lève une exception si .env manque."""
         missing_file = tmp_path / ".env"
 
-        with patch(
-            "cptcopro.utils.env_loader.get_env_file_path", return_value=missing_file
-        ):
+        with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=missing_file):
             with pytest.raises(FileNotFoundError):
                 get_credentials()
 
@@ -375,9 +358,7 @@ class TestValidateStartupEnv:
             for var in vars_to_clean:
                 os.environ.pop(var, None)
 
-            with patch(
-                "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
-            ):
+            with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=env_file):
                 result = validate_startup_env()
 
                 assert result["login_site_copro"] == "user"
@@ -424,9 +405,7 @@ class TestValidateStartupEnv:
             for var in vars_to_clean:
                 os.environ.pop(var, None)
 
-            with patch(
-                "cptcopro.utils.env_loader.get_env_file_path", return_value=env_file
-            ):
+            with patch("cptcopro.utils.env_loader.get_env_file_path", return_value=env_file):
                 with pytest.raises(ValueError) as exc_info:
                     validate_startup_env()
                 assert "pcloud_backup_file" in str(exc_info.value)
@@ -457,6 +436,11 @@ class TestEnvLoadedOnlyOnce:
             "pcloud_backup_folder=g\n"
             "pcloud_backup_folder_id=2\n"
             "pcloud_backup_file=h\n"
+            "MARIADB_HOST=127.0.0.1\n"
+            "MARIADB_PORT=3306\n"
+            "MARIADB_USER=u\n"
+            "MARIADB_PASSWORD=p\n"
+            "MARIADB_DATABASE=d\n"
         )
 
         vars_to_clean = [
@@ -470,6 +454,11 @@ class TestEnvLoadedOnlyOnce:
             "pcloud_backup_folder",
             "pcloud_backup_folder_id",
             "pcloud_backup_file",
+            "MARIADB_HOST",
+            "MARIADB_PORT",
+            "MARIADB_USER",
+            "MARIADB_PASSWORD",
+            "MARIADB_DATABASE",
         ]
         for var in vars_to_clean:
             monkeypatch.delenv(var, raising=False)

@@ -1,160 +1,139 @@
-"""Module d'insertion des copropriétaires dans la base de données SQLite.
+"""Module insertion coproprietaires MariaDB."""
 
-Ce module gère l'insertion/mise à jour des données des copropriétaires
-avec leurs informations de lots (numéro et type d'appartement).
-"""
-import sqlite3
+from __future__ import annotations
+
 from collections import Counter
-from typing import Any, List
+from typing import Any
+
+import pymysql.cursors
 from loguru import logger
 
-logger = logger.bind(type_log="BDD")
+from .connection import get_db_connection
+from .constants import NOMBRE_LOTS_ATTENDU
+
+_logger = logger.bind(type_log="BDD")
 
 
 class CollecteCoproprietairesInvalideError(RuntimeError):
-    """Erreur levée quand la collecte copropriétaires/lots est incohérente."""
+    """Erreur de base pour les anomalies de collecte des copropriétaires."""
+    pass
+
+
+class IncoherenceLotsError(CollecteCoproprietairesInvalideError):
+    """Erreur levée lorsque le nombre de lots collectés ne correspond pas au nombre attendu."""
+    pass
+
+
+def valider_nombre_lots(
+    data_coproprietaires: list[Any],
+    nombre_attendu: int = NOMBRE_LOTS_ATTENDU,
+) -> None:
+    """Valide strictement que le nombre de copropriétaires/lots correspond au nombre attendu.
+
+    Args:
+        data_coproprietaires: Liste brute ou consolidée des copropriétaires.
+        nombre_attendu: Nombre attendu (par défaut 64).
+
+    Raises:
+        IncoherenceLotsError: Si len(data_coproprietaires) != nombre_attendu.
+    """
+    count = len(data_coproprietaires) if data_coproprietaires is not None else 0
+    if count != nombre_attendu:
+        raise IncoherenceLotsError(
+            f"Incohérence lots : {count} lot(s) trouvé(s) au lieu de {nombre_attendu} attendus !"
+        )
 
 
 def _normaliser_lot_type(num_apt: str, type_apt: str) -> tuple[str, str]:
-    """Normalise les clés lot/type pour comparaisons de stabilité."""
     return (str(num_apt).strip(), str(type_apt).strip().lower())
 
 
 def _est_marqueur_non_lot(num_apt: str, type_apt: str) -> bool:
-    """Retourne True pour les marqueurs non-lot explicites (NA)."""
     return str(num_apt).strip().upper() == "NA" and str(type_apt).strip().upper() == "NA"
 
 
-def _valider_collecte(data: list[tuple[str, str, str, str]], cur: sqlite3.Cursor) -> None:
-    """Valide la cohérence métier de la collecte avant remplacement de la table."""
+def _valider_collecte(
+    data: list[tuple[str, str, str, str]],
+    cur: pymysql.cursors.DictCursor,
+    nombre_attendu: int | None = None,
+) -> None:
+    if nombre_attendu is not None and len(data) != nombre_attendu:
+        raise IncoherenceLotsError(
+            f"Incohérence lots : {len(data)} lot(s) trouvé(s) au lieu de {nombre_attendu} attendus !"
+        )
     invalides: list[str] = []
     lots_entrants: list[tuple[str, str]] = []
-
     for nom, code, num_apt, type_apt in data:
         num_norm = str(num_apt).strip()
         type_norm = str(type_apt).strip()
-        nom_norm = str(nom).strip()
-        code_norm = str(code).strip()
-
         if _est_marqueur_non_lot(num_norm, type_norm):
             continue
-
-        if not nom_norm or not code_norm:
-            invalides.append(
-                f"propriétaire/code vide pour lot={num_norm or '<vide>'}, type={type_norm or '<vide>'}"
-            )
+        if not str(nom).strip() or not str(code).strip():
+            invalides.append(f"proprietaire/code vide lot={num_norm}")
             continue
-
         if not num_norm or not type_norm:
-            invalides.append(
-                f"lot/type vide pour propriétaire={nom_norm or '<vide>'}, code={code_norm or '<vide>'}"
-            )
+            invalides.append(f"lot/type vide proprietaire={nom}")
             continue
-
         lots_entrants.append(_normaliser_lot_type(num_norm, type_norm))
-
     if invalides:
         details = "; ".join(invalides[:3])
-        if len(invalides) > 3:
-            details += f"; ... ({len(invalides)} anomalies au total)"
-        raise CollecteCoproprietairesInvalideError(
-            "Collecte lots invalide: au moins une association propriétaire/numéro de lot/type appartement est incohérente. "
-            f"Détails: {details}."
-        )
-
-    doublons = [lot for lot, count in Counter(lots_entrants).items() if count > 1]
+        raise CollecteCoproprietairesInvalideError(details)
+    doublons = [lot for lot, c in Counter(lots_entrants).items() if c > 1]
     if doublons:
-        exemples = ", ".join(f"({num},{typ})" for num, typ in doublons[:5])
-        raise CollecteCoproprietairesInvalideError(
-            "Collecte lots invalide: doublons détectés sur les clés (numéro lot, type appartement): "
-            f"{exemples}."
-        )
-
-    rows_existantes = cur.execute(
-        """
-        SELECT num_apt, type_apt
-        FROM coproprietaires
-        WHERE COALESCE(TRIM(num_apt), '') <> ''
-          AND COALESCE(TRIM(type_apt), '') <> ''
-          AND UPPER(TRIM(num_apt)) <> 'NA'
-          AND UPPER(TRIM(type_apt)) <> 'NA'
-        """
-    ).fetchall()
-
-    lots_existants = {
-        _normaliser_lot_type(num_apt, type_apt)
-        for num_apt, type_apt in rows_existantes
-    }
-    lots_entrants_set = set(lots_entrants)
-
-    if not lots_existants:
-        # Premier chargement: pas de baseline à comparer.
+        raise CollecteCoproprietairesInvalideError(f"doublons: {doublons[:5]}")
+    sql = (
+        "SELECT num_apt, type_apt FROM coproprietaires"
+        " WHERE UPPER(TRIM(num_apt)) != 'NA' AND UPPER(TRIM(type_apt)) != 'NA'"
+        " AND TRIM(num_apt) != '' AND TRIM(type_apt) != ''"
+    )
+    cur.execute(sql)
+    rows = cur.fetchall()
+    existants = {_normaliser_lot_type(r["num_apt"], r["type_apt"]) for r in rows}
+    entrants = set(lots_entrants)
+    if not existants:
         return
-
-    if len(lots_entrants_set) != len(lots_existants):
+    if len(entrants) != len(existants):
         raise CollecteCoproprietairesInvalideError(
-            "Collecte lots invalide: le nombre de lots a changé. "
-            f"attendu={len(lots_existants)}, collecté={len(lots_entrants_set)}."
+            f"Nombre de lots change: attendu={len(existants)}, collecte={len(entrants)}"
         )
-
-    if lots_entrants_set != lots_existants:
-        manquants = sorted(lots_existants - lots_entrants_set)[:5]
-        inattendus = sorted(lots_entrants_set - lots_existants)[:5]
+    if entrants != existants:
+        manquants = sorted(existants - entrants)[:5]
+        inattendus = sorted(entrants - existants)[:5]
         raise CollecteCoproprietairesInvalideError(
-            "Collecte lots invalide: l'ensemble des associations (numéro lot, type appartement) diffère de la baseline. "
-            f"Manquants={manquants}; Inattendus={inattendus}."
+            f"Lots differents. Manquants={manquants} Inattendus={inattendus}"
         )
 
 
-def enregistrer_coproprietaires(data_coproprietaires: List[Any], db_path: str) -> None:
-    """
-    Insère des informations de copropriétaires dans la table `coproprietaires`.
-    
-    Args:
-        data_coproprietaires: Liste de dictionnaires contenant les clés:
-            - nom_proprietaire (ou proprietaire): nom du propriétaire
-            - code_proprietaire (ou code): code du propriétaire
-            - num_apt: numéro d'appartement
-            - type_apt: type d'appartement
-        db_path: Chemin vers la base de données SQLite
-
-    Returns:
-        None
-    """    
-    logger.info("Insertion des copropriétaires dans la base de données...")
-    data = []
+def enregistrer_coproprietaires(
+    data_coproprietaires: list[Any],
+    nombre_attendu: int | None = None,
+) -> None:
+    """Insere coproprietaires via batch UPSERT MariaDB (1 seul aller-retour reseau)."""
+    _logger.info("Insertion des coproprietaires...")
+    data: list[tuple[str, str, str, str]] = []
     for copro in data_coproprietaires:
-        # Accept both old keys ('proprietaire','code') and new keys ('nom_proprietaire','code_proprietaire')
-        nom = copro.get("nom_proprietaire") if copro.get("nom_proprietaire") is not None else copro.get("proprietaire")
-        code = copro.get("code_proprietaire") if copro.get("code_proprietaire") is not None else copro.get("code")
-        data.append((nom or "", code or "", copro.get("num_apt") or "", copro.get("type_apt") or ""))
-
+        nom = copro.get("nom_proprietaire") or copro.get("proprietaire") or ""
+        code = copro.get("code_proprietaire") or copro.get("code") or ""
+        data.append((nom, code, copro.get("num_apt") or "", copro.get("type_apt") or ""))
     if not data:
-        logger.info("Aucune donnée coproprietaires à insérer.")
-        return None
-    
-    conn = sqlite3.connect(db_path)
-    cur = conn.cursor()
-    try:
-        _valider_collecte(data, cur)
-
-        # Pour éviter les doublons, on remplace la table existante
-        cur.execute("DELETE FROM coproprietaires")
-
-        if data:
-            # La colonne last_check a une valeur par défaut ; on n'insère que les 4 colonnes attendues
-            cur.executemany(
-                "INSERT INTO coproprietaires (nom_proprietaire, code_proprietaire, num_apt, type_apt) VALUES (?, ?, ?, ?)",
-                data,
+        if nombre_attendu is not None:
+            raise IncoherenceLotsError(
+                f"Incohérence lots : 0 lot trouvé au lieu de {nombre_attendu} attendus !"
             )
-        conn.commit()
-        nb_copro = len(data)
-    except Exception as e:
-        conn.rollback()
-        logger.error(f"Erreur lors de l'insertion des coproprietaires : {e}")
-        raise
-    finally:
-        conn.close()
-
-    logger.info(f"{nb_copro} copropriétaires insérés (table remplacée).")
-    return None
+        _logger.info("Aucune donnee a inserer.")
+        return
+    upsert_sql = (
+        "INSERT INTO coproprietaires"
+        " (nom_proprietaire, code_proprietaire, num_apt, type_apt, last_check)"
+        " VALUES (%s, %s, %s, %s, CURRENT_DATE)"
+        " ON DUPLICATE KEY UPDATE"
+        " nom_proprietaire=VALUES(nom_proprietaire),"
+        " num_apt=VALUES(num_apt),"
+        " type_apt=VALUES(type_apt),"
+        " last_check=VALUES(last_check)"
+    )
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            _valider_collecte(data, cur, nombre_attendu=nombre_attendu)
+            cur.executemany(upsert_sql, data)
+    _logger.info(f"{len(data)} coproprietaires UPSERT MariaDB.")

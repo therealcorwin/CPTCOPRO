@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import os
 import re
-import shutil
 import sys
 import tempfile
 from datetime import datetime
@@ -14,10 +12,8 @@ from pcloud_sdk import PCloudException, PCloudSDK
 from pcloud_sdk.progress_utils import SimpleProgressBar
 
 from cptcopro.utils.env_loader import get_pcloud_backup_config, get_pcloud_credentials
-from cptcopro.utils.paths import get_db_path, get_log_path, get_project_root_dir
+from cptcopro.utils.paths import get_backup_dir, get_log_path, get_project_root_dir
 from cptcopro.utils.pcloud_oauth import obtenir_code_oauth_automatique
-
-
 
 # Charger les credentials OAuth2 pCloud depuis le fichier .env
 pcloud_credentials = get_pcloud_credentials()
@@ -64,6 +60,7 @@ def tester_presence_token_pcloud(token_file: Path | None = None) -> bool:
     exists = token_path.exists()
     logger.info("Présence du token pCloud '{}': {}", token_path, exists)
     return exists
+
 
 def creer_client_pcloud(token_file: Path | None = None) -> PCloudSDK:
     """Crée un client pCloud configuré pour OAuth2 et gestion du token."""
@@ -168,16 +165,14 @@ def assurer_repertoire_backup_bdd_copro(
             folder_name,
             existing_folder.get("folderid"),
         )
-        return existing_folder
+        return dict(existing_folder)
 
     logger.info("Création du répertoire pCloud '{}'...", folder_name)
     try:
         created_folder_id = sdk.folder.create(folder_name, parent=parent_folder_id)
     except PCloudException as exc:
         logger.error("Impossible de créer le répertoire pCloud '{}': {}", folder_name, exc)
-        raise RuntimeError(
-            f"Création du répertoire pCloud '{folder_name}' échouée."
-        ) from exc
+        raise RuntimeError(f"Création du répertoire pCloud '{folder_name}' échouée.") from exc
 
     created_folder = sdk.folder.list_folder(folder_name)
     if created_folder is not None:
@@ -186,7 +181,7 @@ def assurer_repertoire_backup_bdd_copro(
             folder_name,
             created_folder.get("folderid"),
         )
-        return created_folder
+        return dict(created_folder)
 
     logger.success(
         "Répertoire pCloud '{}' créé (folderid={}).",
@@ -277,9 +272,7 @@ def lister_fichiers_et_dossiers_pcloud(
             contents = sdk.folder.get_content(folder_id=target_folder_id)
     except PCloudException as exc:
         logger.error("Lecture du dossier pCloud '{}' échouée: {}", folder_name, exc)
-        raise RuntimeError(
-            f"Impossible de lister le dossier pCloud '{folder_name}'."
-        ) from exc
+        raise RuntimeError(f"Impossible de lister le dossier pCloud '{folder_name}'.") from exc
     except RuntimeError:
         raise
     except Exception as exc:
@@ -288,9 +281,7 @@ def lister_fichiers_et_dossiers_pcloud(
             folder_name,
             exc,
         )
-        raise RuntimeError(
-            f"Erreur inattendue lors du listing pCloud de '{folder_name}'."
-        ) from exc
+        raise RuntimeError(f"Erreur inattendue lors du listing pCloud de '{folder_name}'.") from exc
 
     if not isinstance(contents, list):
         logger.warning(
@@ -305,7 +296,7 @@ def lister_fichiers_et_dossiers_pcloud(
     def _entry_name(entry: dict[str, Any]) -> str:
         return str(entry.get("name", "")).casefold()
 
-    def _format_size(size: Any) -> str:
+    def _format_size(size: object) -> str:
         if not isinstance(size, (int, float)):
             return "-"
         units = ["B", "KB", "MB", "GB", "TB"]
@@ -398,8 +389,11 @@ def lister_fichiers_et_dossiers_pcloud(
 
 
 def _extraire_date_backup_depuis_nom(nom_fichier: str) -> datetime | None:
-    """Extrait la date d'un fichier de backup pCloud nommé `<base>-DD-MM-YYYY-HH-MM.sqlite`."""
-    pattern = re.compile(r"^(?P<base>.+)-(?P<timestamp>\d{2}-\d{2}-\d{4}-\d{2}-\d{2})(?:-\d{2})?\.sqlite$", re.IGNORECASE)
+    """Extrait la date d'un fichier de backup pCloud nommé `<base>-DD-MM-YYYY-HH-MM.(sqlite|sql.gz)`."""
+    pattern = re.compile(
+        r"^(?P<base>.+)-(?P<timestamp>\d{2}-\d{2}-\d{4}-\d{2}-\d{2})(?:-\d{2})?\.(?:sqlite|sql\.gz)$",
+        re.IGNORECASE,
+    )
     match = pattern.match(nom_fichier.strip())
     if match is None:
         return None
@@ -414,7 +408,7 @@ def _extraire_date_backup_depuis_nom(nom_fichier: str) -> datetime | None:
 def _selectionner_backup_pcloud_plus_recent(
     elements: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Sélectionne le backup .sqlite le plus récent parmi les éléments listés."""
+    """Sélectionne le backup (.sql.gz ou .sqlite) le plus récent parmi les éléments listés."""
     backups: list[dict[str, Any]] = []
     for element in elements:
         if not isinstance(element, dict):
@@ -423,7 +417,7 @@ def _selectionner_backup_pcloud_plus_recent(
             continue
 
         name = str(element.get("name", "")).strip()
-        if not name.lower().endswith(".sqlite"):
+        if not (name.lower().endswith(".sql.gz") or name.lower().endswith(".sqlite")):
             continue
 
         element_copy = dict(element)
@@ -431,7 +425,7 @@ def _selectionner_backup_pcloud_plus_recent(
         backups.append(element_copy)
 
     if not backups:
-        raise RuntimeError("Aucun fichier de backup .sqlite n'a été trouvé sur pCloud.")
+        raise RuntimeError("Aucun fichier de backup n'a été trouvé sur pCloud.")
 
     def _sort_key(element: dict[str, Any]) -> tuple[datetime, str]:
         backup_dt = element.get("_backup_dt")
@@ -469,19 +463,22 @@ def telecharger_dernier_backup_pcloud(
         RuntimeError: Si aucun backup n'est trouvé, si l'utilisateur refuse
             l'écrasement, ou en cas d'échec de téléchargement.
     """
-    local_db_path = get_db_path(local_db_name)
-    local_db_dir = local_db_path.parent
+    local_db_dir = get_backup_dir()
+    local_db_path = local_db_dir / (local_db_name or "coproprietaires.sqlite")
     local_db_dir.mkdir(parents=True, exist_ok=True)
 
     if local_db_path.exists():
         if overwrite is None:
             print(f"Une base locale existe déjà: {local_db_path}")
-            response = input("Voulez-vous l'ecraser avec le dernier backup pCloud ? [o/N] : ").strip().lower()
+            response = (
+                input("Voulez-vous l'ecraser avec le dernier backup pCloud ? [o/N] : ")
+                .strip()
+                .lower()
+            )
             overwrite = response in {"o", "oui", "y", "yes"}
 
         if not overwrite:
-            logger.info(
-                "Téléchargement annulé: base locale déjà présente et écrasement refusé.")
+            logger.info("Téléchargement annulé: base locale déjà présente et écrasement refusé.")
             return {
                 "downloaded": False,
                 "reason": "local_exists",
@@ -527,9 +524,7 @@ def telecharger_dernier_backup_pcloud(
             )
         except PCloudException as exc:
             logger.error("Téléchargement pCloud échoué pour '{}': {}", remote_name, exc)
-            raise RuntimeError(
-                f"Téléchargement pCloud du backup '{remote_name}' échoué."
-            ) from exc
+            raise RuntimeError(f"Téléchargement pCloud du backup '{remote_name}' échoué.") from exc
         except Exception as exc:
             logger.error("Erreur inattendue lors du téléchargement '{}': {}", remote_name, exc)
             raise RuntimeError(
@@ -547,26 +542,50 @@ def telecharger_dernier_backup_pcloud(
                 f"Le fichier '{remote_name}' téléchargé depuis pCloud est introuvable dans le dossier temporaire."
             )
 
-        if local_db_path.exists():
-            try:
-                local_db_path.unlink()
-            except FileNotFoundError:
-                pass
+        if str(downloaded_file).endswith(".sql.gz"):
+            import gzip
 
-        target_sidecars = [
-            local_db_path.with_name(local_db_path.name + "-wal"),
-            local_db_path.with_name(local_db_path.name + "-shm"),
-            local_db_path.with_name(local_db_path.name + "-journal"),
-        ]
+            from cptcopro.Database.connection import get_db_connection
 
-        downloaded_file.replace(local_db_path)
-
-        for sidecar in target_sidecars:
-            if sidecar.exists():
+            logger.info("Restauration du dump SQL dans MariaDB...")
+            with gzip.open(downloaded_file, "rt", encoding="utf-8") as gz:
+                sql_content = gz.read()
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    for stmt in sql_content.split(";"):
+                        stmt_lines = [
+                            line for line in stmt.splitlines() if not line.strip().startswith("--")
+                        ]
+                        stmt_clean = "\n".join(stmt_lines).strip()
+                        if stmt_clean:
+                            cur.execute(stmt_clean)
+            logger.success("Dump SQL restaure dans MariaDB avec succes.")
+            local_backup_path = local_db_dir / downloaded_file.name
+            downloaded_file.replace(local_backup_path)
+            local_db_path = local_backup_path
+        else:
+            if local_db_path.exists():
                 try:
-                    sidecar.unlink()
-                except OSError:
-                    logger.warning("Impossible de supprimer le fichier annexe SQLite '{}'.", sidecar)
+                    local_db_path.unlink()
+                except FileNotFoundError:
+                    pass
+
+            target_sidecars = [
+                local_db_path.with_name(local_db_path.name + "-wal"),
+                local_db_path.with_name(local_db_path.name + "-shm"),
+                local_db_path.with_name(local_db_path.name + "-journal"),
+            ]
+
+            downloaded_file.replace(local_db_path)
+
+            for sidecar in target_sidecars:
+                if sidecar.exists():
+                    try:
+                        sidecar.unlink()
+                    except OSError:
+                        logger.warning(
+                            "Impossible de supprimer le fichier annexe SQLite '{}'.", sidecar
+                        )
 
     logger.success(
         "Dernier backup pCloud téléchargé vers '{}'.",
@@ -575,7 +594,7 @@ def telecharger_dernier_backup_pcloud(
     return {
         "downloaded": True,
         "remote_fileid": remote_fileid,
-        "remote_name": remote_name,
+        "remote_filename": remote_name,
         "local_path": str(local_db_path),
     }
 
@@ -585,34 +604,19 @@ def sauvegarder_bdd_pcloud(
     db_path: Path,
     folder_name: str = PCLOUD_BACKUP_FOLDER_NAME,
 ) -> dict[str, Any]:
-    """Sauvegarde la base de données SQLite horodatée sur pCloud.
-
-    Le fichier distant est nommé `<nom_base>-DD-MM-YYYY-HH-MM.sqlite`.
-    Une barre d'avancement Rich est affichée pendant le transfert.
-    Le succès du transfert est contrôlé par comparaison de la taille locale
-    et de la taille retournée par l'API pCloud.
-
-    Args:
-        sdk: Client pCloud authentifié.
-        db_path: Chemin local de la base SQLite à sauvegarder.
-        folder_name: Nom du répertoire distant de backup.
-
-    Returns:
-        Dictionnaire de métadonnées pCloud du fichier uploadé.
-
-    Raises:
-        FileNotFoundError: Si `db_path` n'existe pas.
-        RuntimeError: En cas d'échec d'upload ou de contrôle d'intégrité.
-    """
+    """Sauvegarde la base de données horodatée sur pCloud."""
     db_path = Path(db_path)
     if not db_path.exists():
         raise FileNotFoundError(f"Base de données introuvable : {db_path}")
 
-    # Nom horodaté (les ':' sont interdits dans les noms de fichiers Windows)
+    # Nom horodaté
     now = datetime.now()
-    stem = db_path.stem  # ex: coproprietaires
     timestamp = now.strftime("%d-%m-%Y-%H-%M")
-    remote_filename = f"{stem}-{timestamp}.sqlite"
+    if db_path.name.endswith(".sql.gz"):
+        remote_filename = f"backup_cptcopro-{timestamp}.sql.gz"
+    else:
+        stem = db_path.stem
+        remote_filename = f"{stem}-{timestamp}.sqlite"
 
     local_size = db_path.stat().st_size
     logger.info(
@@ -628,7 +632,7 @@ def sauvegarder_bdd_pcloud(
 
     # --- Barre d'avancement pCloud SDK ---
     progress_callback = SimpleProgressBar(
-        title=f"Backup pCloud",
+        title="Backup pCloud",
         width=50,
         show_speed=True,
         show_eta=True,
@@ -645,9 +649,7 @@ def sauvegarder_bdd_pcloud(
         )
     except PCloudException as exc:
         logger.error("Upload pCloud échoué pour '{}': {}", remote_filename, exc)
-        raise RuntimeError(
-            f"Upload pCloud de '{remote_filename}' échoué."
-        ) from exc
+        raise RuntimeError(f"Upload pCloud de '{remote_filename}' échoué.") from exc
     except Exception as exc:
         logger.error("Erreur inattendue lors de l'upload '{}': {}", remote_filename, exc)
         raise RuntimeError(
@@ -675,9 +677,7 @@ def sauvegarder_bdd_pcloud(
     except RuntimeError:
         raise
     except Exception as exc:
-        logger.warning(
-            "Impossible de vérifier la taille distante du fichier (ignoré): {}", exc
-        )
+        logger.warning("Impossible de vérifier la taille distante du fichier (ignoré): {}", exc)
         remote_size = None
         remote_fileid = None
 
@@ -697,8 +697,8 @@ __all__ = [
     "creer_client_pcloud",
     "deconnecter_pcloud",
     "lister_fichiers_et_dossiers_pcloud",
-    "telecharger_dernier_backup_pcloud",
     "sauvegarder_bdd_pcloud",
+    "telecharger_dernier_backup_pcloud",
     "tester_presence_token_pcloud",
     "tester_token_et_connecter_pcloud",
 ]
