@@ -16,7 +16,6 @@ from cptcopro.utils.paths import (
     get_log_path,
     get_project_root_dir,
     get_streamlit_config_dir,
-    init_env,
     is_pyinstaller_bundle,
 )
 
@@ -209,32 +208,3 @@ class TestGetStreamlitConfigDir:
         with patch("cptcopro.utils.paths.get_app_dir", return_value=tmp_path):
             result = get_streamlit_config_dir()
             assert result == config_dir
-
-
-class TestInitEnv:
-    """Tests pour init_env()."""
-
-    def test_returns_false_if_no_env_file(self, tmp_path):
-        """Retourne False si le fichier .env n'existe pas."""
-        import cptcopro.utils.paths as paths_module
-
-        # Reset l'état
-        paths_module._env_loaded = False
-
-        with patch.object(Path, "exists", return_value=False):
-            with patch.dict(os.environ, {}, clear=True):
-                result = init_env()
-                # Le résultat dépend de l'existence du fichier
-                assert isinstance(result, bool)
-
-    def test_returns_true_if_already_loaded(self):
-        """Retourne True si déjà chargé."""
-        import cptcopro.utils.paths as paths_module
-
-        paths_module._env_loaded = True
-
-        result = init_env()
-        assert result is True
-
-        # Reset pour les autres tests
-        paths_module._env_loaded = False

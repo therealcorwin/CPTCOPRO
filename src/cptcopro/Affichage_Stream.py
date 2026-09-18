@@ -27,9 +27,9 @@ import streamlit as st
 
 # Charger les variables d'environnement
 try:
-    from cptcopro.utils.paths import init_env
+    from cptcopro.utils.env_loader import load_env_file
 
-    init_env()
+    load_env_file()
 except ImportError:
     pass  # Fallback si l'import échoue
 

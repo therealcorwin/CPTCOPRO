@@ -32,19 +32,23 @@ from typing import Any, cast
 from loguru import logger
 from selectolax.parser import HTMLParser
 
+# Valider toutes les variables d'environnement requises AVANT d'importer les
+# modules applicatifs : certains d'entre eux (ex. Backup_DB_Pcloud) lisent le
+# .env dès l'import et lèveraient sinon une erreur partielle (seulement leurs
+# propres clés) qui masquerait les autres clés manquantes.
+from cptcopro.utils.env_loader import validate_startup_env
+
+validate_startup_env()
+
 import cptcopro.Database as dtb
 import cptcopro.Database.Backup_DB_Pcloud as bckp_pcloud
 import cptcopro.Parsing.Commun as pc
 import cptcopro.Traitement.Charge_Copro as tp
 import cptcopro.Traitement.Lots_Copro as tlc
 import cptcopro.utils.streamlit_launcher as usl
-from cptcopro.utils.env_loader import validate_startup_env
 from cptcopro.utils.paths import get_log_path
 
-# Charger et valider les variables d'environnement avant toute utilisation
-validate_startup_env()
 dtb.verif_connexion_db()
-
 # Configurer les logs avec le bon chemin
 LOG_PATH = str(get_log_path("app.log"))
 

@@ -19,9 +19,6 @@ from dotenv import load_dotenv
 
 _LOG = logging.getLogger(__name__)
 
-# État de chargement du .env
-_env_loaded = False
-
 
 def get_project_root_dir() -> Path:
     """Retourne la racine du projet en mode dev, sinon le répertoire de l'exe.
@@ -33,31 +30,6 @@ def get_project_root_dir() -> Path:
     if is_pyinstaller_bundle():
         return get_app_dir()
     return Path(__file__).parent.parent.parent.parent
-
-
-def init_env() -> bool:
-    """Charge le fichier .env depuis la racine du projet ou à côté de l'exe.
-
-    Cette fonction doit être appelée explicitement avant d'utiliser
-    les variables d'environnement (CPTCOPRO_DB_NAME, etc.).
-
-    Returns:
-        True si le fichier .env a été chargé, False sinon.
-    """
-    global _env_loaded
-    if _env_loaded:
-        return True
-
-    env_path = get_env_file_path()
-
-    if env_path is not None and env_path.exists():
-        load_dotenv(env_path)
-        _LOG.debug(f"Fichier .env chargé depuis {env_path}")
-        _env_loaded = True
-        return True
-
-    _LOG.debug("Fichier .env non trouvé")
-    return False
 
 
 def is_pyinstaller_bundle() -> bool:
@@ -208,6 +180,13 @@ def get_streamlit_config_dir() -> Path | None:
         return bundle_config
 
     return None
+
+
+def init_env() -> bool:
+    """Charge le fichier .env (délégué à env_loader.load_env_file)."""
+    from cptcopro.utils.env_loader import load_env_file
+
+    return load_env_file()
 
 
 # Afficher les chemins au chargement du module (debug)

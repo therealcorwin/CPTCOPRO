@@ -397,3 +397,4 @@ Voici quelques pistes d'évolutions à forte valeur ajoutée pour poursuivre le 
 - **Auteur** : [Therealcorwin](https://github.com/therealcorwin)
 - **Projet** : CPTCOPRO — Suivi Compte Copro
 - **Documentation technique détaillée** : Consultez [`reports/call_graph.md`](reports/call_graph.md) pour le graphe d'appels complet et les spécifications d'ingénierie.
+

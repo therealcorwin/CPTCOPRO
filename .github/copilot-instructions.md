@@ -17,11 +17,10 @@ Ce dépôt récupère les charges et les lots depuis un extranet via Playwright,
 - **`src/cptcopro/Traitement/Charge_Copro.py`** : extraction de la date et du tableau des charges.
 - **`src/cptcopro/Traitement/Lots_Copro.py`** : extraction et consolidation des propriétaires et lots.
 
-### Persistance SQLite
+### Persistance Base de Données
 - **Package principal** : `src/cptcopro/Database/`
 - Modules à connaître : `Creation_BDD.py`, `Charges_To_BDD.py`, `Coproprietaires_To_BDD.py`, `Alertes_Config.py`, `Backup_DB.py`, `Backup_DB_Pcloud.py`, `Relance_Config.py`, `Relance_Templates.py`.
 - Tables clés : `charge`, `alertes_debit_eleve`, `coproprietaires`, `suivi_alertes`, `config_alerte`, `relance_config`, `relance_destinataire`, `relance_draft`, `relance_template`.
-- **`src/cptcopro/Database/Dedoublonnage.py`** existe encore, mais n'est plus dans le flux principal de `main.py`.
 
 ### Système d'alertes
 - **Table `config_alerte`** : seuils configurables par type d'appartement.
@@ -49,18 +48,20 @@ Ce dépôt récupère les charges et les lots depuis un extranet via Playwright,
 
 - **Python requis** : `>=3.12,<3.14` (défini dans `pyproject.toml`)
 - **Dépendances principales** : `loguru`, `selectolax`, `pandas`, `plotly`, `rich`, `python-dotenv`, `playwright`, `streamlit`, `streamlit-extras`
-- **Variables d'environnement** (ou `.env`) nécessaires :
-  - `login_site_copro` : Identifiant de connexion
-  - `password_site_copro` : Mot de passe
-  - `url_site_copro` : URL du site du syndic
-  - `url_situation_copro` : URL de la situation copropriétaire
-  - Variables pCloud : `pcloud_APP_KEY`, `pcloud_APP_SECRET`, `pcloud_location_id`, `pcloud_backup_folder`, `pcloud_backup_folder_id`, `pcloud_backup_file`
+- **Variables d'environnement** (ou `.env`) requises au démarrage (voir `REQUIRED_STARTUP_ENV_VARS` dans `env_loader.py`) :
+  - Core site copro : `login_site_copro`, `password_site_copro`, `url_site_copro`, `url_situation_copro`
+  - pCloud : `pcloud_APP_KEY`, `pcloud_APP_SECRET`, `pcloud_location_id`, `pcloud_backup_folder`, `pcloud_backup_folder_id`, `pcloud_backup_file`
+  - MariaDB : `MARIADB_HOST`, `MARIADB_PORT`, `MARIADB_USER`, `MARIADB_PASSWORD`, `MARIADB_DATABASE`
+  - Optionnel Relances : `MISTRAL_API_KEY`, `RELANCE_MAILBOX_PASSWORD`, `MS_CLIENT_ID`
+  - Toutes documentées dans `src/cptcopro/.env.example` (un test dédié vérifie que cette liste et le fichier restent synchronisés)
 
-### Emplacement du `.env`
+### Emplacement et chargement du `.env`
 
 - **Exécution normale** : le démarrage valide et charge les variables depuis un `.env` à la racine du projet.
 - **PyInstaller** : le `.env` est attendu à côté de l'exécutable.
-- **Note pratique** : `utils.paths.init_env()` et `utils.env_loader` coexistent ; pour éviter les ambiguïtés, considérer la racine du projet comme emplacement de référence en développement.
+- **`utils.env_loader` est le point d'entrée unique** pour charger/valider le `.env` (`utils.paths.init_env()` a été supprimé) ; la résolution du chemin (`paths.get_env_file_path()`) reste dans `paths.py` et est réutilisée par `env_loader`.
+- **Chargement en cache** : le fichier `.env` n'est lu/parsé qu'une seule fois par processus (flag `_env_loaded` dans `env_loader.py`) ; chaque appelant continue de valider ses propres clés requises à chaque appel, sans relire le fichier.
+- **Ordre d'import important dans `main.py`** : `validate_startup_env()` doit être appelé avant d'importer tout module applicatif (ex. `Backup_DB_Pcloud`) qui lit le `.env` au niveau module — sinon une erreur partielle (clés d'un seul sous-module) masquerait la liste complète des clés manquantes.
 
 ### Exécution locale
 
@@ -114,10 +115,9 @@ Options:
 
 ## Limitations et comportements utiles
 
-- Le dédoublonnage existe encore dans `Database/Dedoublonnage.py`, mais n'est plus appelé par `main.py`.
-- Le bloc pCloud expérimental commenté a été supprimé de `main.py`; le flux actif passe par `Backup_DB_Pcloud.py`.
 - Les erreurs de parsing remontent sous forme de codes `KO_*` centralisés dans `src/cptcopro/Parsing/constants.py`.
 - Le détail du flux d'appel et des pages Streamlit est maintenu dans `reports/call_graph.md`.
+- `tests/test_env_example_sync.py` échoue si une variable de `REQUIRED_STARTUP_ENV_VARS` n'est pas documentée dans `.env.example` ; `tests/test_env_loader.py::TestEnvLoadedOnlyOnce` verrouille le chargement unique du `.env`.
 
 ## Fichiers à consulter rapidement
 
@@ -130,6 +130,7 @@ Options:
 | `src/cptcopro/Traitement/Lots_Copro.py` | Parsing HTML des lots |
 | `src/cptcopro/Database/__init__.py` | API publique du package Database |
 | `src/cptcopro/utils/paths.py` | Résolution des chemins DB/logs/backup |
+| `src/cptcopro/utils/env_loader.py` | Chargement/validation unique du `.env` |
 | `src/cptcopro/Parsing/constants.py` | Codes d'erreur et timings Playwright |
 | `reports/call_graph.md` | Graphe des appels de fonctions |
 

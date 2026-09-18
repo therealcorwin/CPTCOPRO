@@ -404,3 +404,74 @@ def test_telecharger_dernier_backup_pcloud_ecrase_et_supprime_sidecars(
     assert local_db_path.read_text(encoding="utf-8") == "backup"
     assert not (local_db_path.parent / "coproprietaires.sqlite-wal").exists()
     assert not (local_db_path.parent / "coproprietaires.sqlite-shm").exists()
+
+
+def test_extraire_code_depuis_url():
+    from cptcopro.utils.pcloud_oauth import extraire_code_depuis_url
+
+    url = "http://localhost:8000/callback?code=TEST_AUTH_CODE_123&locationid=1"
+    assert extraire_code_depuis_url(url) == "TEST_AUTH_CODE_123"
+
+    url_no_code = "http://localhost:8000/callback?error=access_denied"
+    assert extraire_code_depuis_url(url_no_code) is None
+
+    invalid_url = "not_a_valid_url"
+    assert extraire_code_depuis_url(invalid_url) is None
+
+
+def test_connecter_pcloud_via_oauth_utilise_code_automatique(monkeypatch: pytest.MonkeyPatch):
+    class MockOAuthSDK:
+        def __init__(self):
+            self.authenticated_code = None
+            self.location_id = None
+
+        def get_auth_url(self, redirect_uri):
+            return "https://my.pcloud.com/oauth2/authorize?client_id=fake"
+
+        def authenticate(self, code, location_id=None):
+            self.authenticated_code = code
+            self.location_id = location_id
+            return {"locationid": location_id, "access_token": "token123"}
+
+    mock_sdk = MockOAuthSDK()
+    monkeypatch.setattr(pcloud_mod, "creer_client_pcloud", lambda token_path=None: mock_sdk)
+    monkeypatch.setattr(
+        pcloud_mod,
+        "obtenir_code_oauth_automatique",
+        lambda auth_url, redirect_uri: "AUTO_CODE_XYZ",
+    )
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda prompt="": pytest.fail("input() ne doit pas être appelé si le code automatique réussit"),
+    )
+
+    result = pcloud_mod.connecter_pcloud_via_oauth()
+    assert result is mock_sdk
+    assert mock_sdk.authenticated_code == "AUTO_CODE_XYZ"
+
+
+def test_connecter_pcloud_via_oauth_fallback_manuel_si_automatique_echoue(monkeypatch: pytest.MonkeyPatch):
+    class MockOAuthSDK:
+        def __init__(self):
+            self.authenticated_code = None
+
+        def get_auth_url(self, redirect_uri):
+            return "https://my.pcloud.com/oauth2/authorize?client_id=fake"
+
+        def authenticate(self, code, location_id=None):
+            self.authenticated_code = code
+            return {"locationid": 1, "access_token": "token123"}
+
+    mock_sdk = MockOAuthSDK()
+    monkeypatch.setattr(pcloud_mod, "creer_client_pcloud", lambda token_path=None: mock_sdk)
+    monkeypatch.setattr(
+        pcloud_mod,
+        "obtenir_code_oauth_automatique",
+        lambda auth_url, redirect_uri: None,
+    )
+    monkeypatch.setattr("builtins.input", lambda prompt="": "MANUAL_CODE_ABC")
+
+    result = pcloud_mod.connecter_pcloud_via_oauth()
+    assert result is mock_sdk
+    assert mock_sdk.authenticated_code == "MANUAL_CODE_ABC"
+
