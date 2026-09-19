@@ -219,8 +219,28 @@ else:
                     title="Courbes des débits pour les copropriétaires en alerte (€)",
                     markers=True,
                 )
-                fig.update_layout(xaxis_title="Date de relevé", yaxis_title="Débit (€)")
                 fig = apply_plotly_theme(fig)
+                fig.update_layout(
+                    height=520,
+                    xaxis_title="Date de relevé",
+                    yaxis_title="Débit (€)",
+                    margin=dict(l=20, r=20, t=50, b=90),
+                    title=dict(
+                        text="Courbes des débits pour les copropriétaires en alerte (€)",
+                        x=0.01,
+                        xanchor="left",
+                        y=0.98,
+                        yanchor="top",
+                    ),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.22,
+                        xanchor="center",
+                        x=0.5,
+                        title=dict(text=""),
+                    ),
+                )
                 st.plotly_chart(fig, width="stretch")
         except Exception as e:
             st.warning(f"Impossible de générer le graphique : {e}")

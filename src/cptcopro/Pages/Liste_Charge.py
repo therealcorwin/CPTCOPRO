@@ -8,7 +8,6 @@ Cette page regroupe :
 
 from __future__ import annotations
 
-import datetime as dt
 import io
 
 import pandas as pd
@@ -17,13 +16,62 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from cptcopro.Database.connection import get_db_cursor
-from cptcopro.utils.db_helpers import fetch_dataframe, normalize_date_columns
+from cptcopro.utils.db_helpers import (
+    fetch_dataframe,
+    normalize_date_columns,
+    normalize_numeric_columns,
+)
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     is_privacy_enabled,
     preparer_df_pour_graphe,
 )
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
+
+
+def _normalize_date_range(date_val: object, min_d: object, max_d: object) -> tuple[object, object]:
+    """Extrait en toute sécurité start_date et end_date d'un composant date."""
+    if isinstance(date_val, (tuple, list)):
+        if len(date_val) >= 2:
+            return date_val[0], date_val[1]
+        elif len(date_val) == 1:
+            return date_val[0], max_d
+        return min_d, max_d
+    elif date_val is not None:
+        return date_val, max_d
+    return min_d, max_d
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_alertes_codes() -> set[str]:
+    """Charger la liste des codes copropriétaires ayant une alerte de débit actif."""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("SELECT code_proprietaire FROM alertes_debit_eleve")
+            rows = cur.fetchall()
+        return {str(r["code_proprietaire"]) for r in rows if r and "code_proprietaire" in r}
+    except Exception:
+        return set()
+
+
+def _determiner_statut(row: pd.Series, alert_codes: set[str]) -> str:
+    """Détermine le statut synthétique d'un copropriétaire pour la balance de gestion."""
+    code = str(row.get("code", ""))
+    debit = float(row.get("debit", 0.0))
+    credit = float(row.get("credit", 0.0))
+    delta = float(row.get("delta_debit", 0.0))
+
+    if code in alert_codes:
+        return "🚨 Alerte seuil"
+    if debit > 0:
+        if delta > 0:
+            return "🔴 Débiteur (+)"
+        elif delta < 0:
+            return "🟡 Débiteur (-)"
+        return "🟠 Débiteur"
+    if credit > 0:
+        return "🔵 Créditeur"
+    return "🟢 À jour"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -36,24 +84,10 @@ def load_charges() -> pd.DataFrame:
         )
         df = fetch_dataframe(cur)
     df = normalize_date_columns(df, ["date"])
+    df = normalize_numeric_columns(df, ["debit", "credit"])
     if "date" in df.columns:
         df = df.dropna(subset=["date"]).sort_values("date")
     return df
-
-
-def _normalize_date_range(
-    date_val: object, min_d: dt.date, max_d: dt.date
-) -> tuple[dt.date, dt.date]:
-    """Extrait en toute sécurité start_date et end_date d'un st.date_input."""
-    if isinstance(date_val, (tuple, list)):
-        if len(date_val) >= 2:
-            return date_val[0], date_val[1]
-        elif len(date_val) == 1:
-            return date_val[0], date_val[0]
-        return min_d, max_d
-    elif isinstance(date_val, dt.date):
-        return date_val, date_val
-    return min_d, max_d
 
 
 # --- En-tête de la page ---
@@ -69,15 +103,18 @@ if df_all.empty:
     st.warning("⚠️ Aucune donnée de charge trouvée dans la base de données.")
     st.stop()
 
-date_min = df_all["date"].min()
-date_max = df_all["date"].max()
+available_dates = sorted(df_all["date"].dropna().unique())
+date_labels = [
+    d.strftime("%d/%m/%Y") if hasattr(d, "strftime") else str(d)
+    for d in available_dates
+]
 all_types = ["Tous", *sorted(t for t in df_all["type_apt"].dropna().unique() if t)]
 
 # ============================================================================
 # FILTRES ERGONOMIQUES
 # ============================================================================
 with st.container():
-    col_f1, col_f2, col_f3, col_f4 = st.columns([1.5, 1, 1.2, 1.2], gap="medium")
+    col_f1, col_f2, col_f3, col_f4 = st.columns([1.4, 0.9, 1.1, 1.1], gap="medium")
 
     with col_f1:
         search_query = st.text_input(
@@ -99,74 +136,254 @@ with st.container():
             "Filtre prédéfini",
             options=[
                 "Tous les copropriétaires",
-                "Top 5 Débits récents",
-                "Top 10 Débits récents",
                 "Débits > 0 uniquement",
+                "Top 5 Débits",
+                "Top 10 Débits",
             ],
             index=0,
             key="charges_quick_focus",
         )
 
     with col_f4:
-        date_range = st.date_input(
-            "Période d'analyse",
-            value=(date_min, date_max),
-            min_value=date_min,
-            max_value=date_max,
-            key="charges_date_range",
+        selected_date_label = st.selectbox(
+            "📅 Relevé de référence",
+            options=date_labels,
+            index=len(date_labels) - 1,
+            help="Sélectionnez la date du relevé pour la situation instantanée et les indicateurs.",
+            key="charges_date_ref",
         )
 
-start_date, end_date = _normalize_date_range(date_range, date_min, date_max)
-
-# Application des filtres
-filtered_df = df_all[(df_all["date"] >= start_date) & (df_all["date"] <= end_date)].copy()
-
+# Application du périmètre de recherche et typologie
+df_scope = df_all.copy()
 if search_query:
-    filtered_df = filtered_df[
-        filtered_df["proprietaire"].str.contains(search_query, case=False, na=False)
-        | filtered_df["code"].str.contains(search_query, case=False, na=False)
+    df_scope = df_scope[
+        df_scope["proprietaire"].str.contains(search_query, case=False, na=False)
+        | df_scope["code"].str.contains(search_query, case=False, na=False)
     ]
 
 if selected_type != "Tous":
-    filtered_df = filtered_df[filtered_df["type_apt"] == selected_type]
+    df_scope = df_scope[df_scope["type_apt"] == selected_type]
 
-if quick_focus == "Top 5 Débits récents":
-    derniers = filtered_df[filtered_df["date"] == end_date]
-    top_5_owners = derniers.nlargest(5, "debit")["proprietaire"].unique()
-    filtered_df = filtered_df[filtered_df["proprietaire"].isin(top_5_owners)]
-elif quick_focus == "Top 10 Débits récents":
-    derniers = filtered_df[filtered_df["date"] == end_date]
-    top_10_owners = derniers.nlargest(10, "debit")["proprietaire"].unique()
-    filtered_df = filtered_df[filtered_df["proprietaire"].isin(top_10_owners)]
+# Identification du relevé actif et du relevé antérieur (N-1)
+date_ref_idx = date_labels.index(selected_date_label)
+date_ref = available_dates[date_ref_idx]
+date_prev = available_dates[date_ref_idx - 1] if date_ref_idx > 0 else None
+
+df_ref = df_scope[df_scope["date"] == date_ref].copy()
+df_prev = (
+    df_scope[df_scope["date"] == date_prev].copy()
+    if date_prev is not None
+    else pd.DataFrame()
+)
+
+# Application du filtre prédéfini sur le relevé actif
+if quick_focus == "Top 5 Débits":
+    top_5_owners = df_ref.nlargest(5, "debit")["proprietaire"].unique()
+    df_ref = df_ref[df_ref["proprietaire"].isin(top_5_owners)]
+elif quick_focus == "Top 10 Débits":
+    top_10_owners = df_ref.nlargest(10, "debit")["proprietaire"].unique()
+    df_ref = df_ref[df_ref["proprietaire"].isin(top_10_owners)]
 elif quick_focus == "Débits > 0 uniquement":
-    filtered_df = filtered_df[filtered_df["debit"] > 0]
+    df_ref = df_ref[df_ref["debit"] > 0]
+
+# Périmètre historique correspondant pour les graphiques (jusqu'au relevé de référence)
+active_owners = (
+    df_ref["proprietaire"].unique()
+    if not df_ref.empty
+    else df_scope["proprietaire"].unique()
+)
+filtered_df = df_scope[
+    df_scope["proprietaire"].isin(active_owners) & (df_scope["date"] <= date_ref)
+].copy()
+
+# Calcul des variations individuelles et du statut
+if not df_prev.empty:
+    prev_map_debit = df_prev.set_index("code")["debit"].to_dict()
+    prev_map_credit = df_prev.set_index("code")["credit"].to_dict()
+else:
+    prev_map_debit = {}
+    prev_map_credit = {}
+
+df_ref["debit_prev"] = df_ref["code"].map(prev_map_debit).fillna(0.0)
+df_ref["credit_prev"] = df_ref["code"].map(prev_map_credit).fillna(0.0)
+df_ref["delta_debit"] = df_ref["debit"] - df_ref["debit_prev"]
+df_ref["solde_net"] = df_ref["debit"] - df_ref["credit"]
+
+alert_codes = load_alertes_codes()
+df_ref["statut"] = df_ref.apply(lambda r: _determiner_statut(r, alert_codes), axis=1)
 
 st.divider()
 
 # ============================================================================
-# SECTION KPI DYNAMIQUE
+# SECTION KPI DYNAMIQUE (Situation au relevé de référence)
 # ============================================================================
-nb_lignes = len(filtered_df)
-nb_copros = filtered_df["proprietaire"].nunique()
-total_debit = float(filtered_df["debit"].sum())
-total_credit = float(filtered_df["credit"].sum())
-solde_net = total_debit - total_credit
+if df_ref.empty:
+    st.info("ℹ️ Aucun enregistrement ne correspond aux filtres pour ce relevé.")
+elif df_ref["proprietaire"].nunique() == 1:
+    # --- Vue Individuelle Contextuelle (Fiche Copropriétaire) ---
+    copro_row = df_ref.iloc[0]
+    copro_debit = float(copro_row["debit"])
+    copro_credit = float(copro_row["credit"])
+    copro_delta = float(copro_row["delta_debit"])
+    copro_solde_net = copro_debit - copro_credit
+    copro_statut = copro_row["statut"]
 
-kpi1, kpi2, kpi3, kpi4 = st.columns(4, gap="medium")
-
-with kpi1:
-    st.metric("Copropriétaires filtrés", f"{nb_copros} ({nb_lignes} relevés)")
-with kpi2:
-    st.metric("Total Débits", f"{total_debit:,.2f} €".replace(",", " "))
-with kpi3:
-    st.metric("Total Crédits", f"{total_credit:,.2f} €".replace(",", " "))
-with kpi4:
-    st.metric(
-        "Solde Net Débiteur",
-        f"{solde_net:,.2f} €".replace(",", " "),
-        delta=f"{'+' if solde_net > 0 else ''}{solde_net:,.0f} €",
-        delta_color="inverse" if solde_net > 0 else "normal",
+    copro_history = df_scope[df_scope["code"] == copro_row["code"]].sort_values("date")
+    max_debit = (
+        float(copro_history["debit"].max()) if not copro_history.empty else copro_debit
     )
+    nb_deb = int((copro_history["debit"] > 0).sum())
+    total_releves = len(copro_history)
+    pct_deb = (nb_deb / total_releves * 100) if total_releves > 0 else 0
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4, gap="medium")
+
+    with kpi1:
+        label_solde = (
+            "Solde Débiteur Actuel"
+            if copro_solde_net > 0
+            else ("Solde Créditeur Actuel" if copro_solde_net < 0 else "Solde Actuel (À jour)")
+        )
+        delta_str = (
+            f"{'+' if copro_delta > 0 else ''}{copro_delta:,.2f} € vs N-1"
+            if date_prev is not None
+            else None
+        )
+        st.metric(
+            label_solde,
+            f"{abs(copro_solde_net):,.2f} €".replace(",", " "),
+            delta=delta_str,
+            delta_color="inverse" if copro_delta > 0 else "normal",
+            help="Solde net (Débit - Crédit) au relevé de référence.",
+        )
+
+    with kpi2:
+        st.metric(
+            "Statut du compte",
+            copro_statut,
+            delta=f"Relevé du {selected_date_label}",
+            delta_color="off",
+            help="Statut calculé à la date du relevé de référence.",
+        )
+
+    with kpi3:
+        st.metric(
+            "Pic Débiteur Historique",
+            f"{max_debit:,.2f} €".replace(",", " "),
+            delta=f"Sur {total_releves} relevé(s)",
+            delta_color="off",
+            help="Plus haut solde débiteur atteint dans l'historique disponible.",
+        )
+
+    with kpi4:
+        st.metric(
+            "Fréquence en Débit",
+            f"{nb_deb} / {total_releves} relevés",
+            delta=f"{pct_deb:.0f} % du temps",
+            delta_color="inverse" if pct_deb > 50 else "off",
+            help="Proportion de relevés dans lesquels le compte a présenté un solde débiteur.",
+        )
+else:
+    # --- Vue Globale Copropriété ---
+    nb_copros = len(df_ref)
+    total_debit = float(df_ref["debit"].sum())
+    prev_debit = float(df_prev["debit"].sum()) if not df_prev.empty else total_debit
+    delta_total_debit = total_debit - prev_debit if not df_prev.empty else None
+
+    nb_debiteurs = int((df_ref["debit"] > 0).sum())
+    nb_debiteurs_prev = (
+        int((df_prev["debit"] > 0).sum()) if not df_prev.empty else nb_debiteurs
+    )
+    delta_nb_debiteurs = (
+        nb_debiteurs - nb_debiteurs_prev if not df_prev.empty else None
+    )
+    taux_debiteurs = (nb_debiteurs / nb_copros * 100) if nb_copros > 0 else 0.0
+
+    debit_moyen = (total_debit / nb_debiteurs) if nb_debiteurs > 0 else 0.0
+    debit_moyen_prev = (
+        (prev_debit / nb_debiteurs_prev) if nb_debiteurs_prev > 0 else debit_moyen
+    )
+    delta_debit_moyen = (
+        debit_moyen - debit_moyen_prev if not df_prev.empty else None
+    )
+
+    total_credit = float(df_ref["credit"].sum())
+    prev_credit = float(df_prev["credit"].sum()) if not df_prev.empty else total_credit
+    delta_total_credit = (
+        total_credit - prev_credit if not df_prev.empty else None
+    )
+
+    solde_net_global = total_debit - total_credit
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4, gap="medium")
+
+    with kpi1:
+        delta_debit_str = (
+            f"{'+' if delta_total_debit > 0 else ''}{delta_total_debit:,.2f} € vs N-1"
+            if delta_total_debit is not None
+            else None
+        )
+        st.metric(
+            "Encours Débiteur Réel",
+            f"{total_debit:,.2f} €".replace(",", " "),
+            delta=delta_debit_str,
+            delta_color="inverse",
+            help="Total réel des impayés au relevé sélectionné (hors cumul artificiel des années passées).",
+        )
+
+    with kpi2:
+        delta_nb_str = (
+            f"{'+' if delta_nb_debiteurs > 0 else ''}{delta_nb_debiteurs} compte(s) vs N-1"
+            if delta_nb_debiteurs is not None
+            else None
+        )
+        st.metric(
+            "Copropriétaires Débiteurs",
+            f"{nb_debiteurs} / {nb_copros} ({taux_debiteurs:.1f} %)",
+            delta=delta_nb_str,
+            delta_color="inverse",
+            help="Nombre et pourcentage de copropriétaires ayant un solde débiteur strict (> 0 €).",
+        )
+
+    with kpi3:
+        delta_moy_str = (
+            f"{'+' if delta_debit_moyen > 0 else ''}{delta_debit_moyen:,.2f} € vs N-1"
+            if delta_debit_moyen is not None
+            else None
+        )
+        st.metric(
+            "Débit Moyen par Débiteur",
+            f"{debit_moyen:,.2f} €".replace(",", " "),
+            delta=delta_moy_str,
+            delta_color="inverse",
+            help="Montant moyen de découvert parmi les seuls copropriétaires débiteurs.",
+        )
+
+    with kpi4:
+        delta_cred_str = (
+            f"{'+' if delta_total_credit > 0 else ''}{delta_total_credit:,.2f} € vs N-1"
+            if delta_total_credit is not None
+            else None
+        )
+        st.metric(
+            "Avances & Trop-Perçus",
+            f"{total_credit:,.2f} €".replace(",", " "),
+            delta=delta_cred_str,
+            delta_color="normal",
+            help="Total des soldes créditeurs (avances de charges) versés par les copropriétaires.",
+        )
+
+    date_prev_str = date_prev.strftime("%d/%m/%Y") if date_prev else "N/A"
+    col_sub1, col_sub2 = st.columns([2, 1])
+    with col_sub1:
+        st.caption(
+            f"📅 Situation arrêtée au **{selected_date_label}** (comparée au relevé antérieur du {date_prev_str})."
+        )
+    with col_sub2:
+        statut_solde = "débiteur" if solde_net_global > 0 else "excédentaire"
+        st.caption(
+            f"⚖️ Solde net global de la copropriété : **{solde_net_global:,.2f} €** ({statut_solde})"
+        )
 
 st.space("small")
 
@@ -183,41 +400,112 @@ tab_table, tab_graph, tab_stats = st.tabs(
 
 # --- ONGLET 1: TABLEAU ---
 with tab_table:
-    if filtered_df.empty:
-        st.info("Aucun enregistrement ne correspond aux critères sélectionnés.")
-    else:
-        df_sorted = filtered_df.sort_values(
-            ["date", "proprietaire"], ascending=[False, True]
-        ).copy()
-
-        display_df = appliquer_confidentialite(df_sorted)
-
-        st.dataframe(
-            display_df,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "date": st.column_config.DateColumn("Date relevé", format="DD/MM/YYYY"),
-                "proprietaire": st.column_config.TextColumn("Copropriétaire", width="medium"),
-                "code": st.column_config.TextColumn("Code", width="small"),
-                "num_apt": st.column_config.TextColumn("Lot / N°", width="small"),
-                "type_apt": st.column_config.TextColumn("Type", width="small"),
-                "debit": st.column_config.NumberColumn("Débit (€)", format="%.2f €"),
-                "credit": st.column_config.NumberColumn("Crédit (€)", format="%.2f €"),
-            },
+    col_t1, col_t2 = st.columns([2, 1])
+    with col_t1:
+        vue_historique = st.checkbox(
+            "📜 Déplier tout l'historique chronologique de la sélection",
+            value=False,
+            key="charges_show_history",
+            help="Cochez pour afficher l'ensemble des relevés passés au lieu de la balance au relevé de référence.",
         )
 
-        col_csv, _ = st.columns([1, 3])
-        with col_csv:
-            csv_buf = io.StringIO()
-            display_df.to_csv(csv_buf, index=False, sep=";")
-            st.download_button(
-                "📥 Télécharger la sélection (CSV)",
-                data=csv_buf.getvalue().encode("utf-8-sig"),
-                file_name=f"charges_coproprietaires_{start_date}_{end_date}.csv",
-                mime="text/csv",
-                use_container_width=True,
+    if vue_historique:
+        if filtered_df.empty:
+            st.info("Aucun enregistrement ne correspond aux critères sélectionnés.")
+        else:
+            df_sorted = filtered_df.sort_values(
+                ["date", "proprietaire"], ascending=[False, True]
+            ).copy()
+            display_df = appliquer_confidentialite(df_sorted)
+
+            st.dataframe(
+                display_df,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "date": st.column_config.DateColumn("Date relevé", format="DD/MM/YYYY"),
+                    "proprietaire": st.column_config.TextColumn("Copropriétaire", width="medium"),
+                    "code": st.column_config.TextColumn("Code", width="small"),
+                    "num_apt": st.column_config.TextColumn("Lot / N°", width="small"),
+                    "type_apt": st.column_config.TextColumn("Type", width="small"),
+                    "debit": st.column_config.NumberColumn("Débit (€)", format="%.2f €"),
+                    "credit": st.column_config.NumberColumn("Crédit (€)", format="%.2f €"),
+                },
             )
+
+            col_csv, _ = st.columns([1, 3])
+            with col_csv:
+                csv_buf = io.StringIO()
+                display_df.to_csv(csv_buf, index=False, sep=";")
+                st.download_button(
+                    "📥 Télécharger l'historique complet (CSV)",
+                    data=csv_buf.getvalue().encode("utf-8-sig"),
+                    file_name=f"charges_historique_{date_labels[0]}_{selected_date_label}.csv".replace(
+                        "/", "-"
+                    ),
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+    else:
+        if df_ref.empty:
+            st.info("Aucun enregistrement ne correspond aux critères pour ce relevé.")
+        else:
+            df_ref_sorted = df_ref.sort_values(
+                ["debit", "proprietaire"], ascending=[False, True]
+            ).copy()
+            display_ref = appliquer_confidentialite(df_ref_sorted)
+
+            st.dataframe(
+                display_ref,
+                width="stretch",
+                hide_index=True,
+                column_order=[
+                    "proprietaire",
+                    "code",
+                    "num_apt",
+                    "type_apt",
+                    "debit",
+                    "credit",
+                    "delta_debit",
+                    "statut",
+                ],
+                column_config={
+                    "proprietaire": st.column_config.TextColumn("Copropriétaire", width="medium"),
+                    "code": st.column_config.TextColumn("Code", width="small"),
+                    "num_apt": st.column_config.TextColumn("Lot / N°", width="small"),
+                    "type_apt": st.column_config.TextColumn("Type", width="small"),
+                    "debit": st.column_config.NumberColumn("Débit (€)", format="%.2f €"),
+                    "credit": st.column_config.NumberColumn("Crédit (€)", format="%.2f €"),
+                    "delta_debit": st.column_config.NumberColumn(
+                        "Variation vs N-1 (€)",
+                        format="%.2f €",
+                        help="Évolution de la dette par rapport au relevé précédent (positif = dette en hausse).",
+                    ),
+                    "statut": st.column_config.TextColumn("Statut", width="medium"),
+                },
+            )
+
+            col_csv, _ = st.columns([1, 3])
+            with col_csv:
+                csv_buf = io.StringIO()
+                export_cols = [
+                    "proprietaire",
+                    "code",
+                    "num_apt",
+                    "type_apt",
+                    "debit",
+                    "credit",
+                    "delta_debit",
+                    "statut",
+                ]
+                display_ref[export_cols].to_csv(csv_buf, index=False, sep=";")
+                st.download_button(
+                    f"📥 Télécharger la balance du {selected_date_label} (CSV)",
+                    data=csv_buf.getvalue().encode("utf-8-sig"),
+                    file_name=f"balance_coproprietaires_{selected_date_label.replace('/', '-')}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
 
 # --- ONGLET 2: GRAPHIQUE ---
 with tab_graph:
@@ -243,7 +531,7 @@ with tab_graph:
             .reset_index()
             .rename(columns={"debit": "debit_moyen"})
         )
-        avg_df = avg_df[(avg_df["date"] >= start_date) & (avg_df["date"] <= end_date)]
+        avg_df = avg_df[avg_df["date"] <= date_ref]
 
         if graph_mode == "🎯 Focus Top Débits (5/10)":
             col_f1, col_f2 = st.columns([2, 1], gap="medium")
@@ -299,8 +587,22 @@ with tab_graph:
                             line=dict(color="#F59E0B", dash="dash", width=2.5),
                         )
                     )
-                fig.update_layout(xaxis_title="Date de relevé", yaxis_title="Débit (€)")
                 fig = apply_plotly_theme(fig)
+                fig.update_layout(
+                    height=500,
+                    xaxis_title="Date de relevé",
+                    yaxis_title="Débit (€)",
+                    margin=dict(l=20, r=20, t=50, b=90),
+                    title=dict(x=0.01, xanchor="left", y=0.98, yanchor="top"),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.22,
+                        xanchor="center",
+                        x=0.5,
+                        title=dict(text=""),
+                    ),
+                )
                 st.plotly_chart(fig, width="stretch")
 
         elif graph_mode == "👥 Comparateur Sur-Mesure":
@@ -353,8 +655,22 @@ with tab_graph:
                             line=dict(color="#F59E0B", dash="dash", width=2.5),
                         )
                     )
-                fig.update_layout(xaxis_title="Date de relevé", yaxis_title="Débit (€)")
                 fig = apply_plotly_theme(fig)
+                fig.update_layout(
+                    height=500,
+                    xaxis_title="Date de relevé",
+                    yaxis_title="Débit (€)",
+                    margin=dict(l=20, r=20, t=50, b=90),
+                    title=dict(x=0.01, xanchor="left", y=0.98, yanchor="top"),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.22,
+                        xanchor="center",
+                        x=0.5,
+                        title=dict(text=""),
+                    ),
+                )
                 st.plotly_chart(fig, width="stretch")
 
         elif graph_mode == "📊 Tendance Globale & Typologies":
@@ -441,52 +757,57 @@ with tab_graph:
 
 # --- ONGLET 3: STATS & RÉPARTITION ---
 with tab_stats:
-    if filtered_df.empty:
-        st.info("Aucune donnée disponible.")
+    if df_ref.empty:
+        st.info("Aucune donnée disponible pour le relevé sélectionné.")
     else:
         col_s1, col_s2 = st.columns(2, gap="large")
 
         with col_s1:
-            st.markdown("#### Répartition des débits par type de lot")
+            st.markdown(f"#### Répartition des débits par type de lot ({selected_date_label})")
             repartition_type = (
-                filtered_df.groupby("type_apt")
+                df_ref.groupby("type_apt")
                 .agg(
                     TotalDebit=("debit", "sum"),
                     MoyenneDebit=("debit", "mean"),
-                    NbReleves=("debit", "count"),
+                    NbLots=("debit", "count"),
                 )
                 .reset_index()
             )
-            if not repartition_type.empty:
+            pie_data = repartition_type[repartition_type["TotalDebit"] > 0]
+            if not pie_data.empty:
                 fig_pie = px.pie(
-                    repartition_type,
+                    pie_data,
                     values="TotalDebit",
                     names="type_apt",
                     color_discrete_sequence=px.colors.qualitative.Safe,
                 )
                 fig_pie = apply_plotly_theme(fig_pie)
                 st.plotly_chart(fig_pie, width="stretch")
+            else:
+                st.info("Aucun débit supérieur à 0 € à répartir pour ce relevé.")
 
         with col_s2:
-            st.markdown("#### Top 10 des débits au relevé le plus récent")
-            latest_date = filtered_df["date"].max()
+            st.markdown(f"#### Top 10 des débits au {selected_date_label}")
             top_10 = (
-                filtered_df[filtered_df["date"] == latest_date]
+                df_ref[df_ref["debit"] > 0]
                 .nlargest(10, "debit")
                 .sort_values("debit", ascending=True)
             )
-            top_10_prep = preparer_df_pour_graphe(top_10, "proprietaire")
+            if not top_10.empty:
+                top_10_prep = preparer_df_pour_graphe(top_10, "proprietaire")
 
-            fig_bar = px.bar(
-                top_10_prep,
-                x="debit",
-                y="proprietaire",
-                orientation="h",
-                title=f"Top 10 au {latest_date.strftime('%d/%m/%Y')}",
-                labels={"debit": "Débit (€)", "proprietaire": "Copropriétaire"},
-                color="debit",
-                color_continuous_scale="Blues",
-            )
-            fig_bar.update_layout(coloraxis_showscale=False)
-            fig_bar = apply_plotly_theme(fig_bar)
-            st.plotly_chart(fig_bar, width="stretch")
+                fig_bar = px.bar(
+                    top_10_prep,
+                    x="debit",
+                    y="proprietaire",
+                    orientation="h",
+                    title=f"Top 10 au {selected_date_label}",
+                    labels={"debit": "Débit (€)", "proprietaire": "Copropriétaire"},
+                    color="debit",
+                    color_continuous_scale="Blues",
+                )
+                fig_bar.update_layout(coloraxis_showscale=False)
+                fig_bar = apply_plotly_theme(fig_bar)
+                st.plotly_chart(fig_bar, width="stretch")
+            else:
+                st.info("Aucun compte débiteur (> 0 €) sur ce relevé.")

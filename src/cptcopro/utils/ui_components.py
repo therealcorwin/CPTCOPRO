@@ -9,6 +9,7 @@ Ce module centralise :
 
 from __future__ import annotations
 
+import datetime as dt
 import html
 
 import plotly.graph_objects as go
@@ -208,18 +209,66 @@ def apply_plotly_theme(fig: go.Figure) -> go.Figure:
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(30, 41, 59, 0.5)",
         font=dict(family="sans-serif", color="#F8FAFC", size=12),
-        margin=dict(l=20, r=20, t=40, b=20),
+        margin=dict(l=20, r=20, t=50, b=90),
+        title=dict(
+            x=0.01,
+            xanchor="left",
+            y=0.98,
+            yanchor="top",
+        ),
         legend=dict(
             orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1,
+            yanchor="top",
+            y=-0.22,
+            xanchor="center",
+            x=0.5,
             bgcolor="rgba(15, 23, 42, 0.8)",
             bordercolor="#334155",
             borderwidth=1,
+            title=dict(text=""),
         ),
         xaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
         yaxis=dict(gridcolor="#334155", zerolinecolor="#475569"),
     )
     return fig
+
+
+def normalize_date_range(
+    date_val: object, min_d: dt.date, max_d: dt.date
+) -> tuple[dt.date, dt.date]:
+    """Extrait en toute sécurité start_date et end_date d'un composant date.
+
+    Si une seule date est renseignée (ex: tuple d'un seul élément), end_date
+    conserve la borne maximale par défaut afin d'éviter d'écraser la date de fin
+    avec la date de début.
+    """
+    if isinstance(date_val, (tuple, list)):
+        if len(date_val) >= 2:
+            return date_val[0], date_val[1]
+        elif len(date_val) == 1:
+            return date_val[0], max_d
+        return min_d, max_d
+    elif isinstance(date_val, dt.date):
+        return date_val, max_d
+    return min_d, max_d
+
+
+def determiner_statut_copro(
+    code: str,
+    debit: float,
+    credit: float,
+    delta_debit: float,
+    alert_codes: set[str],
+) -> str:
+    """Détermine le statut synthétique d'un copropriétaire pour la balance de gestion."""
+    if str(code) in alert_codes:
+        return "🚨 Alerte seuil"
+    if debit > 0:
+        if delta_debit > 0:
+            return "🔴 Débiteur (+)"
+        elif delta_debit < 0:
+            return "🟡 Débiteur (-)"
+        return "🟠 Débiteur"
+    if credit > 0:
+        return "🔵 Créditeur"
+    return "🟢 À jour"

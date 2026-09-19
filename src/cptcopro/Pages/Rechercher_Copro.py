@@ -287,8 +287,28 @@ with tab_compare:
             title="Comparatif des débits (€)",
             markers=True,
         )
-        fig_multi.update_layout(xaxis_title="Date", yaxis_title="Débit (€)")
         fig_multi = apply_plotly_theme(fig_multi)
+        fig_multi.update_layout(
+            height=520,
+            xaxis_title="Date",
+            yaxis_title="Débit (€)",
+            margin=dict(l=20, r=20, t=50, b=90),
+            title=dict(
+                text="Comparatif des débits (€)",
+                x=0.01,
+                xanchor="left",
+                y=0.98,
+                yanchor="top",
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.22,
+                xanchor="center",
+                x=0.5,
+                title=dict(text=""),
+            ),
+        )
         st.plotly_chart(fig_multi, width="stretch")
 
         with st.expander("📋 Tableau des données comparées", expanded=False):
