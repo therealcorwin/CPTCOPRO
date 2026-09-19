@@ -43,7 +43,51 @@ TEMPLATE_PLACEHOLDERS = [
     "sender_email",
     "tone_instruction",
     "frequency_days",
+    "date_du_jour",
+    "contact_name",
+    "type_alerte",
+    "last_relance_date",
+    "nb_relances_total",
 ]
+
+
+def get_all_template_placeholders(db_path: str | None = None) -> list[dict[str, Any]]:
+    """Retourne la liste complète des placeholders disponibles (système + personnalisés)."""
+    from .Relance_Variables import list_relance_variables
+
+    system_vars = [
+        {"name": "nom_proprietaire", "category": "Copropriétaire & Lots", "description": "Nom et prénom du copropriétaire"},
+        {"name": "code_proprietaire", "category": "Copropriétaire & Lots", "description": "Identifiant / code interne"},
+        {"name": "num_apt", "category": "Copropriétaire & Lots", "description": "Numéro de lot ou d'appartement"},
+        {"name": "type_apt", "category": "Copropriétaire & Lots", "description": "Typologie du lot (ex: 3p, studio)"},
+        {"name": "contact_name", "category": "Copropriétaire & Lots", "description": "Nom du contact dédié ou mandataire"},
+        {"name": "debit", "category": "Finances & Débit", "description": "Montant brut en euros du débit constaté"},
+        {"name": "debit_fmt", "category": "Finances & Débit", "description": "Montant formaté avec devise (ex: 1 234.56 EUR)"},
+        {"name": "type_alerte", "category": "Finances & Débit", "description": "Niveau d'alerte détecté (ex: Débit élevé)"},
+        {"name": "date_origin", "category": "Dates & Échéances", "description": "Date de situation comptable d'origine"},
+        {"name": "date_du_jour", "category": "Dates & Échéances", "description": "Date du jour au format JJ/MM/AAAA"},
+        {"name": "frequency_days", "category": "Dates & Échéances", "description": "Fréquence minimale entre deux relances en jours"},
+        {"name": "last_relance_date", "category": "Historique des Relances", "description": "Date du précédent courrier de relance"},
+        {"name": "nb_relances_total", "category": "Historique des Relances", "description": "Nombre total de relances déjà émises"},
+        {"name": "sender_name", "category": "Syndic & Expéditeur", "description": "Nom de l'expéditeur (syndic)"},
+        {"name": "sender_email", "category": "Syndic & Expéditeur", "description": "Email de réponse du syndic"},
+        {"name": "tone_instruction", "category": "Syndic & Expéditeur", "description": "Consigne générale de ton pour la relance"},
+    ]
+
+    custom_vars = []
+    try:
+        rows = list_relance_variables(db_path=db_path)
+        for r in rows:
+            custom_vars.append({
+                "name": str(r["name"]),
+                "category": "Variables Personnalisées",
+                "description": str(r.get("description") or f"Valeur : {r.get('value')}").strip(),
+                "value": str(r.get("value") or ""),
+            })
+    except Exception as exc:
+        _logger.debug(f"Erreur chargement custom_vars pour placeholders: {exc}")
+
+    return system_vars + custom_vars
 
 
 def init_relance_templates_if_missing(db_path: str | None = None) -> bool:
@@ -131,8 +175,18 @@ def create_relance_template(
     tone_instruction: str = "",
     is_default: bool = False,
     db_path: str | None = None,
+    subject: str | None = None,
+    body: str | None = None,
+    prompt_instructions: str | None = None,
 ) -> int:
     """Cree un nouveau template et retourne son identifiant."""
+    if subject_template is None and subject is not None:
+        subject_template = subject
+    if body_template is None and body is not None:
+        body_template = body
+    if not tone_instruction and prompt_instructions is not None:
+        tone_instruction = prompt_instructions
+
     pos = list(args)
     if pos and (
         pos[0] is None
@@ -210,8 +264,18 @@ def update_relance_template(
     tone_instruction: str | None = None,
     is_default: bool | None = None,
     db_path: str | None = None,
+    subject: str | None = None,
+    body: str | None = None,
+    prompt_instructions: str | None = None,
 ) -> bool:
     """Met a jour un template existant."""
+    if subject_template is None and subject is not None:
+        subject_template = subject
+    if body_template is None and body is not None:
+        body_template = body
+    if tone_instruction is None and prompt_instructions is not None:
+        tone_instruction = prompt_instructions
+
     pos = list(args)
     if pos and (
         pos[0] is None

@@ -298,8 +298,9 @@ def creer_base_db(db_path: str | None = None) -> None:
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS relance_destinataire (
                     code_proprietaire VARCHAR(50) PRIMARY KEY,
-                    email_to VARCHAR(255) NOT NULL,
+                    email_to VARCHAR(255) NOT NULL DEFAULT '',
                     contact_name VARCHAR(255),
+                    notes TEXT,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     FOREIGN KEY (code_proprietaire) REFERENCES coproprietaires(code_proprietaire)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -351,6 +352,33 @@ def creer_base_db(db_path: str | None = None) -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
             """)
             _logger.success("Table 'relance_template' verifiee/creee.")
+
+            # 13. Table relance_variable (variables de relance personnalisees)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS relance_variable (
+                    var_id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL UNIQUE,
+                    value TEXT NOT NULL,
+                    description VARCHAR(255) DEFAULT '',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """)
+            _logger.success("Table 'relance_variable' verifiee/creee.")
+
+            # 14. Table relance_snippet (paragraphes types de relance)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS relance_snippet (
+                    snippet_id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    title VARCHAR(150) NOT NULL UNIQUE,
+                    content TEXT NOT NULL,
+                    description VARCHAR(255) DEFAULT '',
+                    sort_order INT DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """)
+            _logger.success("Table 'relance_snippet' verifiee/creee.")
 
     _logger.success("Base de donnees MariaDB initialisee avec succes.")
 
@@ -577,13 +605,18 @@ def integrite_db(db_path: str | None = None) -> dict[str, Any]:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS relance_destinataire (
                         code_proprietaire VARCHAR(50) PRIMARY KEY,
-                        email_to VARCHAR(255) NOT NULL,
+                        email_to VARCHAR(255) NOT NULL DEFAULT '',
                         contact_name VARCHAR(255),
+                        notes TEXT,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                         FOREIGN KEY (code_proprietaire) REFERENCES coproprietaires(code_proprietaire)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
                 """)
                 created.append("relance_destinataire")
+            else:
+                cur.execute("SHOW COLUMNS FROM relance_destinataire LIKE 'notes'")
+                if not cur.fetchone():
+                    cur.execute("ALTER TABLE relance_destinataire ADD COLUMN notes TEXT")
 
             # Table relance_draft
             has_relance_draft = _has_table(cur, "relance_draft")
@@ -635,6 +668,44 @@ def integrite_db(db_path: str | None = None) -> dict[str, Any]:
                 """)
                 created.append("relance_template")
 
+            # Table relance_variable
+            has_relance_variable = _has_table(cur, "relance_variable")
+            if not has_relance_variable:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS relance_variable (
+                        var_id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(100) NOT NULL UNIQUE,
+                        value TEXT NOT NULL,
+                        description VARCHAR(255) DEFAULT '',
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                """)
+                created.append("relance_variable")
+
+            # Table relance_snippet
+            has_relance_snippet = _has_table(cur, "relance_snippet")
+            if not has_relance_snippet:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS relance_snippet (
+                        snippet_id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        title VARCHAR(150) NOT NULL UNIQUE,
+                        content TEXT NOT NULL,
+                        description VARCHAR(255) DEFAULT '',
+                        sort_order INT DEFAULT 0,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+                """)
+                created.append("relance_snippet")
+
+    # Initialisation des snippets par défaut si la table est vide
+    try:
+        from .Relance_Snippets import init_relance_snippets_if_missing
+        init_relance_snippets_if_missing(db_path=db_path)
+    except Exception as exc:
+        _logger.warning(f"Impossible d'initialiser les snippets par défaut : {exc}")
+
     return {
         "charge": has_charge,
         "alertes_debit_eleve": has_alertes,
@@ -646,6 +717,8 @@ def integrite_db(db_path: str | None = None) -> dict[str, Any]:
         "relance_destinataire": has_relance_destinataire,
         "relance_draft": has_relance_draft,
         "relance_template": has_relance_template,
+        "relance_variable": has_relance_variable,
+        "relance_snippet": has_relance_snippet,
         "created": created,
     }
 

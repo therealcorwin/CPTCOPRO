@@ -12,7 +12,7 @@ Pour une vue synthétique du projet, voir `README.md` et `.github/copilot-instru
 
 1. **Vue d'ensemble (runtime)** : Cartographie macroscopique des flux d'exécution lors d'un lancement standard via CLI.
 2. **Déroulé du flux principal** : Ordre chronologique concret des appels dans `main.py`.
-3. **Cartographie Streamlit** : Structuration de la navigation (5 pôles), des 14 pages et de leurs fonctions de chargement `@st.cache_data`.
+3. **Cartographie Streamlit** : Structuration de la navigation (5 pôles), des 8 pages et de leurs fonctions de chargement `@st.cache_data`.
 4. **Sous-système de Relances (IA & Messagerie)** : Pipeline de génération de messages (Mistral AI ou modèles statiques), gestion des brouillons et synchronisation IMAP Hotmail (OAuth2).
 5. **Confidentialité & Sécurité** : Anonymisation des données sensibles et flux d'autorisation Microsoft OAuth2 Device Flow.
 6. **Matrices de référence** : Catalogue des modules, matrice CRUD des tables MariaDB, options CLI et constantes de timing.
@@ -45,7 +45,7 @@ flowchart TB
     end
 
     subgraph LAYER4["Couche 4 : Présentation, IA & Actions"]
-        L4_st["Affichage_Stream.py & 14 Pages Streamlit (5 Pôles thématiques)"]
+        L4_st["Affichage_Stream.py & 8 Pages Streamlit (5 Pôles thématiques)"]
         L4_ai["Mistral AI API REST (Rédaction contextuelle des relances)"]
         L4_imap["utils/relance_mailer.py (Dépôt IMAP Hotmail / Microsoft OAuth2 Device Flow)"]
     end
@@ -309,7 +309,7 @@ sequenceDiagram
 ## Cartographie Streamlit complète
 
 L'application web Streamlit est articulée autour de `src/cptcopro/Affichage_Stream.py`.
-Au démarrage, elle initialise et vérifie le pool MariaDB via `@st.cache_resource`, configure la charte graphique et orchestre la navigation en **5 pôles fonctionnels** regroupant **14 pages**.
+Au démarrage, elle initialise et vérifie le pool MariaDB via `@st.cache_resource`, configure la charte graphique et orchestre la navigation en **5 pôles fonctionnels** regroupant **8 pages**.
 
 ```mermaid
 flowchart LR
@@ -323,48 +323,35 @@ flowchart LR
         p_dash["Pages/Dashboard.py"]
     end
 
-    subgraph SEC2["2. 💳 Charges & Débits"]
+    subgraph SEC2["2. 💳 Finances & Charges"]
         p_lc["Pages/Liste_Charge.py"]
-        p_cc["Pages/Courbe_Charge_Copro.py"]
     end
 
     subgraph SEC3["3. 👥 Copropriétaires"]
         p_rech["Pages/Rechercher_Copro.py"]
-        p_lcopro["Pages/Liste_Copro.py"]
     end
 
-    subgraph SEC4["4. 🚨 Centre d'Alertes"]
+    subgraph SEC4["4. 🚨 Risques & Alertes"]
         p_ale["Pages/Alerte.py"]
         p_sadv["Pages/Statistiques_Avancees.py"]
-        p_sale["Pages/Stat_Alerte.py"]
-        p_cfg["Pages/Config_Alertes.py"]
     end
 
-    subgraph SEC5["5. ✉️ Relances & Messagerie"]
+    subgraph SEC5["5. ✉️ Recouvrement & Relances"]
         p_rel["Pages/Relance.py"]
         p_drf["Pages/Relance_Drafts.py"]
-        p_tpl["Pages/Relance_Templates.py"]
         p_rcfg["Pages/Relance_Config.py"]
-        p_adm["Pages/Relance_Admin.py"]
     end
 
     subgraph LOADERS["Fonctions de chargement (@st.cache_data)"]
         f_d1["chargement_somme_debit_global()"]
         f_d2["suivi_nbre_alertes()"]
         f_lc["load_charges() (Liste_Charge)"]
-        f_cc["load_data() (Courbe)"]
-        f_rc["load_all_data() (Recherche 360°)"]
-        f_lco["load_coproprietaires() (Annuaire)"]
-        f_al1["recup_alertes()"]
-        f_al2["recup_debits_proprietaires_alertes()"]
-        f_al3["recup_suivi_alertes()"]
+        f_rc["load_all_data(), load_coproprietaires() (Espace Copropriétaires)"]
+        f_al1["recup_alertes(), recup_debits_proprietaires_alertes(), recup_suivi_alertes(), load_config()"]
         f_sa1["load_charges(), load_alertes(), load_config_alertes(), load_coproprietaires()"]
-        f_cf1["load_config()"]
         f_r1["_load_due_data(), _load_templates()"]
         f_r2["_load_all_drafts(), _load_tracking_summary(), _load_config()"]
-        f_r3["_load_templates(), _load_config()"]
-        f_r4["_load_relance_config()"]
-        f_r5["_load_drafts()"]
+        f_r4["_load_relance_config(), _load_templates()"]
     end
 
     subgraph HELPERS["Helpers transversaux"]
@@ -376,18 +363,12 @@ flowchart LR
     pool --> nav
     nav --> p_dash --> f_d1 & f_d2
     nav --> p_lc --> f_lc
-    nav --> p_cc --> f_cc
     nav --> p_rech --> f_rc
-    nav --> p_lcopro --> f_lco
-    nav --> p_ale --> f_al1 & f_al2 & f_al3
+    nav --> p_ale --> f_al1
     nav --> p_sadv --> f_sa1
-    nav --> p_sale --> f_al1 & f_al3
-    nav --> p_cfg --> f_cf1
     nav --> p_rel --> f_r1
     nav --> p_drf --> f_r2
-    nav --> p_tpl --> f_r3
     nav --> p_rcfg --> f_r4
-    nav --> p_adm --> f_r5
 
     LOADERS -.-> h_norm
     SEC1 & SEC2 & SEC3 & SEC4 & SEC5 -.-> h_priv
@@ -631,10 +612,11 @@ flowchart LR
 | `src/cptcopro/Database/Alertes_Config.py` | Calcul des alertes et configuration des seuils | `sauvegarder_nombre_alertes()` (`GROUP BY ... WITH ROLLUP`), `get_config_alertes()`, `update_config_alerte()` |
 | `src/cptcopro/Database/Backup_DB.py` | Dump logique SQL pur Python compressé | `backup_db()` (génération de `.sql.gz` sans `mariadb-dump`), `generate_insert_statements()` |
 | `src/cptcopro/Database/Backup_DB_Pcloud.py` | Sauvegarde et restauration pCloud SDK | `sauvegarder_bdd_pcloud()`, `telecharger_dernier_backup_pcloud()`, `tester_token_et_connecter_pcloud()`, `deconnecter_pcloud()` |
-| `src/cptcopro/Database/Relance_Config.py` | Paramétrage et requêtes des relances | `get_relance_config()`, `update_relance_config()`, `list_relances_due()`, `save_relance_draft()`, `get_relance_drafts()`, `get_relances_tracking_summary()`, `upsert_relance_destinataire()`, `get_relance_destinataires()`, `mark_relance_draft_status()` |
-| `src/cptcopro/Database/Relance_Templates.py` | Gestion des modèles de relance | `list_relance_templates()`, `get_relance_template()`, `create_relance_template()`, `update_relance_template()`, `delete_relance_template()` |
-| `src/cptcopro/Affichage_Stream.py` | Point d'entrée Streamlit & structure de navigation | Configuration multi-pages (5 pôles), injection CSS, initialisation du pool de connexions |
-| `src/cptcopro/Pages/*.py` | 14 pages applicatives Streamlit | Visualisations, dashboards, fiches individuelles, réglages d'alertes et gestion des relances |
+| `src/cptcopro/Database/Relance_Config.py` | Paramétrage et requêtes des relances | `get_relance_config()`, `update_relance_config()`, `list_relances_due()`, `save_relance_draft()`, `get_relance_drafts()`, `get_relances_tracking_summary()`, `get_copro_notes()`, `save_copro_notes()`, `upsert_relance_destinataire()`, `get_relance_destinataires()`, `mark_relance_draft_status()` |
+| `src/cptcopro/Database/Relance_Templates.py` | Gestion des modèles de relance | `list_relance_templates()`, `get_relance_template()`, `create_relance_template()`, `update_relance_template()`, `delete_relance_template()`, `get_all_template_placeholders()` |
+| `src/cptcopro/Database/Relance_Variables.py` | Gestion des variables de personnalisation des relances | `list_relance_variables()`, `get_relance_variable()`, `create_relance_variable()`, `update_relance_variable()`, `delete_relance_variable()`, `get_custom_variables_dict()`, `normalize_variable_name()` |
+| `src/cptcopro/Affichage_Stream.py` | Point d'entrée Streamlit & structure de navigation | Configuration multi-pages (5 pôles, 8 pages), injection CSS, initialisation du pool de connexions |
+| `src/cptcopro/Pages/*.py` | 8 pages applicatives Streamlit | Visualisations, tableaux de bord, fiches individuelles 360°, centre d'alertes et gestion des relances |
 | `scripts/migrate_sqlite_to_mariadb.py` | Outil de migration initiale SQLite vers MariaDB | Migration paginée par lots avec barre de progression Rich et validation de parité |
 
 ---
@@ -646,15 +628,16 @@ Cette matrice récapitule les opérations de lecture (**R**) et d'écriture (**W
 | Table / Vue MariaDB | Type de stockage | Modules d'écriture (W) | Modules de lecture (R) |
 | :--- | :--- | :--- | :--- |
 | `charge` | Table InnoDB *(System Versioning)* | `Charges_To_BDD.py` (batch UPSERT) | `Creation_BDD.py` (triggers), `Dashboard.py`, `Statistiques_Avancees.py`, `Backup_DB.py` |
-| `coproprietaires` | Table InnoDB | `Coproprietaires_To_BDD.py` (batch UPSERT) | `Liste_Copro.py`, `Statistiques_Avancees.py`, `Creation_BDD.py` (triggers), `Backup_DB.py` |
-| `alertes_debit_eleve` | Table InnoDB | Triggers MariaDB (`charge` INSERT / DELETE) | `Alerte.py`, `Stat_Alerte.py`, `Statistiques_Avancees.py`, `Alertes_Config.py`, `Relance_Config.py` |
-| `suivi_alertes` | Table InnoDB | `Alertes_Config.py` (`sauvegarder_nombre_alertes`) | `Dashboard.py`, `Alerte.py`, `Stat_Alerte.py`, `Backup_DB.py` |
-| `config_alerte` | Table InnoDB | `Config_Alertes.py`, `Creation_BDD.py` (init) | `Creation_BDD.py` (triggers), `Statistiques_Avancees.py`, `Rechercher_Copro.py`, `Backup_DB.py` |
-| `relance_config` | Table InnoDB | `Relance_Config.py` (Page & DB) | `Relance.py`, `Relance_Drafts.py`, `Relance_Templates.py`, `Backup_DB.py` |
-| `relance_destinataire` | Table InnoDB | `Relance.py` (`upsert_relance_destinataire`) | `Relance.py`, `Relance_Config.py` (`list_relances_due`), `Backup_DB.py` |
-| `relance_template` | Table InnoDB | `Relance_Templates.py` (Page & DB) | `Relance.py`, `Relance_Templates.py`, `Backup_DB.py` |
-| `relance_draft` | Table InnoDB | `Relance.py`, `Relance_Drafts.py`, `Relance_Admin.py` | `Relance_Drafts.py`, `Relance_Admin.py`, `Relance_Config.py` (tracking summary), `Backup_DB.py` |
-| `vw_charge_coproprietaires` | Vue SQL *(ROW_NUMBER)* | `Creation_BDD.py` (`CREATE OR REPLACE VIEW`) | `Dashboard.py`, `Liste_Charge.py`, `Courbe_Charge_Copro.py`, `Rechercher_Copro.py`, `Alerte.py` |
+| `coproprietaires` | Table InnoDB | `Coproprietaires_To_BDD.py` (batch UPSERT) | `Rechercher_Copro.py`, `Statistiques_Avancees.py`, `Creation_BDD.py` (triggers), `Backup_DB.py` |
+| `alertes_debit_eleve` | Table InnoDB | Triggers MariaDB (`charge` INSERT / DELETE) | `Alerte.py`, `Statistiques_Avancees.py`, `Alertes_Config.py`, `Relance_Config.py` |
+| `suivi_alertes` | Table InnoDB | `Alertes_Config.py` (`sauvegarder_nombre_alertes`) | `Dashboard.py`, `Alerte.py`, `Backup_DB.py` |
+| `config_alerte` | Table InnoDB | `Alerte.py`, `Creation_BDD.py` (init) | `Creation_BDD.py` (triggers), `Statistiques_Avancees.py`, `Rechercher_Copro.py`, `Backup_DB.py` |
+| `relance_config` | Table InnoDB | `Relance_Config.py` (Page & DB) | `Relance.py`, `Relance_Drafts.py`, `Backup_DB.py` |
+| `relance_destinataire` | Table InnoDB | `Relance.py` (`upsert_relance_destinataire`), `Rechercher_Copro.py` (`save_copro_notes`) | `Relance.py`, `Relance_Config.py` (`list_relances_due`, `get_copro_notes`), `Backup_DB.py` |
+| `relance_template` | Table InnoDB | `Relance_Config.py` (Page & DB) | `Relance.py`, `Relance_Config.py`, `Backup_DB.py` |
+| `relance_variable` | Table InnoDB | `Relance_Config.py` (Page & DB) | `Relance_Config.py`, `relance_mailer.py`, `Backup_DB.py` |
+| `relance_draft` | Table InnoDB | `Relance.py`, `Relance_Drafts.py` | `Relance_Drafts.py`, `Relance_Config.py` (tracking summary), `Backup_DB.py` |
+| `vw_charge_coproprietaires` | Vue SQL *(ROW_NUMBER)* | `Creation_BDD.py` (`CREATE OR REPLACE VIEW`) | `Dashboard.py`, `Liste_Charge.py`, `Rechercher_Copro.py`, `Alerte.py` |
 
 ---
 

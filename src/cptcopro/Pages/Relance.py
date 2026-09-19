@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from contextlib import suppress
 from typing import Any, cast
 
@@ -89,6 +90,23 @@ if not due_df.empty:
     due_df["due"] = due_df["due"].fillna(0).astype(int)
     due_df["debit"] = pd.to_numeric(due_df["debit"], errors="coerce").fillna(0.0)
 
+    def _format_date_col(val: object) -> str:
+        if val is None or pd.isna(val) or val == "":
+            return "-"
+        if hasattr(val, "strftime"):
+            return val.strftime("%d/%m/%Y")
+        try:
+            dt = pd.to_datetime(val)
+            if pd.isna(dt):
+                return "-"
+            return dt.strftime("%d/%m/%Y")
+        except Exception:
+            return str(val)
+
+    for dcol in ["date_origin", "first_relance_date", "last_relance_date"]:
+        if dcol in due_df.columns:
+            due_df[dcol] = due_df[dcol].apply(_format_date_col)
+
 tab_generation, tab_destinataires = st.tabs(
     [
         "🎯 Copropriétaires à relancer & Rédaction",
@@ -103,6 +121,25 @@ with tab_generation:
     due_only = (
         due_df[due_df["due"] == 1].copy() if not due_df.empty else pd.DataFrame(columns=DUE_COLS)
     )
+
+    # Gestion de la passerelle 1-clic (pré-sélection ciblée)
+    target_code = st.session_state.get("target_relance_copro")
+    if target_code:
+        if not due_df.empty and target_code not in due_only["code_proprietaire"].values:
+            forced_row = due_df[due_df["code_proprietaire"] == target_code]
+            if not forced_row.empty:
+                due_only = pd.concat([due_only, forced_row], ignore_index=True)
+
+        col_ban1, col_ban2 = st.columns([3, 1], gap="medium")
+        with col_ban1:
+            st.info(
+                f"🎯 **Relance ciblée active** pour le copropriétaire `{target_code}`. "
+                "Le compte a été pré-sélectionné."
+            )
+        with col_ban2:
+            if st.button("Réinitialiser le filtre", key="reset_target_copro_btn"):
+                st.session_state.pop("target_relance_copro", None)
+                st.rerun()
 
     # Bandeau d'information
     col_info1, col_info2 = st.columns([3, 1])
@@ -139,7 +176,13 @@ with tab_generation:
         ]
         available_due_cols = [c for c in due_cols if c in due_only.columns]
         due_display = due_only[available_due_cols].copy()
-        due_display.insert(0, "Generer", True)
+
+        # Si cible spécifiée, cocher uniquement cette cible
+        if target_code:
+            due_display.insert(0, "Generer", due_display["code_proprietaire"] == target_code)
+        else:
+            due_display.insert(0, "Generer", True)
+
         due_display["Template"] = default_template_name
 
         st.caption(
@@ -208,15 +251,18 @@ with tab_generation:
                     st.error("Génération désactivée dans les paramètres.")
                     st.stop()
 
-                rows_to_generate = edited_due[edited_due["Generer"]]
+                mask_gen = edited_due["Generer"] == True  # noqa: E712
+                rows_to_generate = edited_due[mask_gen]
                 if rows_to_generate.empty:
                     st.warning("Veuillez cocher au moins un copropriétaire.")
                 else:
                     st.session_state.drafts_to_edit = []
+                    total_to_generate = len(rows_to_generate)
+                    progress_bar = st.progress(0, text="Initialisation de la rédaction...")
 
                     with st.spinner("Rédaction des brouillons en cours..."):
                         nb_generated = 0
-                        for _, edited_row in rows_to_generate.iterrows():
+                        for idx, (_, edited_row) in enumerate(rows_to_generate.iterrows()):
                             code = str(edited_row["code_proprietaire"])
                             row = due_only[due_only["code_proprietaire"].astype(str) == code]
                             if row.empty:
@@ -231,6 +277,19 @@ with tab_generation:
                             use_llm = force_llm or (
                                 selected_template is not None
                                 and selected_template.get("generation_mode") == "llm"
+                            )
+
+                            # Respect du rate-limit Mistral (pause de 2.0s recommandée par Mistral pour rester sous 32 RPM)
+                            if use_llm and idx > 0:
+                                progress_bar.progress(
+                                    idx / total_to_generate,
+                                    text=f"Pause de temporisation Mistral (2s)... ({idx}/{total_to_generate})",
+                                )
+                                time.sleep(2.0)
+
+                            progress_bar.progress(
+                                (idx + 0.5) / total_to_generate,
+                                text=f"Rédaction pour {payload.get('nom_proprietaire')} ({idx + 1}/{total_to_generate})...",
                             )
 
                             if use_llm:
@@ -270,6 +329,7 @@ with tab_generation:
                             )
                             nb_generated += 1
 
+                    progress_bar.empty()
                     st.toast(f"✅ {nb_generated} brouillon(s) généré(s) avec succès !", icon="📬")
                     _load_due_data.clear()
                     st.success(

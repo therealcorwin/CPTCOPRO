@@ -95,18 +95,213 @@ derniers_debits_typed["type_apt"] = (
     derniers_debits_typed["type_apt_copro"].fillna(derniers_debits_typed["type_apt"]).fillna("NA")
 )
 
-tab_distrib, tab_risques, tab_recidive, tab_saison = st.tabs(
+tab_aging, tab_distrib, tab_risques, tab_recidive, tab_saison = st.tabs(
     [
-        "📊 1. Distribution & Ratios",
-        "⚠️ 2. Détection Précoce (Risques)",
-        "🔁 3. Récidives & Durée",
-        "📅 4. Typologie & Saisonnalité",
+        "⏳ 1. Balance Âgée (Aging)",
+        "📊 2. Distribution & Ratios",
+        "⚠️ 3. Détection Précoce (Risques)",
+        "🔁 4. Récidives & Durée",
+        "📅 5. Typologie & Saisonnalité",
     ]
 )
 
 
 # ============================================================================
-# ONGLET 1: DISTRIBUTION & RATIOS
+# ONGLET 1: BALANCE ÂGÉE DES CRÉANCES
+# ============================================================================
+with tab_aging:
+    st.subheader(f"⏳ Balance Âgée des Créances au {derniere_date.strftime('%d/%m/%Y')}")
+    st.caption(
+        "Ventilation de l'ancienneté des soldes débiteurs ininterrompus par tranches d'âge standard (<30j, 30-60j, 60-90j, >90j)."
+    )
+
+    aging_records = []
+    for code, group in charges_df.groupby("code"):
+        group_sorted = group.sort_values("date", ascending=True)
+        derniere_ligne = group_sorted.iloc[-1]
+        debit_actuel = float(derniere_ligne["debit"])
+
+        if debit_actuel > 0:
+            reversed_rows = group_sorted.iloc[::-1]
+            date_debut_dette = derniere_ligne["date"]
+            for _, r in reversed_rows.iterrows():
+                if float(r["debit"]) > 0:
+                    date_debut_dette = r["date"]
+                else:
+                    break
+
+            jours_anciennete = max(0, (derniere_date - date_debut_dette).days)
+
+            if jours_anciennete <= 30:
+                tranche = "< 30 jours"
+                tranche_order = 1
+            elif jours_anciennete <= 60:
+                tranche = "30 - 60 jours"
+                tranche_order = 2
+            elif jours_anciennete <= 90:
+                tranche = "60 - 90 jours"
+                tranche_order = 3
+            else:
+                tranche = "> 90 jours"
+                tranche_order = 4
+
+            aging_records.append(
+                {
+                    "code": code,
+                    "proprietaire": derniere_ligne["proprietaire"],
+                    "num_apt": derniere_ligne.get("num_apt", "N/A"),
+                    "type_apt": derniere_ligne.get("type_apt", "N/A"),
+                    "debit": debit_actuel,
+                    "date_debut_dette": date_debut_dette,
+                    "jours_anciennete": jours_anciennete,
+                    "tranche": tranche,
+                    "tranche_order": tranche_order,
+                }
+            )
+
+    if not aging_records:
+        st.success("🎉 Aucun compte débiteur au dernier relevé ! Toutes les charges sont apurées.")
+    else:
+        df_aging = pd.DataFrame(aging_records)
+
+        total_creances = df_aging["debit"].sum()
+        nb_debiteurs = len(df_aging)
+
+        tranche_30 = df_aging[df_aging["tranche"] == "< 30 jours"]
+        tranche_60 = df_aging[df_aging["tranche"] == "30 - 60 jours"]
+        tranche_90 = df_aging[df_aging["tranche"] == "60 - 90 jours"]
+        tranche_plus90 = df_aging[df_aging["tranche"] == "> 90 jours"]
+
+        col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5, gap="small")
+        with col_k1:
+            st.metric(
+                "Total Créances",
+                f"{total_creances:,.2f} €".replace(",", " "),
+                delta=f"{nb_debiteurs} débiteur(s)",
+                delta_color="off",
+            )
+        with col_k2:
+            st.metric(
+                "< 30 jours (Courant)",
+                f"{tranche_30['debit'].sum():,.2f} €".replace(",", " "),
+                delta=f"{len(tranche_30)} compte(s)",
+                delta_color="off",
+            )
+        with col_k3:
+            st.metric(
+                "30 - 60 jours (Rappel)",
+                f"{tranche_60['debit'].sum():,.2f} €".replace(",", " "),
+                delta=f"{len(tranche_60)} compte(s)",
+                delta_color="inverse",
+            )
+        with col_k4:
+            st.metric(
+                "60 - 90 jours (Alerte)",
+                f"{tranche_90['debit'].sum():,.2f} €".replace(",", " "),
+                delta=f"{len(tranche_90)} compte(s)",
+                delta_color="inverse",
+            )
+        with col_k5:
+            st.metric(
+                "> 90 jours (Critique)",
+                f"{tranche_plus90['debit'].sum():,.2f} €".replace(",", " "),
+                delta=f"{len(tranche_plus90)} compte(s)",
+                delta_color="inverse",
+            )
+
+        st.divider()
+
+        col_g_age1, col_g_age2 = st.columns([1.5, 1], gap="large")
+        colors_map = {
+            "< 30 jours": "#10B981",
+            "30 - 60 jours": "#F59E0B",
+            "60 - 90 jours": "#F97316",
+            "> 90 jours": "#EF4444",
+        }
+
+        with col_g_age1:
+            summary_aging = (
+                df_aging.groupby(["tranche", "tranche_order"])
+                .agg(TotalDebit=("debit", "sum"), Nombre=("code", "count"))
+                .reset_index()
+                .sort_values("tranche_order")
+            )
+            fig_aging_bar = px.bar(
+                summary_aging,
+                x="tranche",
+                y="TotalDebit",
+                color="tranche",
+                color_discrete_map=colors_map,
+                text_auto=".2f",
+                title="Créances cumulées par tranche d'ancienneté (€)",
+                labels={"tranche": "Classe d'âge", "TotalDebit": "Montant (€)"},
+            )
+            fig_aging_bar.update_layout(showlegend=False)
+            fig_aging_bar = apply_plotly_theme(fig_aging_bar)
+            st.plotly_chart(fig_aging_bar, width="stretch")
+
+        with col_g_age2:
+            fig_aging_pie = px.pie(
+                summary_aging,
+                values="TotalDebit",
+                names="tranche",
+                color="tranche",
+                color_discrete_map=colors_map,
+                hole=0.4,
+                title="Part des impayés par classe d'âge",
+            )
+            fig_aging_pie = apply_plotly_theme(fig_aging_pie)
+            st.plotly_chart(fig_aging_pie, width="stretch")
+
+        st.divider()
+
+        col_filtre_age, _ = st.columns([1.5, 2])
+        with col_filtre_age:
+            filtre_tranche = st.selectbox(
+                "Filtrer le tableau par classe d'âge :",
+                options=["Toutes", "< 30 jours", "30 - 60 jours", "60 - 90 jours", "> 90 jours"],
+                index=0,
+                key="aging_tranche_filter",
+            )
+
+        df_aging_filtre = df_aging.copy()
+        if filtre_tranche != "Toutes":
+            df_aging_filtre = df_aging_filtre[df_aging_filtre["tranche"] == filtre_tranche]
+
+        df_aging_filtre["date_debut_str"] = pd.to_datetime(
+            df_aging_filtre["date_debut_dette"]
+        ).dt.strftime("%d/%m/%Y")
+
+        st.markdown(f"**{len(df_aging_filtre)} compte(s) débiteur(s) affiché(s)**")
+        st.dataframe(
+            appliquer_confidentialite(
+                df_aging_filtre.sort_values(
+                    by=["tranche_order", "debit"], ascending=[False, False]
+                )
+            ),
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "proprietaire": st.column_config.TextColumn("Copropriétaire", width="large"),
+                "code": st.column_config.TextColumn("Code", width="small"),
+                "num_apt": st.column_config.TextColumn("Lot", width="small"),
+                "type_apt": st.column_config.TextColumn("Type", width="small"),
+                "debit": st.column_config.NumberColumn(
+                    "Débit total (€)", format="%.2f €", width="medium"
+                ),
+                "tranche": st.column_config.TextColumn("Tranche d'ancienneté", width="medium"),
+                "jours_anciennete": st.column_config.NumberColumn(
+                    "Ancienneté (jours)", format="%d j", width="small"
+                ),
+                "date_debut_str": st.column_config.TextColumn(
+                    "Dette ininterrompue depuis", width="medium"
+                ),
+            },
+        )
+
+
+# ============================================================================
+# ONGLET 2: DISTRIBUTION & RATIOS
 # ============================================================================
 with tab_distrib:
     st.subheader(f"Distribution des soldes au {derniere_date.strftime('%d/%m/%Y')}")

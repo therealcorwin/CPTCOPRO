@@ -3,22 +3,19 @@
 Ce module définit l'application web Streamlit avec navigation multi-pages
 pour visualiser et analyser les données des copropriétaires.
 
-Pages disponibles:
-    - Dashboard: Vue d'ensemble du suivi des charges
-    - Liste Charge: Suivi détaillé des charges par copropriétaire
-    - Courbe Charge Copro: Analyse graphique des débits
-    - Alertes: Suivi des copropriétaires en situation d'alerte
-    - Config Alertes: Configuration des seuils d'alerte par type d'appartement
-    - Liste Copro: Liste complète des copropriétaires
-    - Recherche Copro: Recherche d'informations sur un copropriétaire
+Pages disponibles (8 pages unifiées):
+    - Dashboard: Vue d'ensemble et KPIs du suivi des charges
+    - Liste_Charge: Suivi financier détaillé et comparateur multi-courbes
+    - Rechercher_Copro: Espace Copropriétaires (Annuaire & Fiche 360° individuelle)
+    - Alerte: Centre d'Alertes (actives, répartition par lot, historique, seuils)
+    - Statistiques_Avancees: Analyses avancées & Balance Âgée (Aging Balance)
+    - Relance: Assistant de génération des relances (IA Mistral / Modèles)
+    - Relance_Drafts: Boîte d'envoi, brouillons et suivi d'efficacité
+    - Relance_Config: Paramètres des relances, modèles types et OAuth2 Hotmail
 
 Usage:
     Lancé automatiquement via streamlit_launcher ou manuellement:
     $ streamlit run src/cptcopro/Affichage_Stream.py
-
-Note:
-    Les pages sont définies dans le dossier Pages/ avec leurs assets
-    dans Pages/Assets/.
 """
 
 from pathlib import Path
@@ -31,7 +28,7 @@ try:
 
     load_env_file()
 except ImportError:
-    pass  # Fallback si l'import échoue
+    pass
 
 try:
     from cptcopro.utils.ui_components import inject_custom_css
@@ -76,7 +73,7 @@ try:
 except Exception as exc:
     st.error(f"Erreur de connexion à la base de données MariaDB : {exc}")
 
-# --- Configuration des pages ---
+# --- Configuration des 8 pages applicatives ---
 Dashboard_page = st.Page(
     "Pages/Dashboard.py",
     title="Tableau de bord",
@@ -84,56 +81,36 @@ Dashboard_page = st.Page(
     default=True,
 )
 
-# Pôle Charges
+# Pôle Finances & Charges
 Liste_Charge_page = st.Page(
     "Pages/Liste_Charge.py",
-    title="Suivi détaillé des charges",
+    title="Suivi des charges & débits",
     icon=":material/table_chart:",
-)
-Courbe_Charge_Corpo_page = st.Page(
-    "Pages/Courbe_Charge_Copro.py",
-    title="Évolution & Analyse des débits",
-    icon=":material/show_chart:",
 )
 
 # Pôle Copropriétaires
 Recherche_Copro_page = st.Page(
     "Pages/Rechercher_Copro.py",
-    title="Recherche & Fiche copropriétaire",
-    icon=":material/person_search:",
-)
-Liste_Copro_page = st.Page(
-    "Pages/Liste_Copro.py",
-    title="Annuaire des copropriétaires",
+    title="Espace copropriétaires & 360°",
     icon=":material/group:",
 )
 
-# Pôle Alertes & Risques
+# Pôle Risques & Alertes
 Alerte_page = st.Page(
     "Pages/Alerte.py",
-    title="Alertes actives",
+    title="Centre d'alertes & seuils",
     icon=":material/warning:",
 )
 Statistiques_Avancees_page = st.Page(
     "Pages/Statistiques_Avancees.py",
-    title="Analyses & Statistiques avancées",
+    title="Analyses & Balance âgée",
     icon=":material/insights:",
 )
-Stat_Alerte_page = st.Page(
-    "Pages/Stat_Alerte.py",
-    title="Historique & Répartition",
-    icon=":material/pie_chart:",
-)
-Config_Alertes_page = st.Page(
-    "Pages/Config_Alertes.py",
-    title="Configuration des seuils",
-    icon=":material/tune:",
-)
 
-# Pôle Relances & Notifications
+# Pôle Recouvrement & Relances
 Relance_page = st.Page(
     "Pages/Relance.py",
-    title="Génération des relances (IA)",
+    title="Assistant de relances",
     icon=":material/mark_email_unread:",
 )
 Relance_Drafts_page = st.Page(
@@ -141,49 +118,75 @@ Relance_Drafts_page = st.Page(
     title="Brouillons & Boîte d'envoi",
     icon=":material/drafts:",
 )
-Relance_Templates_page = st.Page(
-    "Pages/Relance_Templates.py",
-    title="Modèles d'emails",
-    icon=":material/description:",
-)
 Relance_Config_page = st.Page(
     "Pages/Relance_Config.py",
-    title="Paramètres messagerie & IA",
+    title="Paramètres & Modèles",
     icon=":material/settings:",
 )
-Relance_Admin_page = st.Page(
-    "Pages/Relance_Admin.py",
-    title="Administration",
-    icon=":material/admin_panel_settings:",
-)
 
-# --- NAVIGATION SETUP [WITH SECTIONS]---
+# --- NAVIGATION SETUP (5 PÔLES THÉMATIQUES - 8 PAGES) ---
 menus = st.navigation(
     {
         "📊 Vue d'ensemble": [Dashboard_page],
-        "💳 Charges & Débits": [Liste_Charge_page, Courbe_Charge_Corpo_page],
-        "👥 Copropriétaires": [Recherche_Copro_page, Liste_Copro_page],
-        "🚨 Centre d'Alertes": [
+        "💳 Finances & Charges": [Liste_Charge_page],
+        "👥 Copropriétaires": [Recherche_Copro_page],
+        "🚨 Risques & Alertes": [
             Alerte_page,
             Statistiques_Avancees_page,
-            Stat_Alerte_page,
-            Config_Alertes_page,
         ],
-        "✉️ Relances & Messagerie": [
+        "✉️ Recouvrement & Relances": [
             Relance_page,
             Relance_Drafts_page,
-            Relance_Templates_page,
             Relance_Config_page,
-            Relance_Admin_page,
         ],
     },
     expanded=True,
 )
 
-# --- SIDEBAR BRANDING & CONTROLS ---
+# --- SIDEBAR BRANDING & ACTIONS ---
 LOGO_PATH = Path(__file__).parent / "Pages" / "Assets" / "gb2.png"
 if LOGO_PATH.exists():
     st.logo(str(LOGO_PATH), size="large")
+
+# Bouton de rafraîchissement rapide du cache
+st.sidebar.divider()
+if st.sidebar.button(
+    "🔄 Rafraîchir les données",
+    use_container_width=True,
+    help="Efface le cache local et recharge les données actualisées de la base",
+):
+    st.cache_data.clear()
+    st.toast("Cache réinitialisé !", icon="🔄")
+    st.rerun()
+
+# Widget Santé du Système
+with st.sidebar.expander("🩺 Santé du Système", expanded=False):
+    try:
+        from cptcopro.Database.connection import get_db_cursor
+
+        with get_db_cursor() as cur:
+            cur.execute("SELECT MAX(date) AS max_date FROM charge")
+            row = cur.fetchone()
+            max_d = row["max_date"] if row else None
+            max_d_str = (
+                max_d.strftime("%d/%m/%Y")
+                if max_d and hasattr(max_d, "strftime")
+                else (str(max_d) if max_d else "N/A")
+            )
+        st.markdown(f"🟢 **MariaDB** : Connecté\n\n📅 **Dernier relevé** : `{max_d_str}`")
+    except Exception as err:
+        st.markdown(f"🔴 **MariaDB** : Déconnecté (`{err}`)")
+
+    try:
+        from cptcopro.utils.hotmail_oauth import verifier_statut_token_hotmail
+
+        token_ok, msg_token = verifier_statut_token_hotmail()
+        if token_ok:
+            st.markdown(f"🟢 **Hotmail OAuth2** : Connecté\n\n(`{msg_token}`)")
+        else:
+            st.markdown("🟠 **Hotmail OAuth2** : Déconnecté")
+    except Exception as exc:
+        st.markdown(f"⚪ **Hotmail OAuth2** : Non vérifié (`{exc}`)")
 
 st.sidebar.caption("🏢 **CPTCOPRO** v2.0")
 st.sidebar.caption("Made with ❤️ by [Therealcorwin](https://github.com/Therealcorwin)")

@@ -262,6 +262,56 @@ def get_relance_destinataires(db_path: str | None = None) -> list[dict[str, Any]
         return list(cur.fetchall())
 
 
+def get_copro_notes(code_proprietaire: str) -> str:
+    """Retourne les notes internes et promesses de paiement associees a un coproprietaire."""
+    code = (code_proprietaire or "").strip()
+    if not code:
+        return ""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute(
+                """
+                SELECT notes FROM relance_destinataire
+                WHERE code_proprietaire = %s
+                """,
+                (code,),
+            )
+            row = cur.fetchone()
+            if row and row.get("notes"):
+                return str(row["notes"])
+    except Exception as exc:
+        _logger.warning(f"Erreur lecture notes coproprietaire {code}: {exc}")
+    return ""
+
+
+def save_copro_notes(code_proprietaire: str, notes: str) -> None:
+    """Enregistre ou met a jour les notes internes pour un coproprietaire."""
+    code = (code_proprietaire or "").strip()
+    if not code:
+        raise ValueError("code_proprietaire vide")
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Ensure notes column exists in relance_destinataire
+                try:
+                    cur.execute("ALTER TABLE relance_destinataire ADD COLUMN IF NOT EXISTS notes TEXT")
+                except Exception as exc:
+                    _logger.debug(f"ALTER TABLE relance_destinataire note column: {exc}")
+                cur.execute(
+                    """
+                    INSERT INTO relance_destinataire (code_proprietaire, email_to, notes, updated_at)
+                    VALUES (%s, '', %s, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE
+                        notes = VALUES(notes),
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (code, notes.strip()),
+                )
+    except Exception as exc:
+        _logger.error(f"Erreur sauvegarde notes coproprietaire {code}: {exc}")
+        raise
+
+
 def list_relances_due(
     db_path: str | None = None,
     frequency_days: int | None = None,

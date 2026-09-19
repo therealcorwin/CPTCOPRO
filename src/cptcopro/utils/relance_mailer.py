@@ -11,11 +11,13 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import suppress
+from datetime import date
 from email.message import EmailMessage
 from typing import Any
 
 from loguru import logger
 
+from cptcopro.Database.Relance_Variables import get_custom_variables_dict
 from cptcopro.utils.hotmail_oauth import get_hotmail_access_token
 
 logger = logger.bind(type_log="RELANCE")
@@ -38,7 +40,7 @@ def _build_placeholder_context(
     config: dict[str, Any],
 ) -> _SafePlaceholderDict:
     debit = float(data.get("debit") or 0.0)
-    return _SafePlaceholderDict(
+    ctx = _SafePlaceholderDict(
         nom_proprietaire=str(data.get("nom_proprietaire") or ""),
         code_proprietaire=str(data.get("code_proprietaire") or ""),
         debit=debit,
@@ -46,11 +48,28 @@ def _build_placeholder_context(
         num_apt=str(data.get("num_apt") or "NA"),
         type_apt=str(data.get("type_apt") or "NA"),
         date_origin=str(data.get("date_origin") or ""),
+        date_du_jour=date.today().strftime("%d/%m/%Y"),
+        today=date.today().strftime("%d/%m/%Y"),
+        contact_name=str(data.get("contact_name") or ""),
+        type_alerte=str(data.get("type_alerte") or ""),
+        last_relance_date=str(data.get("last_relance_date") or "aucune"),
+        nb_relances_total=str(data.get("nb_relances_total") or "0"),
+        jours_depuis_derniere_relance=str(data.get("jours_depuis_derniere_relance") or "-"),
         sender_name=str(config.get("sender_name") or ""),
         sender_email=str(config.get("sender_email") or ""),
         tone_instruction=str(config.get("tone_instruction") or ""),
         frequency_days=str(config.get("frequency_days") or ""),
     )
+
+    # Injection des variables personnalisées définies par l'utilisateur
+    try:
+        custom_vars = get_custom_variables_dict()
+        for k, v in custom_vars.items():
+            ctx[k] = v
+    except Exception as exc:
+        logger.debug(f"Erreur chargement des variables personnalisées : {exc}")
+
+    return ctx
 
 
 def render_relance_template(
@@ -60,9 +79,8 @@ def render_relance_template(
 ) -> tuple[str, str]:
     """Genere (subject, body) a partir d'un template parametrable et des donnees du coproprietaire.
 
-    Placeholders disponibles: nom_proprietaire, code_proprietaire, debit, debit_fmt,
-    num_apt, type_apt, date_origin, sender_name, sender_email, tone_instruction,
-    frequency_days.
+    Placeholders disponibles : toutes les variables systemes (nom_proprietaire, debit_fmt,
+    date_du_jour, etc.) ainsi que les variables personnalisees configurees en base.
     """
     context = _build_placeholder_context(data, config)
     subject = str(template.get("subject_template") or "").format_map(context)
@@ -132,8 +150,22 @@ def tester_connexion_mistral(
         rep = content.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
         return True, f"Connexion réussie avec {model} ! Réponse: '{rep}'"
     except urllib.error.HTTPError as http_err:
-        err_msg = http_err.read().decode("utf-8", errors="ignore")
-        return False, f"Erreur HTTP {http_err.code} ({http_err.reason}) : {err_msg}"
+        raw_msg = http_err.read().decode("utf-8", errors="ignore")
+        try:
+            err_json = json.loads(raw_msg)
+            msg_detail = err_json.get("message") or raw_msg
+        except Exception:
+            msg_detail = raw_msg
+
+        if http_err.code == 429:
+            return (
+                False,
+                f"Limite de requêtes atteinte (HTTP 429 - Rate limit exceeded) : {msg_detail}. "
+                "Mistral AI applique un plafond de fréquence (1 req/s sur le plan gratuit) "
+                "ou le quota mensuel de crédits gratuits est épuisé sur console.mistral.ai. "
+                "Solutions : patientez quelques instants, réduisez le rythme, ou désactivez l'IA pour générer vos relances avec les modèles types.",
+            )
+        return False, f"Erreur HTTP {http_err.code} ({http_err.reason}) : {msg_detail}"
     except Exception as exc:
         return False, f"Erreur de connexion Mistral : {exc}"
 
@@ -232,38 +264,76 @@ def generate_relance_draft_with_llm(
             {"role": "user", "content": user_prompt},
         ],
     }
-    req = urllib.request.Request(
-        url=f"{api_base}/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key.strip()}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
 
-    try:
-        # Schéma https:// validé avant construction de la requête
-        with urllib.request.urlopen(req, timeout=30) as response:  # nosec B310
-            raw = response.read().decode("utf-8")
-        content = json.loads(raw)
-        body = content.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        if body:
-            logger.success(f"Brouillon généré avec succès par Mistral pour {copro_nom}.")
-            return (subject, body, "mistral", model)
-        else:
-            logger.warning(f"Réponse vide reçue de Mistral pour {copro_nom}, utilisation fallback.")
-            body = _fallback_body(data, tone_instruction)
-            return (subject, body, provider, model)
-    except urllib.error.HTTPError as http_err:
-        err_msg = http_err.read().decode("utf-8", errors="ignore")
-        logger.error(f"Erreur HTTP API Mistral ({http_err.code}): {http_err.reason} - {err_msg}")
-        body = _fallback_body(data, tone_instruction)
-        return (subject, body, provider, model)
-    except Exception as exc:
-        logger.error(f"Erreur lors de la génération avec Mistral : {exc}")
-        body = _fallback_body(data, tone_instruction)
-        return (subject, body, provider, model)
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(
+                url=f"{api_base}/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {api_key.strip()}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as response:  # nosec B310
+                raw = response.read().decode("utf-8")
+            content = json.loads(raw)
+            body = content.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if body:
+                logger.success(f"Brouillon généré avec succès par Mistral pour {copro_nom}.")
+                return (subject, body, "mistral", model)
+            else:
+                logger.warning(
+                    f"Réponse vide reçue de Mistral pour {copro_nom}, utilisation fallback."
+                )
+                break
+        except urllib.error.HTTPError as http_err:
+            raw_err = http_err.read().decode("utf-8", errors="ignore")
+            if http_err.code == 429 and attempt < max_retries - 1:
+                retry_header = http_err.headers.get("Retry-After")
+                if retry_header:
+                    try:
+                        parsed_wait = float(retry_header)
+                        wait_time = min(max(parsed_wait, 2.0), 30.0)
+                    except (ValueError, TypeError):
+                        wait_time = 5.0 * (attempt + 1)
+                else:
+                    # Valeur recommandée par le guide officiel Mistral (5 secondes par défaut)
+                    wait_time = 5.0 * (attempt + 1)
+                logger.warning(
+                    f"Mistral HTTP 429 (Rate Limit) pour {copro_nom} — tentative {attempt + 1}/{max_retries}. Attente de {wait_time:.1f}s..."
+                )
+                time.sleep(wait_time)
+                continue
+            logger.error(
+                f"Erreur HTTP API Mistral ({http_err.code}): {http_err.reason} - {raw_err}"
+            )
+            break
+        except Exception as exc:
+            logger.error(f"Erreur lors de la génération avec Mistral : {exc}")
+            break
+
+    # Secours intelligent : template choisi s'il existe, sinon fallback standard
+    if template and (template.get("body_template") or template.get("body")):
+        try:
+            rendered_subj, rendered_body = render_relance_template(template, data, config)
+            logger.info(
+                f"Brouillon de secours généré via template '{template.get('name')}' pour {copro_nom}."
+            )
+            return (
+                rendered_subj or subject,
+                rendered_body,
+                "template",
+                template.get("name", "Standard"),
+            )
+        except Exception as exc:
+            logger.debug(f"Erreur fallback render_relance_template: {exc}")
+
+    body = _fallback_body(data, tone_instruction)
+    return (subject, body, provider, model)
 
 
 def build_email_message(

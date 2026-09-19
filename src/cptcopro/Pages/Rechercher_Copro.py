@@ -1,24 +1,36 @@
-"""Page de recherche et Fiche 360° détaillée par copropriétaire."""
+"""Page Espace Copropriétaires : Annuaire des lots et Fiche 360° individuelle."""
 
 from __future__ import annotations
 
+import io
+
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+try:
+    from cptcopro.Database import get_copro_notes, save_copro_notes
+except ImportError:
+    import importlib
+    import sys
+
+    if "cptcopro.Database.Relance_Config" in sys.modules:
+        importlib.reload(sys.modules["cptcopro.Database.Relance_Config"])
+    if "cptcopro.Database" in sys.modules:
+        importlib.reload(sys.modules["cptcopro.Database"])
+
+    from cptcopro.Database.Relance_Config import get_copro_notes, save_copro_notes
 from cptcopro.Database.connection import get_db_cursor
 from cptcopro.utils.db_helpers import fetch_dataframe, normalize_date_columns
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
-    preparer_df_pour_graphe,
 )
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_all_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Charge les données des charges, copropriétaires et seuils d'alerte."""
+    """Charge les données des charges, alertes et seuils."""
     with get_db_cursor() as cur:
         cur.execute(
             "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, "
@@ -39,27 +51,46 @@ def load_all_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     return charges_df, alertes_df, config_df
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_coproprietaires() -> pd.DataFrame:
+    """Charge la liste complète des copropriétaires depuis MariaDB."""
+    with get_db_cursor() as cur:
+        cur.execute(
+            "SELECT nom_proprietaire AS Proprietaire, code_proprietaire AS Code, "
+            "type_apt AS Type, num_apt AS Numero, last_check AS Date FROM coproprietaires "
+            "ORDER BY nom_proprietaire ASC"
+        )
+        df = fetch_dataframe(cur)
+    return normalize_date_columns(df, ["Date"])
+
+
 render_header(
-    "🔍 Fiche Copropriétaire & Analyse 360°",
-    "Consultez l'historique complet, la situation financière et le statut d'alerte d'un copropriétaire",
+    "👥 Espace Copropriétaires",
+    "Répertoire complet des lots, annuaire des résidents et fiches individuelles 360°",
 )
 
 charges_df, alertes_df, config_df = load_all_data()
+df_copros = load_coproprietaires()
 
-
-if charges_df.empty:
+if charges_df.empty and df_copros.empty:
     st.warning("⚠️ Aucune donnée disponible.")
     st.stop()
 
 # Liste unique des copropriétaires et métadonnées associées
-proprietaires_uniques = sorted(charges_df["proprietaire"].unique())
-thresholds_by_type = dict(zip(config_df["type_apt"], config_df["threshold"], strict=False))
+proprietaires_uniques = sorted(charges_df["proprietaire"].unique()) if not charges_df.empty else []
+thresholds_by_type = (
+    dict(zip(config_df["type_apt"], config_df["threshold"], strict=False))
+    if not config_df.empty
+    else {}
+)
 
 # Table de correspondance métadonnées par propriétaire
 copro_meta_df = (
     charges_df[["proprietaire", "code", "num_apt", "type_apt"]]
     .drop_duplicates(subset=["proprietaire"])
     .set_index("proprietaire")
+    if not charges_df.empty
+    else pd.DataFrame()
 )
 
 
@@ -79,7 +110,6 @@ def filter_coproprietaires(query: str, all_owners: list[str]) -> list[str]:
             num_apt = str(row.get("num_apt") or "").lower()
             type_apt = str(row.get("type_apt") or "").lower()
 
-            # Normalisation du lot (ex: "01" -> "1")
             num_apt_clean = num_apt.lstrip("0") if num_apt != "0" else "0"
             q_clean = q.lstrip("0") if q != "0" else "0"
 
@@ -96,23 +126,114 @@ def filter_coproprietaires(query: str, all_owners: list[str]) -> list[str]:
     return matched
 
 
-# Onglets principaux : Fiche Individuelle vs Comparateur Multi-copropriétaires
-tab_fiche, tab_compare = st.tabs(
+tab_annuaire, tab_fiche = st.tabs(
     [
-        "👤 Fiche Individuelle 360°",
-        "📊 Comparateur Multi-Copropriétaires",
+        "📋 Annuaire des Lots & Résidents",
+        "👤 Fiche Individuelle 360° & Notes",
     ]
 )
 
 # ============================================================================
-# ONGLET 1: FICHE INDIVIDUELLE 360°
+# ONGLET 1: ANNUAIRE DES LOTS & COPROPRIÉTAIRES (Ex-Liste_Copro)
+# ============================================================================
+with tab_annuaire:
+    if df_copros.empty:
+        st.info("ℹ️ Aucun copropriétaire répertorié dans la base.")
+    else:
+        total_copros = len(df_copros)
+        repartition_types = df_copros["Type"].value_counts().to_dict()
+
+        kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5, gap="small")
+        with kpi1:
+            st.metric("Total Copropriétaires", total_copros)
+        with kpi2:
+            st.metric("2 pièces (T2)", repartition_types.get("2p", 0))
+        with kpi3:
+            st.metric("3 pièces (T3)", repartition_types.get("3p", 0))
+        with kpi4:
+            st.metric("4 pièces (T4)", repartition_types.get("4p", 0))
+        with kpi5:
+            st.metric("5 pièces (T5+)", repartition_types.get("5p", 0))
+
+        st.divider()
+
+        col_f1, col_f2 = st.columns([2, 1], gap="medium")
+        with col_f1:
+            search_annuaire = st.text_input(
+                "🔍 Recherche rapide dans l'annuaire",
+                placeholder="Filtrer par nom, code ou n° de lot...",
+                key="annuaire_quick_search",
+            ).strip()
+        with col_f2:
+            types_dispo = ["Tous", *sorted(t for t in df_copros["Type"].dropna().unique() if t)]
+            filtre_type = st.selectbox(
+                "Type de lot",
+                options=types_dispo,
+                index=0,
+                key="annuaire_type_sel",
+            )
+
+        df_filtre_annuaire = df_copros.copy()
+        if search_annuaire:
+            df_filtre_annuaire = df_filtre_annuaire[
+                df_filtre_annuaire["Proprietaire"].str.contains(
+                    search_annuaire, case=False, na=False
+                )
+                | df_filtre_annuaire["Code"].str.contains(search_annuaire, case=False, na=False)
+                | df_filtre_annuaire["Numero"]
+                .astype(str)
+                .str.contains(search_annuaire, case=False, na=False)
+            ]
+        if filtre_type != "Tous":
+            df_filtre_annuaire = df_filtre_annuaire[df_filtre_annuaire["Type"] == filtre_type]
+
+        st.markdown(f"**{len(df_filtre_annuaire)} copropriétaire(s) affiché(s)**")
+
+        display_annuaire = appliquer_confidentialite(df_filtre_annuaire)
+        st.dataframe(
+            display_annuaire,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Proprietaire": st.column_config.TextColumn(
+                    "Nom du copropriétaire", width="large"
+                ),
+                "Code": st.column_config.TextColumn("Code", width="small"),
+                "Type": st.column_config.TextColumn("Type Lot", width="small"),
+                "Numero": st.column_config.TextColumn("Numéro Lot / Apt", width="small"),
+                "Date": st.column_config.DateColumn(
+                    "Dernière vérification", format="DD/MM/YYYY", width="medium"
+                ),
+            },
+        )
+
+        # Export CSV
+        col_csv, _ = st.columns([1, 3])
+        with col_csv:
+            csv_buf = io.StringIO()
+            display_annuaire.to_csv(csv_buf, index=False, sep=";")
+            st.download_button(
+                "📥 Exporter l'annuaire (CSV)",
+                data=csv_buf.getvalue().encode("utf-8-sig"),
+                file_name="annuaire_coproprietaires.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+
+# ============================================================================
+# ONGLET 2: FICHE INDIVIDUELLE 360° & BLOC-NOTES
 # ============================================================================
 with tab_fiche:
     col_s1, col_s2 = st.columns([1.2, 2], gap="medium")
 
+    # Pré-sélection depuis un autre onglet ou page
+    default_search = st.session_state.get("target_fiche_copro", "")
+
     with col_s1:
         search_filter = st.text_input(
-            "🔍 Filtrer par nom, code ou n° de lot :",
+            "🔍 Rechercher un copropriétaire :",
+            value=default_search,
             placeholder="Ex: Dupont, D001, 12, T3...",
             key="fiche_search_box",
         ).strip()
@@ -121,16 +242,21 @@ with tab_fiche:
 
     with col_s2:
         if not matching_proprietaires:
-            st.warning(f"Aucun copropriétaire trouvé pour la recherche : '{search_filter}'")
+            st.warning(f"Aucun compte trouvé pour : '{search_filter}'")
             selected_copro = None
         else:
-            label_select = f"Sélectionnez le copropriétaire ({len(matching_proprietaires)} résultat{'s' if len(matching_proprietaires) > 1 else ''}) :"
+            label_select = (
+                f"Sélectionnez le copropriétaire ({len(matching_proprietaires)} résultat"
+                f"{'s' if len(matching_proprietaires) > 1 else ''}) :"
+            )
             selected_copro = st.selectbox(
                 label_select,
                 options=matching_proprietaires,
                 index=0,
                 format_func=lambda p: (
-                    f"{p}  (Code: {copro_meta_df.loc[p, 'code']} | Lot: {copro_meta_df.loc[p, 'num_apt']} - {str(copro_meta_df.loc[p, 'type_apt']).upper()})"
+                    f"{p}  (Code: {copro_meta_df.loc[p, 'code']} | Lot: "
+                    f"{copro_meta_df.loc[p, 'num_apt']} - "
+                    f"{str(copro_meta_df.loc[p, 'type_apt']).upper()})"
                     if p in copro_meta_df.index
                     else p
                 ),
@@ -138,23 +264,20 @@ with tab_fiche:
             )
 
     if not selected_copro:
-        st.info("Veuillez affiner ou effacer votre recherche pour sélectionner un compte.")
+        st.info("Veuillez sélectionner un compte pour afficher sa fiche 360°.")
     else:
-        # Données du copropriétaire sélectionné
         df_copro = charges_df[charges_df["proprietaire"] == selected_copro].sort_values("date")
 
         if df_copro.empty:
-            st.info("Aucune donnée pour ce copropriétaire.")
+            st.info("Aucun historique financier pour ce copropriétaire.")
         else:
             dernier_releve = df_copro.iloc[-1]
-            code_copro = dernier_releve["code"]
+            code_copro = str(dernier_releve["code"])
             type_lot = dernier_releve["type_apt"] or "NA"
             num_lot = dernier_releve["num_apt"] or "NA"
             debit_actuel = float(dernier_releve["debit"])
-            credit_actuel = float(dernier_releve["credit"])
             date_releve = dernier_releve["date"].strftime("%d/%m/%Y")
 
-            # Vérifier si en alerte
             if not alertes_df.empty and "code" in alertes_df.columns:
                 alerte_info = alertes_df[alertes_df["code"] == code_copro]
             else:
@@ -166,15 +289,28 @@ with tab_fiche:
 
             st.divider()
 
-            # --- Bandeau d'identité & Situation ---
-            st.markdown(f"### Situation au {date_releve} : **{selected_copro}**")
+            # --- Bandeau d'identité & Situation financière ---
+            col_id, col_actions = st.columns([2.5, 1.2], gap="large")
+            with col_id:
+                st.markdown(f"### Situation au {date_releve} : **{selected_copro}**")
+            with col_actions:
+                # Passerelle 1-clic vers le module de relances
+                if st.button(
+                    "✉️ Préparer une relance",
+                    type="primary",
+                    help="Bascule vers le module de relance avec ce copropriétaire pré-sélectionné",
+                    use_container_width=True,
+                ):
+                    st.session_state["target_relance_copro"] = code_copro
+                    st.switch_page("Pages/Relance.py")
 
             col_c1, col_c2, col_c3, col_c4 = st.columns(4, gap="medium")
             with col_c1:
                 st.metric("Code Copropriétaire", code_copro)
             with col_c2:
                 st.metric(
-                    "Lot & Typologie", f"Lot {num_lot} ({type_lot.upper() if type_lot else 'N/A'})"
+                    "Lot & Typologie",
+                    f"Lot {num_lot} ({type_lot.upper() if type_lot else 'N/A'})",
                 )
             with col_c3:
                 st.metric(
@@ -194,15 +330,36 @@ with tab_fiche:
                     )
                 else:
                     st.metric(
-                        "Statut Alerte", "✅ Normal", delta="Sous le seuil", delta_color="normal"
+                        "Statut Alerte",
+                        "✅ Normal",
+                        delta="Sous le seuil",
+                        delta_color="normal",
                     )
 
-            st.space("small")
+            # --- Bloc-notes interne & Suivi des promesses de paiement ---
+            with st.expander(
+                "📝 Bloc-notes interne & Promesses de paiement (Gestionnaire)",
+                expanded=False,
+            ):
+                current_notes = get_copro_notes(code_copro)
+                with st.form(f"notes_form_{code_copro}"):
+                    notes_input = st.text_area(
+                        "Notes internes (promesses de règlement, échanges téléphoniques, accords d'échéancier) :",
+                        value=current_notes,
+                        height=100,
+                        placeholder="Ex: Promesse de virement de 450 € prévue le 28 du mois...",
+                    )
+                    submitted_notes = st.form_submit_button(
+                        "💾 Enregistrer les notes", use_container_width=False
+                    )
+                    if submitted_notes:
+                        save_copro_notes(code_copro, notes_input)
+                        st.toast("Notes internes enregistrées avec succès !", icon="💾")
+                        st.rerun()
 
             # --- Graphique temporel individuel ---
             fig_indiv = go.Figure()
 
-            # Courbe du débit
             fig_indiv.add_trace(
                 go.Scatter(
                     x=df_copro["date"],
@@ -214,7 +371,6 @@ with tab_fiche:
                 )
             )
 
-            # Ligne de seuil d'alerte
             fig_indiv.add_hline(
                 y=seuil_lot,
                 line_dash="dash",
@@ -231,9 +387,9 @@ with tab_fiche:
             fig_indiv = apply_plotly_theme(fig_indiv)
             st.plotly_chart(fig_indiv, width="stretch")
 
-            # --- Historique des relevés ---
+            # --- Historique complet des relevés ---
             with st.expander(
-                f"📋 Historique complet des relevés pour {selected_copro} ({len(df_copro)} relevés)",
+                f"📋 Historique des relevés pour {selected_copro} ({len(df_copro)} relevés)",
                 expanded=False,
             ):
                 df_display = df_copro.sort_values("date", ascending=False).copy()
@@ -254,74 +410,3 @@ with tab_fiche:
                         "credit": st.column_config.NumberColumn("Crédit (€)", format="%.2f €"),
                     },
                 )
-
-
-# ============================================================================
-# ONGLET 2: COMPARATEUR MULTI-COPROPRIÉTAIRES
-# ============================================================================
-with tab_compare:
-    st.subheader("Comparaison simultanée de plusieurs copropriétaires")
-    st.caption("Sélectionnez plusieurs comptes pour analyser l'évolution croisée de leurs charges.")
-
-    selected_multiple = st.multiselect(
-        "Choisissez les copropriétaires à superposer :",
-        options=proprietaires_uniques,
-        default=proprietaires_uniques[:3]
-        if len(proprietaires_uniques) >= 3
-        else proprietaires_uniques,
-        key="compare_copros_multiselect",
-    )
-
-    if not selected_multiple:
-        st.info("Veuillez sélectionner au moins un copropriétaire pour afficher le comparatif.")
-    else:
-        df_multi = charges_df[charges_df["proprietaire"].isin(selected_multiple)].sort_values(
-            ["proprietaire", "date"]
-        )
-
-        fig_multi = px.line(
-            preparer_df_pour_graphe(df_multi, "proprietaire"),
-            x="date",
-            y="debit",
-            color="proprietaire",
-            title="Comparatif des débits (€)",
-            markers=True,
-        )
-        fig_multi = apply_plotly_theme(fig_multi)
-        fig_multi.update_layout(
-            height=520,
-            xaxis_title="Date",
-            yaxis_title="Débit (€)",
-            margin=dict(l=20, r=20, t=50, b=90),
-            title=dict(
-                text="Comparatif des débits (€)",
-                x=0.01,
-                xanchor="left",
-                y=0.98,
-                yanchor="top",
-            ),
-            legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=-0.22,
-                xanchor="center",
-                x=0.5,
-                title=dict(text=""),
-            ),
-        )
-        st.plotly_chart(fig_multi, width="stretch")
-
-        with st.expander("📋 Tableau des données comparées", expanded=False):
-            st.dataframe(
-                appliquer_confidentialite(
-                    df_multi.sort_values(by=["date", "proprietaire"], ascending=[False, True])
-                ),
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),
-                    "proprietaire": st.column_config.TextColumn("Copropriétaire"),
-                    "debit": st.column_config.NumberColumn("Débit (€)", format="%.2f €"),
-                    "credit": st.column_config.NumberColumn("Crédit (€)", format="%.2f €"),
-                },
-            )

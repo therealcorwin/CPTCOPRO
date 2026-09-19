@@ -25,6 +25,7 @@ def test_relance_tables_created():
             "relance_destinataire",
             "relance_draft",
             "relance_template",
+            "relance_variable",
         ]:
             cur.execute(
                 "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
@@ -591,3 +592,198 @@ def test_generer_brouillons_relances_automation():
 
     # Restaurer l'activation
     dbmod.update_relance_config(enabled=1)
+
+
+def test_copro_notes():
+    """Vérifie la sauvegarde et lecture des notes internes / promesses de paiement."""
+    dbmod.integrite_db()
+    from cptcopro.Database.connection import get_db_connection
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO coproprietaires (nom_proprietaire, code_proprietaire, num_apt, type_apt, last_check) "
+                "VALUES (%s, %s, %s, %s, CURRENT_DATE) ON DUPLICATE KEY UPDATE type_apt=VALUES(type_apt)",
+                ("Notes Test Owner", "NOTES_01", "99", "3p"),
+            )
+
+    # Initialement vide
+    assert dbmod.get_copro_notes("NOTES_01") == ""
+
+    # Sauvegarde
+    test_note = "Promesse de virement de 500 € prévue le 30/10."
+    dbmod.save_copro_notes("NOTES_01", test_note)
+    assert dbmod.get_copro_notes("NOTES_01") == test_note
+
+    # Mise à jour
+    updated_note = "Accord échéancier : 250 € en nov, 250 € en déc."
+    dbmod.save_copro_notes("NOTES_01", updated_note)
+    assert dbmod.get_copro_notes("NOTES_01") == updated_note
+
+
+def test_normalize_variable_name():
+    """Vérifie la normalisation stricte des noms de variables."""
+    from cptcopro.Database.Relance_Variables import normalize_variable_name
+
+    assert normalize_variable_name("iban") == "iban"
+    assert normalize_variable_name("{iban}") == "iban"
+    assert normalize_variable_name("  {IBAN_FR}  ") == "iban_fr"
+    assert normalize_variable_name("Téléphone-Syndic") == "telephone_syndic"
+    assert normalize_variable_name("Code.Acces 2026") == "code_acces_2026"
+    assert normalize_variable_name("123abc") == "var_123abc"
+
+    with pytest.raises(ValueError):
+        normalize_variable_name("")
+
+    with pytest.raises(ValueError):
+        normalize_variable_name("???!!!")
+
+
+def test_custom_variables_crud_and_interpolation():
+    """Vérifie le cycle de vie complet CRUD des variables personnalisées et leur rendu."""
+    dbmod.integrite_db()
+
+    # Nettoyage préalable au cas où
+    for v in dbmod.list_relance_variables():
+        if v["name"] in ("iban_test", "tel_syndic_test"):
+            dbmod.delete_relance_variable(v["var_id"])
+
+    # 1. Création
+    var_id = dbmod.create_relance_variable(
+        name="iban_test",
+        value="FR76 1234 5678 9000",
+        description="IBAN bancaire de test",
+    )
+    assert var_id > 0
+
+    # 2. Lecture
+    var = dbmod.get_relance_variable("iban_test")
+    assert var is not None
+    assert var["name"] == "iban_test"
+    assert var["value"] == "FR76 1234 5678 9000"
+
+    # 3. Interdiction de collision avec une variable système protégée
+    with pytest.raises(ValueError):
+        dbmod.create_relance_variable(name="nom_proprietaire", value="Hack")
+
+    with pytest.raises(ValueError):
+        dbmod.create_relance_variable(name="debit", value="100")
+
+    # 4. Mise à jour
+    ok_up = dbmod.update_relance_variable(
+        var_id,
+        value="FR76 9999 8888 7777",
+        description="IBAN mis à jour",
+    )
+    assert ok_up is True
+    var_updated = dbmod.get_relance_variable(var_id)
+    assert var_updated["value"] == "FR76 9999 8888 7777"
+    assert var_updated["description"] == "IBAN mis à jour"
+
+    # 5. Dictionnaire et injection dans render_relance_template
+    custom_dict = dbmod.get_custom_variables_dict()
+    assert "iban_test" in custom_dict
+    assert custom_dict["iban_test"] == "FR76 9999 8888 7777"
+
+    template = {
+        "name": "Test Custom Vars",
+        "subject_template": "Relance pour {nom_proprietaire} au {date_du_jour}",
+        "body_template": (
+            "Bonjour {nom_proprietaire}, merci de virer {debit_fmt} sur l'IBAN : {iban_test}. "
+            "Dernière relance: {last_relance_date} (total {nb_relances_total})."
+        ),
+    }
+
+    subj, body = render_relance_template(
+        template,
+        {
+            "nom_proprietaire": "Madame Martin",
+            "debit": 450.0,
+            "last_relance_date": "10/09/2026",
+            "nb_relances_total": 2,
+        },
+        {"sender_name": "Cabinet Syndic"},
+    )
+
+    assert "Madame Martin" in subj
+    assert "/" in subj  # date_du_jour présente
+    assert "450.00 EUR" in body
+    assert "FR76 9999 8888 7777" in body
+    assert "10/09/2026" in body
+    assert "total 2" in body
+
+    # 6. Suppression
+    del_ok = dbmod.delete_relance_variable(var_id)
+    assert del_ok is True
+    assert dbmod.get_relance_variable("iban_test") is None
+
+
+def test_relance_snippets_crud():
+    """Vérifie le cycle de vie complet des paragraphes types (snippets)."""
+    dbmod.integrite_db()
+    # 1. Amorçage automatique
+    dbmod.init_relance_snippets_if_missing()
+    snippets = dbmod.list_relance_snippets()
+    assert len(snippets) >= 4
+
+    # Les titres par défaut sont présents
+    titles = [s["title"] for s in snippets]
+    assert "📌 Constat de solde débiteur & Lot" in titles
+    assert "💳 Coordonnées bancaires & Virement" in titles
+
+    # 2. Création d'un snippet personnalisé
+    custom_title = "⏳ Délai de rigueur 8 jours"
+    custom_content = "À défaut de règlement sous 8 jours, le dossier sera transmis au contentieux."
+    custom_desc = "Mise en demeure ferme"
+
+    snip_id = dbmod.create_relance_snippet(
+        title=custom_title,
+        content=custom_content,
+        description=custom_desc,
+        sort_order=50,
+    )
+    assert snip_id > 0
+
+    # 3. Lecture par ID et par Titre
+    snip_by_id = dbmod.get_relance_snippet(snip_id)
+    assert snip_by_id is not None
+    assert snip_by_id["title"] == custom_title
+    assert snip_by_id["content"] == custom_content
+    assert snip_by_id["description"] == custom_desc
+    assert snip_by_id["sort_order"] == 50
+
+    snip_by_title = dbmod.get_relance_snippet(custom_title)
+    assert snip_by_title is not None
+    assert snip_by_title["snippet_id"] == snip_id
+
+    # 4. Blocage des doublons de titre et validations
+    with pytest.raises(ValueError, match="existe déjà"):
+        dbmod.create_relance_snippet(title=custom_title, content="Autre contenu")
+
+    with pytest.raises(ValueError, match="titre du paragraphe type ne peut pas être vide"):
+        dbmod.create_relance_snippet(title="", content="Contenu sans titre")
+
+    with pytest.raises(ValueError, match="contenu du paragraphe type ne peut pas être vide"):
+        dbmod.create_relance_snippet(title="Nouveau titre", content="")
+
+    # 5. Mise à jour
+    dbmod.update_relance_snippet(
+        snip_id,
+        content="Délai de rigueur ramené à 48 heures.",
+        description="Alerte urgente",
+    )
+    snip_updated = dbmod.get_relance_snippet(snip_id)
+    assert snip_updated["content"] == "Délai de rigueur ramené à 48 heures."
+    assert snip_updated["description"] == "Alerte urgente"
+
+    # 6. Suppression
+    del_ok = dbmod.delete_relance_snippet(snip_id)
+    assert del_ok is True
+    assert dbmod.get_relance_snippet(custom_title) is None
+
+    # 7. Restauration des snippets par défaut
+    restored = dbmod.reset_default_relance_snippets()
+    assert restored >= 0  # 0 car déjà présents
+
+
+

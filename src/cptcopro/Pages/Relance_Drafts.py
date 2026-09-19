@@ -111,32 +111,43 @@ with tab_drafts:
                 | filtered_df["code_proprietaire"].str.contains(name_filter, case=False, na=False)
             ]
 
-        # Gestion des sélections globales via session_state
-        if "drafts_selection_action" in st.session_state:
-            action = st.session_state.pop("drafts_selection_action")
-            if action == "select_all":
-                filtered_df["selected"] = True
-            elif action == "deselect_all":
-                filtered_df["selected"] = False
-            elif action == "select_errors":
-                filtered_df["selected"] = filtered_df["status"].isin(["draft_local", "error"])
+        # Gestion persistante des sélections dans session_state
+        if "drafts_selected_ids" not in st.session_state:
+            st.session_state.drafts_selected_ids = set()
+        if "drafts_editor_version" not in st.session_state:
+            st.session_state.drafts_editor_version = 0
 
         # --- Boutons de sélection en masse ---
         col_sel1, col_sel2, col_sel3, col_sel4 = st.columns([1.2, 1.2, 1.6, 1], gap="small")
         with col_sel1:
             if st.button("☑️ Tout cocher", use_container_width=True):
-                st.session_state.drafts_selection_action = "select_all"
+                st.session_state.drafts_selected_ids = set(
+                    filtered_df["draft_id"].dropna().astype(int).tolist()
+                )
+                st.session_state.drafts_editor_version += 1
                 st.rerun()
         with col_sel2:
             if st.button("◻️ Décocher tout", use_container_width=True):
-                st.session_state.drafts_selection_action = "deselect_all"
+                st.session_state.drafts_selected_ids = set()
+                st.session_state.drafts_editor_version += 1
                 st.rerun()
         with col_sel3:
             if st.button("⚠️ Locaux / Erreurs uniquement", use_container_width=True):
-                st.session_state.drafts_selection_action = "select_errors"
+                st.session_state.drafts_selected_ids = set(
+                    filtered_df[filtered_df["status"].isin(["draft_local", "error"])]["draft_id"]
+                    .dropna()
+                    .astype(int)
+                    .tolist()
+                )
+                st.session_state.drafts_editor_version += 1
                 st.rerun()
         with col_sel4:
             st.caption(f"**{len(filtered_df)} / {len(df_drafts)}** brouillon(s)")
+
+        # Synchroniser la colonne 'selected' avec l'ensemble persistant des IDs sélectionnés
+        filtered_df["selected"] = filtered_df["draft_id"].astype(int).isin(
+            st.session_state.drafts_selected_ids
+        )
 
         # --- Tableau d'édition ---
         display_columns = [
@@ -168,10 +179,10 @@ with tab_drafts:
 
         edited_df = st.data_editor(
             filtered_df_display,
-            key=f"all_drafts_editor_{len(filtered_df)}",
+            key=f"all_drafts_editor_{st.session_state.drafts_editor_version}",
             width="stretch",
             hide_index=True,
-            num_rows="dynamic",
+            num_rows="fixed",
             column_config={
                 "S": st.column_config.CheckboxColumn("Sélection", required=True, width="small"),
                 "ID": st.column_config.NumberColumn(disabled=True, width="small"),
@@ -198,17 +209,20 @@ with tab_drafts:
                 type="primary",
                 use_container_width=True,
             ):
-                nb_sent = 0
-                nb_error = 0
-                selected_rows = edited_df[edited_df["S"]]
+                mask_act1 = edited_df["S"] == True  # noqa: E712
+                selected_rows = edited_df[mask_act1]
 
                 if selected_rows.empty:
                     st.warning("Aucun brouillon coché dans le tableau.")
                 else:
+                    nb_sent = 0
+                    nb_error = 0
                     with st.spinner(
                         f"Dépôt de {len(selected_rows)} message(s) sur le serveur IMAP..."
                     ):
                         for _, row in selected_rows.iterrows():
+                            if pd.isna(row.get("ID")):
+                                continue
                             draft_id = int(row["ID"])
                             matching = filtered_df[filtered_df["draft_id"] == draft_id]
                             if matching.empty:
@@ -243,6 +257,8 @@ with tab_drafts:
                             except Exception:
                                 nb_error += 1
 
+                    st.session_state.drafts_selected_ids.clear()
+                    st.session_state.drafts_editor_version += 1
                     _load_all_drafts.clear()
                     _load_tracking_summary.clear()
                     st.toast(f"{nb_sent} brouillon(s) déposé(s) sur Hotmail !", icon="📬")
@@ -250,14 +266,19 @@ with tab_drafts:
 
         with col_act2:
             if st.button("🗑️ Supprimer les cochés", type="secondary", use_container_width=True):
-                selected_rows = edited_df[edited_df["S"]]
+                mask_act2 = edited_df["S"] == True  # noqa: E712
+                selected_rows = edited_df[mask_act2]
                 if selected_rows.empty:
                     st.warning("Aucun brouillon coché pour suppression.")
                 else:
                     nb_deleted = 0
                     for _, row in selected_rows.iterrows():
+                        if pd.isna(row.get("ID")):
+                            continue
                         mark_relance_draft_status(draft_id=int(row["ID"]), status="deleted")
                         nb_deleted += 1
+                    st.session_state.drafts_selected_ids.clear()
+                    st.session_state.drafts_editor_version += 1
                     _load_all_drafts.clear()
                     _load_tracking_summary.clear()
                     st.toast(f"{nb_deleted} brouillon(s) supprimé(s)", icon="🗑️")
@@ -265,6 +286,8 @@ with tab_drafts:
 
         with col_act3:
             if st.button("🔄 Actualiser", use_container_width=True):
+                st.session_state.drafts_selected_ids.clear()
+                st.session_state.drafts_editor_version += 1
                 _load_all_drafts.clear()
                 _load_tracking_summary.clear()
                 st.rerun()
@@ -459,6 +482,23 @@ with tab_tracking:
             return f"Relance N°{nb} ({jours}j)" if pd.notna(jours) else f"Relance N°{nb}"
 
         df_track_filtered["Statut Suivi"] = df_track_filtered.apply(_compute_statut_label, axis=1)
+
+        def _format_date_val(val: object) -> str:
+            if val is None or pd.isna(val) or val == "":
+                return "-"
+            if hasattr(val, "strftime"):
+                return val.strftime("%d/%m/%Y")
+            try:
+                dt = pd.to_datetime(val)
+                if pd.isna(dt):
+                    return "-"
+                return dt.strftime("%d/%m/%Y")
+            except Exception:
+                return str(val)
+
+        for dc in ["first_relance_date", "last_relance_date"]:
+            if dc in df_track_filtered.columns:
+                df_track_filtered[dc] = df_track_filtered[dc].apply(_format_date_val)
 
         display_track_cols = [
             "code_proprietaire",

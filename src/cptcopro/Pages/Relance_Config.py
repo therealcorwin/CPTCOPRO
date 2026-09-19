@@ -1,4 +1,4 @@
-"""Configuration des relances email (fréquence, messagerie Hotmail/IMAP, LLM Mistral)."""
+"""Configuration globale des relances : modèles types, fréquence, messagerie IMAP Hotmail et IA Mistral."""
 
 from __future__ import annotations
 
@@ -9,9 +9,25 @@ import streamlit as st
 
 from cptcopro.Database import (
     DEFAULT_RELANCE_CONFIG,
+    GENERATION_MODES,
+    create_relance_snippet,
+    create_relance_template,
+    create_relance_variable,
+    delete_relance_snippet,
+    delete_relance_template,
+    delete_relance_variable,
+    get_all_template_placeholders,
     get_relance_config,
     init_relance_config_if_missing,
+    init_relance_snippets_if_missing,
+    list_relance_snippets,
+    list_relance_templates,
+    list_relance_variables,
+    reset_default_relance_snippets,
     update_relance_config,
+    update_relance_snippet,
+    update_relance_template,
+    update_relance_variable,
 )
 from cptcopro.utils.hotmail_oauth import (
     demarrer_device_flow_microsoft,
@@ -20,12 +36,62 @@ from cptcopro.utils.hotmail_oauth import (
 )
 from cptcopro.utils.paths import init_env
 from cptcopro.utils.relance_mailer import (
+    render_relance_template,
     tester_connexion_imap,
     tester_connexion_mistral,
 )
 from cptcopro.utils.ui_components import render_header
 
 init_env()
+
+_MODE_LABELS = {
+    "static": "Statique (substitution directe des variables)",
+    "llm": "Assistant IA Mistral (guide de contexte et de ton)",
+}
+
+_SAMPLE_DATA = {
+    "nom_proprietaire": "M. Dupont Jean",
+    "code_proprietaire": "D001",
+    "debit": 1234.56,
+    "num_apt": "12",
+    "type_apt": "3p",
+    "date_origin": "01/07/2026",
+    "date_du_jour": "19/09/2026",
+    "today": "19/09/2026",
+    "contact_name": "M. Dupont",
+    "type_alerte": "Débit élevé",
+    "last_relance_date": "05/09/2026",
+    "nb_relances_total": 1,
+}
+
+def _insert_into_body(tag: str) -> None:
+    curr = str(st.session_state.get("tpl_edit_body", ""))
+    if curr and not curr.endswith((" ", "\n")):
+        st.session_state["tpl_edit_body"] = f"{curr} {tag}"
+    else:
+        st.session_state["tpl_edit_body"] = f"{curr}{tag}"
+    st.toast(f"Balise {tag} ajoutée au corps !", icon="✨")
+    st.rerun()
+
+
+def _insert_into_subject(tag: str) -> None:
+    curr = str(st.session_state.get("tpl_edit_subject", ""))
+    if curr and not curr.endswith(" "):
+        st.session_state["tpl_edit_subject"] = f"{curr} {tag}"
+    else:
+        st.session_state["tpl_edit_subject"] = f"{curr}{tag}"
+    st.toast(f"Balise {tag} ajoutée à l'objet !", icon="✨")
+    st.rerun()
+
+
+def _insert_snippet_into_body(snippet: str) -> None:
+    curr = str(st.session_state.get("tpl_edit_body", "")).rstrip()
+    if curr:
+        st.session_state["tpl_edit_body"] = f"{curr}\n\n{snippet}\n"
+    else:
+        st.session_state["tpl_edit_body"] = f"{snippet}\n"
+    st.toast("Paragraphe type inséré dans le corps !", icon="📝")
+    st.rerun()
 
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -34,26 +100,339 @@ def _load_relance_config() -> dict[str, Any]:
     return cast(dict[str, Any], get_relance_config())
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_templates() -> list[dict[str, Any]]:
+    return cast(list[dict[str, Any]], list_relance_templates())
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_custom_variables() -> list[dict[str, Any]]:
+    return cast(list[dict[str, Any]], list_relance_variables())
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_snippets() -> list[dict[str, Any]]:
+    init_relance_snippets_if_missing()
+    return cast(list[dict[str, Any]], list_relance_snippets())
+
+
 render_header(
-    "⚙️ Configuration des Relances & IA",
-    "Paramètres du serveur IMAP Hotmail/Outlook (OAuth2), fréquence et modèle Mistral AI",
+    "⚙️ Configuration & Modèles de Relance",
+    "Gestion des modèles types, règles d'envoi, variables personnalisées, messagerie IMAP Hotmail et IA",
 )
 
 cfg = _load_relance_config()
+templates = _load_templates()
+custom_variables = _load_custom_variables()
+snippets = _load_snippets()
 
 enabled = bool(int(cfg.get("enabled", 1)))
 frequency_days = int(cfg.get("frequency_days", 14) or 14)
 
-tab_rules, tab_mailbox, tab_llm = st.tabs(
+tab_templates, tab_rules, tab_mailbox, tab_llm, tab_variables, tab_snippets = st.tabs(
     [
-        "📋 Règles de relance",
-        "📬 Boîte mail & OAuth2 (Hotmail)",
+        "📝 Modèles d'Emails & Prompts",
+        "📋 Règles de Relance & Fréquence",
+        "📬 Boîte Mail & OAuth2 (Hotmail)",
         "🤖 Modèle IA (Mistral)",
+        "🏷️ Variables de Personnalisation",
+        "📑 Paragraphes Types (Snippets)",
     ]
 )
 
 # ============================================================================
-# ONGLET 1: RÈGLES DE RELANCE
+# ONGLET 1: MODÈLES D'EMAILS (Ex-Relance_Templates)
+# ============================================================================
+with tab_templates:
+    st.subheader("Modèles de courriers de relance")
+
+    with st.expander("ℹ️ Variables dynamiques disponibles", expanded=False):
+        st.markdown("Vous pouvez insérer ces variables dans le sujet et le corps de vos messages :")
+        all_placeholders = get_all_template_placeholders()
+        sys_chips = [
+            f"`{{{p['name']}}}`"
+            for p in all_placeholders
+            if p.get("category") != "Variables Personnalisées"
+        ]
+        user_chips = [
+            f"`{{{p['name']}}}`"
+            for p in all_placeholders
+            if p.get("category") == "Variables Personnalisées"
+        ]
+        st.markdown("**Variables système :** " + " ".join(sys_chips))
+        if user_chips:
+            st.markdown("**Vos variables personnalisées :** " + " ".join(user_chips))
+        else:
+            st.caption("*(Aucune variable personnalisée définie pour le moment)*")
+        st.caption(
+            "💡 Rendez-vous dans l'onglet **🏷️ Variables de Personnalisation** pour créer ou modifier vos propres variables."
+        )
+
+    st.divider()
+
+    _NEW_TEMPLATE_KEY = "__new__"
+
+    if not templates:
+        template_labels = {_NEW_TEMPLATE_KEY: "➕ Créer un nouveau modèle"}
+        selected_id = _NEW_TEMPLATE_KEY
+    else:
+        template_labels = {
+            t["template_id"]: f"📄 {t['name']}" + (" (⭐ Par défaut)" if t["is_default"] else "")
+            for t in templates
+        }
+        template_labels[_NEW_TEMPLATE_KEY] = "➕ Créer un nouveau modèle"
+        selected_id = st.selectbox(
+            "Sélectionnez un modèle à éditer :",
+            options=list(template_labels.keys()),
+            format_func=lambda tid: template_labels[tid],
+            key="template_select",
+        )
+
+    is_new = selected_id == _NEW_TEMPLATE_KEY
+    selected_template = (
+        {} if is_new else next(t for t in templates if t["template_id"] == selected_id)
+    )
+
+    # Synchronisation de l'état du formulaire avec le modèle sélectionné
+    if st.session_state.get("last_template_edit_id") != selected_id:
+        st.session_state["last_template_edit_id"] = selected_id
+        st.session_state["tpl_edit_name"] = "" if is_new else str(selected_template.get("name") or "")
+        st.session_state["tpl_edit_mode"] = (
+            "static" if is_new else str(selected_template.get("generation_mode") or "static")
+        )
+        st.session_state["tpl_edit_default"] = (
+            False if is_new else bool(selected_template.get("is_default", False))
+        )
+        st.session_state["tpl_edit_subject"] = (
+            "Rappel : Régularisation de vos charges"
+            if is_new
+            else str(selected_template.get("subject_template") or selected_template.get("subject") or "")
+        )
+        st.session_state["tpl_edit_body"] = (
+            ""
+            if is_new
+            else str(selected_template.get("body_template") or selected_template.get("body") or "")
+        )
+        st.session_state["tpl_edit_prompt"] = (
+            ""
+            if is_new
+            else str(selected_template.get("tone_instruction") or selected_template.get("prompt_instructions") or "")
+        )
+
+    tpl_title = "➕ Nouveau Modèle" if is_new else f"✏️ Édition : {selected_template.get('name', '')}"
+    st.markdown(f"### {tpl_title}")
+
+    col_name, col_mode, col_def, _ = st.columns([1.3, 2.0, 1.2, 1.5], gap="medium")
+    with col_name:
+        st.text_input("Nom du modèle", key="tpl_edit_name")
+    with col_mode:
+        st.radio(
+            "Mode de rédaction",
+            options=list(GENERATION_MODES),
+            format_func=lambda m: _MODE_LABELS.get(m, m),
+            key="tpl_edit_mode",
+            horizontal=True,
+        )
+    with col_def:
+        st.write("")
+        st.write("")
+        st.checkbox(
+            "⭐ Modèle par défaut",
+            key="tpl_edit_default",
+        )
+
+    st.markdown("#### ✉️ Objet de l'email")
+    col_sub_inp, col_sub_b1, col_sub_b2 = st.columns([6, 1.2, 1.2], gap="small")
+    with col_sub_inp:
+        st.text_input("Objet", key="tpl_edit_subject", label_visibility="collapsed")
+    with col_sub_b1:
+        if st.button("➕ Nom", key="btn_sub_nom", help="Ajouter {nom_proprietaire} à l'objet", use_container_width=True):
+            _insert_into_subject("{nom_proprietaire}")
+    with col_sub_b2:
+        if st.button("➕ Date", key="btn_sub_date", help="Ajouter {date_origin} à l'objet", use_container_width=True):
+            _insert_into_subject("{date_origin}")
+
+    st.markdown("#### 📄 Corps de l'email / Canevas")
+
+    # Boîte à outils d'insertion rapide de variables
+    with st.container(border=True):
+        st.markdown("🪄 **Boîte à outils d'insertion :**")
+
+        # 1. Variables fréquentes en 1 clic
+        st.caption("Variables fréquentes (cliquez pour insérer directement dans le corps du texte) :")
+        pills = [
+            ("👤 Nom", "{nom_proprietaire}"),
+            ("💰 Débit", "{debit_fmt}"),
+            ("🏠 Lot", "{num_apt}"),
+            ("📅 Date débit", "{date_origin}"),
+            ("🗓️ Date du jour", "{date_du_jour}"),
+            ("🏢 Syndic", "{sender_name}"),
+        ]
+        for cv in custom_variables[:4]:
+            pills.append((f"🏷️ {cv['name']}", f"{{{cv['name']}}}"))
+
+        cols_p = st.columns(len(pills))
+        for ip, (p_lbl, p_tg) in enumerate(pills):
+            if cols_p[ip].button(p_lbl, key=f"quick_pill_{ip}", help=f"Insérer {p_tg} dans le corps", use_container_width=True):
+                _insert_into_body(p_tg)
+
+        st.write("")
+
+        # 2. Sélecteur universel et Paragraphes types
+        col_tool_left, col_tool_right = st.columns([1, 1], gap="large")
+
+        with col_tool_left:
+            st.caption("Toutes les variables disponibles :")
+            col_v_sel, col_v_btn = st.columns([3.5, 1.5], gap="small")
+            with col_v_sel:
+                all_vars_list = [p["name"] for p in all_placeholders]
+                var_desc_map = {
+                    p["name"]: f"{p.get('category', '')} : {{{p['name']}}} — {p.get('description', '')}"
+                    for p in all_placeholders
+                }
+                chosen_var = st.selectbox(
+                    "Toutes les variables :",
+                    options=all_vars_list,
+                    format_func=lambda n: var_desc_map.get(n, n),
+                    key="sel_any_var",
+                    label_visibility="collapsed",
+                )
+            with col_v_btn:
+                if st.button(
+                    "➕ Insérer",
+                    key="btn_ins_any_unified",
+                    use_container_width=True,
+                    help=f"Insérer {{{chosen_var}}} dans le corps",
+                ):
+                    _insert_into_body(f"{{{chosen_var}}}")
+
+        with col_tool_right:
+            st.caption("Paragraphes types prêts à l'emploi :")
+            col_snip_s, col_snip_b = st.columns([3.5, 1.5], gap="small")
+            snip_options = {s["snippet_id"]: s["title"] for s in snippets}
+            snip_content_map = {s["snippet_id"]: s["content"] for s in snippets}
+            with col_snip_s:
+                if snip_options:
+                    chosen_snippet_id = st.selectbox(
+                        "Paragraphes types prêts à l'emploi :",
+                        options=list(snip_options.keys()),
+                        format_func=lambda sid: snip_options.get(sid, ""),
+                        key="sel_snippet",
+                        label_visibility="collapsed",
+                    )
+                else:
+                    st.caption("*(Aucun paragraphe type enregistré)*")
+                    chosen_snippet_id = None
+            with col_snip_b:
+                has_snip = bool(chosen_snippet_id and chosen_snippet_id in snip_content_map)
+                if st.button(
+                    "📝 Insérer",
+                    key="btn_ins_snippet",
+                    use_container_width=True,
+                    help="Insérer ce bloc dans le corps",
+                    disabled=not has_snip,
+                ):
+                    if has_snip and chosen_snippet_id is not None:
+                        _insert_snippet_into_body(snip_content_map[chosen_snippet_id])
+
+    st.text_area(
+        "Corps de l'email",
+        key="tpl_edit_body",
+        height=320,
+        label_visibility="collapsed",
+    )
+
+    st.markdown("#### 🤖 Consignes spécifiques pour l'IA (optionnel)")
+    st.text_area(
+        "Consignes IA",
+        key="tpl_edit_prompt",
+        height=80,
+        help="Instructions fournies à Mistral si ce modèle est sélectionné en mode IA.",
+        label_visibility="collapsed",
+    )
+
+    col_act_save, col_act_del, col_act_rst, _ = st.columns([2, 1.2, 1.2, 3], gap="small")
+    with col_act_save:
+        if st.button("💾 Enregistrer le modèle", type="primary", use_container_width=True):
+            nm = str(st.session_state.get("tpl_edit_name") or "").strip()
+            sb = str(st.session_state.get("tpl_edit_subject") or "").strip()
+            bd = str(st.session_state.get("tpl_edit_body") or "").strip()
+            gm = str(st.session_state.get("tpl_edit_mode") or "static")
+            df = bool(st.session_state.get("tpl_edit_default", False))
+            pr = str(st.session_state.get("tpl_edit_prompt") or "").strip()
+
+            if not nm:
+                st.error("Le nom du modèle est obligatoire.")
+            elif not sb:
+                st.error("L'objet de l'email est obligatoire.")
+            elif not bd:
+                st.error("Le corps de l'email ne peut pas être vide.")
+            elif is_new:
+                create_relance_template(
+                    name=nm,
+                    subject_template=sb,
+                    body_template=bd,
+                    generation_mode=gm,
+                    is_default=df,
+                    tone_instruction=pr,
+                )
+                _load_templates.clear()
+                st.session_state.last_template_edit_id = None
+                st.toast("Modèle créé avec succès !", icon="✅")
+                st.rerun()
+            else:
+                update_relance_template(
+                    selected_id,
+                    name=nm,
+                    subject_template=sb,
+                    body_template=bd,
+                    generation_mode=gm,
+                    is_default=df,
+                    tone_instruction=pr,
+                )
+                _load_templates.clear()
+                st.toast("Modèle mis à jour !", icon="💾")
+                st.rerun()
+
+    with col_act_del:
+        can_delete = not is_new and not selected_template.get("is_default", False)
+        if st.button("🗑️ Supprimer", disabled=not can_delete, use_container_width=True):
+            delete_relance_template(selected_id)
+            _load_templates.clear()
+            st.session_state.last_template_edit_id = None
+            st.toast("Modèle supprimé.", icon="🗑️")
+            st.rerun()
+
+    with col_act_rst:
+        if st.button("🔄 Réinitialiser", use_container_width=True, help="Annule les modifications non enregistrées"):
+            st.session_state.last_template_edit_id = None
+            st.rerun()
+
+    # Section Aperçu en dessous (pleine largeur)
+    st.divider()
+    st.markdown("### 👁️ Aperçu du rendu en temps réel")
+    st.caption("Simulation du courrier avec des données d'exemple réalistes (mise à jour automatique à chaque modification) :")
+
+    tpl_preview = {
+        "subject_template": str(st.session_state.get("tpl_edit_subject") or ""),
+        "body_template": str(st.session_state.get("tpl_edit_body") or ""),
+    }
+    subj_rendu, body_rendu = render_relance_template(tpl_preview, _SAMPLE_DATA, cfg)
+
+    with st.container(border=True):
+        st.markdown(f"**✉️ Objet généré :** `{subj_rendu}`")
+        st.caption("📄 Corps de l'email généré :")
+        st.text_area(
+            "Aperçu du corps",
+            value=body_rendu,
+            height=320,
+            disabled=True,
+            label_visibility="collapsed",
+        )
+
+
+# ============================================================================
+# ONGLET 2: RÈGLES DE RELANCE & FRÉQUENCE
 # ============================================================================
 with tab_rules:
     st.subheader("Paramètres de fréquence et signature")
@@ -101,100 +480,78 @@ with tab_rules:
 
 
 # ============================================================================
-# ONGLET 2: BOÎTE MAIL HOTMAIL & OAUTH2
+# ONGLET 3: BOÎTE MAIL & OAUTH2 (HOTMAIL)
 # ============================================================================
 with tab_mailbox:
-    st.subheader("Connexion Hotmail / Outlook (Dépôt IMAP)")
+    st.subheader("Messagerie Hotmail / Outlook & OAuth2")
 
-    is_oauth_valid, oauth_status_msg = verifier_statut_token_hotmail(cfg)
-    if is_oauth_valid:
-        st.success(f"✅ **OAuth2 Hotmail actif** : {oauth_status_msg}")
-    else:
-        st.warning(f"⚠️ **OAuth2 Hotmail** : {oauth_status_msg}")
+    token_valide, message_token = verifier_statut_token_hotmail(cfg)
+    col_stat1, col_stat2 = st.columns([2, 1], gap="medium")
+    with col_stat1:
+        if token_valide:
+            st.success(f"🟢 **Connecté à Hotmail** via OAuth2 ({message_token})")
+        else:
+            st.warning(f"🟠 **Statut OAuth2** : {message_token}")
 
-    with st.expander("🔑 Autorisation Microsoft (Device Code)", expanded=not is_oauth_valid):
-        st.caption(
-            "Pour déposer des brouillons dans votre compte Hotmail sans mot de passe, "
-            "autorisez l'application via le protocole Device Code de Microsoft."
-        )
+    st.markdown("#### Authentification Microsoft Device Code Flow")
+    st.caption(
+        "Ce protocole permet de connecter votre compte personnel Hotmail/Outlook sans stocker de mot de passe."
+    )
 
-        if "ms_device_flow" not in st.session_state:
-            st.session_state.ms_device_flow = None
+    col_btn_auth, col_btn_check = st.columns(2, gap="medium")
 
-        col_auth1, _ = st.columns([1.5, 2])
-        with col_auth1:
+    with col_btn_auth:
+        if st.button("🔑 Démarrer l'authentification Microsoft", use_container_width=True):
+            flow = demarrer_device_flow_microsoft()
+            if flow:
+                st.session_state["ms_device_flow"] = flow
+                st.info(f"👉 Rendez-vous sur : **{flow['verification_uri']}**")
+                st.code(flow["user_code"], language="text")
+                st.caption(
+                    "Saisissez le code ci-dessus dans la page Microsoft, puis cliquez ci-contre pour valider."
+                )
+
+    with col_btn_check:
+        if "ms_device_flow" in st.session_state:
             if st.button(
-                "🔑 Démarrer l'autorisation Microsoft", type="primary", use_container_width=True
+                "✅ Valider la connexion une fois approuvée",
+                type="primary",
+                use_container_width=True,
             ):
-                try:
-                    flow = demarrer_device_flow_microsoft(cfg)
-                    st.session_state.ms_device_flow = flow
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"Erreur d'initialisation : {exc}")
+                with st.spinner("Vérification auprès de Microsoft..."):
+                    token_data = valider_device_flow_microsoft(st.session_state["ms_device_flow"])
+                    if token_data:
+                        st.session_state.pop("ms_device_flow", None)
+                        st.toast("Compte Microsoft connecté avec succès !", icon="🟢")
+                        st.rerun()
 
-        if st.session_state.ms_device_flow:
-            flow = st.session_state.ms_device_flow
-            user_code = flow.get("user_code", "")
-            verification_uri = flow.get("verification_uri", "https://microsoft.com/devicelogin")
+    st.divider()
 
-            st.info(f"1. Copiez ce code : **`{user_code}`**")
-            st.markdown(
-                f"2. Ouvrez le lien : **[{verification_uri}]({verification_uri})** et collez le code."
-            )
-            st.caption("3. Une fois l'autorisation accordée, cliquez sur Valider :")
-
-            col_val1, col_val2 = st.columns(2, gap="medium")
-            with col_val1:
-                if st.button(
-                    "✓ Valider et enregistrer le jeton", type="primary", use_container_width=True
-                ):
-                    with st.spinner("Validation en cours..."):
-                        success, msg = valider_device_flow_microsoft(flow, cfg)
-                        if success:
-                            st.toast("Jeton OAuth2 enregistré !", icon="✅")
-                            st.session_state.ms_device_flow = None
-                            _load_relance_config.clear()
-                            st.rerun()
-                        else:
-                            st.error(msg)
-            with col_val2:
-                if st.button("Annuler", use_container_width=True):
-                    st.session_state.ms_device_flow = None
-                    st.rerun()
-
-    with st.form("relance_imap_form"):
+    st.markdown("#### Paramètres du serveur IMAP")
+    with st.form("imap_settings_form"):
         col_m1, col_m2 = st.columns(2, gap="medium")
         with col_m1:
             mailbox_imap_host = st.text_input(
-                "Serveur IMAP",
-                value=str(cfg.get("mailbox_imap_host") or "outlook.office365.com"),
+                "Hôte IMAP", value=str(cfg.get("mailbox_imap_host") or "outlook.office365.com")
             )
-            mailbox_imap_user = st.text_input(
-                "Compte Hotmail / Outlook",
-                value=str(cfg.get("mailbox_imap_user") or ""),
+            mailbox_imap_port = st.number_input(
+                "Port IMAP", value=int(cfg.get("mailbox_imap_port", 993) or 993), step=1
             )
         with col_m2:
-            mailbox_imap_port = st.number_input(
-                "Port IMAP",
-                min_value=1,
-                max_value=65535,
-                value=int(cfg.get("mailbox_imap_port", 993) or 993),
-                step=1,
+            mailbox_imap_user = st.text_input(
+                "Adresse email du compte", value=str(cfg.get("mailbox_imap_user") or "")
             )
             mailbox_drafts_folder = st.text_input(
-                "Dossier des brouillons",
+                "Dossier des brouillons IMAP",
                 value=str(cfg.get("mailbox_drafts_folder") or "Drafts"),
-                help="Nom du dossier IMAP cible (ex: Drafts ou Brouillons).",
             )
 
         mailbox_use_ssl = st.checkbox(
-            "Activer SSL",
-            value=bool(int(cfg.get("mailbox_use_ssl", 1) or 1)),
+            "Utiliser SSL", value=bool(int(cfg.get("mailbox_use_ssl", 1) or 1))
         )
 
         submitted_imap = st.form_submit_button(
-            "💾 Enregistrer la configuration IMAP", type="primary", use_container_width=True
+            "💾 Enregistrer les réglages IMAP", use_container_width=True
         )
         if submitted_imap:
             update_relance_config(
@@ -220,7 +577,7 @@ with tab_mailbox:
 
 
 # ============================================================================
-# ONGLET 3: MISTRAL IA
+# ONGLET 4: MISTRAL IA
 # ============================================================================
 with tab_llm:
     st.subheader("Configuration du modèle d'Intelligence Artificielle")
@@ -238,10 +595,33 @@ with tab_llm:
                 value=str(cfg.get("llm_api_base") or "https://api.mistral.ai/v1"),
             )
         with col_l2:
-            llm_model = st.text_input(
-                "Modèle",
-                value=str(cfg.get("llm_model") or "mistral-small-latest"),
+            current_model = str(cfg.get("llm_model") or "mistral-small-latest")
+            model_options = [
+                "mistral-small-latest",
+                "mistral-tiny",
+                "open-mistral-7b",
+                "mistral-medium-latest",
+                "Autre (saisie personnalisée)",
+            ]
+            default_index = (
+                model_options.index(current_model)
+                if current_model in model_options
+                else len(model_options) - 1
             )
+            selected_model_choice = st.selectbox(
+                "Modèle Mistral",
+                options=model_options,
+                index=default_index,
+                help=(
+                    "Recommandation Mistral : privilégiez un modèle léger comme 'mistral-tiny', "
+                    "'open-mistral-7b' ou 'mistral-small-latest' pour respecter les quotas de taux."
+                ),
+            )
+            if selected_model_choice == "Autre (saisie personnalisée)":
+                llm_model = st.text_input("Nom du modèle personnalisé", value=current_model)
+            else:
+                llm_model = selected_model_choice
+
             llm_temperature = st.slider(
                 "Température (créativité)",
                 min_value=0.0,
@@ -286,3 +666,307 @@ with tab_llm:
                     st.success(f"✅ {msg_mistral}")
                 else:
                     st.error(f"❌ {msg_mistral}")
+
+    st.info(
+        "💡 **Gestion des quotas et limites (HTTP 429 - Rate limit exceeded)** :\n"
+        "- **Limite Free tier** : Mistral impose un plafond strict de **32 requêtes par minute** tous modèles confondus.\n"
+        "- **Espacement automatique** : CPTCOPRO applique automatiquement un délai de **2 secondes** entre chaque requête par lot pour rester sous ce seuil.\n"
+        "- **Modèles légers préconisés** : Privilégiez `mistral-tiny`, `mistral-small-latest` ou `open-mistral-7b`.\n"
+        "- **Gestion du Retry-After** : En cas de pic de charge, l'application réessaie après l'en-tête `Retry-After` ou une attente de 5 secondes.\n"
+        "- **Secours garanti** : En cas de dépassement de quota ou de panne, CPTCOPRO bascule sur vos modèles types locaux pour ne jamais perdre de données."
+    )
+
+
+# ============================================================================
+# ONGLET 5: GESTIONNAIRE DE VARIABLES PERSONNALISÉES
+# ============================================================================
+with tab_variables:
+    st.subheader("🏷️ Gestionnaire de Variables Personnalisées")
+    st.markdown(
+        "Définissez vos propres variables dynamiques (ex: `{iban}`, `{telephone_syndic}`, `{horaires_accueil}`) "
+        "pour les insérer librement dans le sujet ou le corps de vos relances. Ces variables sont utilisables "
+        "instantanément dans les **modèles types statiques** et transmises à l'**assistant IA Mistral**."
+    )
+
+    edit_var_id = st.session_state.get("relance_editing_var_id")
+    var_to_edit = (
+        next((v for v in custom_variables if v["var_id"] == edit_var_id), None)
+        if edit_var_id is not None
+        else None
+    )
+
+    if var_to_edit:
+        st.info(f"✏️ **Modification de la variable :** `{{{var_to_edit['name']}}}`")
+
+    with st.form("custom_variable_form"):
+        col_vf1, col_vf2 = st.columns([1, 1], gap="medium")
+        with col_vf1:
+            var_name_input = st.text_input(
+                "Nom de la variable (sans accolades)",
+                value=str(var_to_edit["name"]) if var_to_edit else "",
+                placeholder="ex: iban ou telephone_syndic",
+                help="Saisissez un nom simple. Les espaces et accents sont convertis automatiquement en underscores.",
+            )
+            var_desc_input = st.text_input(
+                "Description / Usage (optionnel)",
+                value=str(var_to_edit["description"]) if var_to_edit else "",
+                placeholder="ex: Coordonnées bancaires pour virement direct",
+                help="Description indicative de l'usage de cette variable.",
+            )
+        with col_vf2:
+            var_val_input = st.text_area(
+                "Valeur de remplacement",
+                value=str(var_to_edit["value"]) if var_to_edit else "",
+                placeholder="ex: FR76 3000 4000 5000 6000 7000 890",
+                height=110,
+                help="Texte exact qui viendra remplacer la variable dans vos messages.",
+            )
+
+        col_sub_v1, col_sub_v2 = st.columns([2, 1], gap="medium")
+        with col_sub_v1:
+            submit_btn_label = (
+                "💾 Mettre à jour la variable"
+                if var_to_edit
+                else "➕ Ajouter la variable personnalisée"
+            )
+            submitted_var = st.form_submit_button(
+                submit_btn_label, type="primary", use_container_width=True
+            )
+
+        if submitted_var:
+            try:
+                if var_to_edit:
+                    update_relance_variable(
+                        int(var_to_edit["var_id"]),
+                        name=var_name_input,
+                        value=var_val_input,
+                        description=var_desc_input,
+                    )
+                    st.session_state.relance_editing_var_id = None
+                    _load_custom_variables.clear()
+                    st.toast("Variable mise à jour avec succès !", icon="✅")
+                    st.rerun()
+                else:
+                    create_relance_variable(
+                        name=var_name_input,
+                        value=var_val_input,
+                        description=var_desc_input,
+                    )
+                    _load_custom_variables.clear()
+                    st.toast("Variable créée avec succès !", icon="🏷️")
+                    st.rerun()
+            except ValueError as val_err:
+                st.error(f"⚠️ {val_err}")
+            except Exception as exc:
+                st.error(f"❌ Erreur lors de l'enregistrement : {exc}")
+
+    if var_to_edit:
+        if st.button("❌ Annuler la modification", key="cancel_edit_var_btn"):
+            st.session_state.relance_editing_var_id = None
+            st.rerun()
+
+    st.divider()
+
+    st.subheader("📋 Vos variables personnalisées enregistrées")
+
+    if not custom_variables:
+        st.info(
+            "💡 Aucune variable personnalisée active pour le moment. "
+            "Remplissez le formulaire ci-dessus pour créer votre première variable (ex: `iban`, `telephone_syndic`, etc.)."
+        )
+    else:
+        for v in custom_variables:
+            c_name, c_val, c_acts = st.columns([1.5, 3, 1], gap="small")
+            with c_name:
+                st.markdown(f"**`{{{v['name']}}}`**")
+                if v.get("description"):
+                    st.caption(str(v["description"]))
+            with c_val:
+                st.code(str(v["value"]), language=None)
+            with c_acts:
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    if st.button("✏️", key=f"edit_v_{v['var_id']}", help="Modifier"):
+                        st.session_state.relance_editing_var_id = v["var_id"]
+                        st.rerun()
+                with col_b2:
+                    if st.button("🗑️", key=f"del_v_{v['var_id']}", help="Supprimer"):
+                        delete_relance_variable(int(v["var_id"]))
+                        if st.session_state.get("relance_editing_var_id") == v["var_id"]:
+                            st.session_state.relance_editing_var_id = None
+                        _load_custom_variables.clear()
+                        st.toast(f"Variable {{{v['name']}}} supprimée !", icon="🗑️")
+                        st.rerun()
+
+    st.divider()
+
+    st.subheader("📚 Répertoire de toutes les variables disponibles")
+    st.caption(
+        "Vous pouvez insérer ces balises dans vos courriers (modèles et consignes de ton). "
+        "Elles seront automatiquement remplacées par les données correspondantes lors de la génération."
+    )
+
+    all_placeholders = get_all_template_placeholders()
+    categories: dict[str, list[dict[str, Any]]] = {}
+    for p in all_placeholders:
+        cat = str(p.get("category") or "Autres")
+        categories.setdefault(cat, []).append(p)
+
+    for cat_name, items in categories.items():
+        with st.expander(f"📁 {cat_name} ({len(items)} variables)", expanded=False):
+            for itm in items:
+                col_p1, col_p2 = st.columns([1.5, 3])
+                with col_p1:
+                    st.markdown(f"**`{{{itm['name']}}}`**")
+                with col_p2:
+                    st.markdown(str(itm.get("description") or "-"))
+
+
+# ============================================================================
+# ONGLET 6: PARAGRAPHES TYPES (SNIPPETS)
+# ============================================================================
+with tab_snippets:
+    st.subheader("📑 Gestionnaire de Paragraphes Types (Snippets)")
+    st.markdown(
+        "Définissez et personnalisez des blocs de texte réutilisables (constats d'impayé, coordonnées bancaires, "
+        "invitations au dialogue, formules de signature, etc.) pour les insérer en un clic dans vos modèles de relance."
+    )
+
+    edit_snip_id = st.session_state.get("relance_editing_snip_id")
+    snip_to_edit = (
+        next((s for s in snippets if s["snippet_id"] == edit_snip_id), None)
+        if edit_snip_id is not None
+        else None
+    )
+
+    if snip_to_edit:
+        st.info(f"✏️ **Modification du paragraphe type :** {snip_to_edit['title']}")
+
+    with st.form("snippet_form"):
+        col_sf1, col_sf2 = st.columns([1.6, 1], gap="medium")
+        with col_sf1:
+            snip_title_input = st.text_input(
+                "Titre du paragraphe type",
+                value=str(snip_to_edit["title"]) if snip_to_edit else "",
+                placeholder="ex: 💳 Coordonnées bancaires & Virement",
+                help="Titre distinctif affiché dans la liste déroulante lors de la rédaction d'un modèle.",
+            )
+            snip_desc_input = st.text_input(
+                "Description / Usage (optionnel)",
+                value=str(snip_to_edit["description"]) if snip_to_edit else "",
+                placeholder="ex: Instructions de virement bancaire pour règlement",
+                help="Courte explication du contexte ou de l'objectif de ce bloc.",
+            )
+        with col_sf2:
+            snip_order_input = st.number_input(
+                "Ordre d'affichage dans la liste",
+                min_value=0,
+                max_value=999,
+                value=int(snip_to_edit["sort_order"]) if snip_to_edit else 10,
+                step=5,
+                help="Les blocs avec un nombre plus petit apparaîtront en premier.",
+            )
+
+        snip_content_input = st.text_area(
+            "Contenu du paragraphe",
+            value=str(snip_to_edit["content"]) if snip_to_edit else "",
+            placeholder="Saisissez ici le texte du bloc. Vous pouvez inclure des variables comme {nom_proprietaire}, {debit_fmt}, {iban}...",
+            height=140,
+            help="Ce texte sera inséré tel quel dans le corps du modèle de relance.",
+        )
+
+        col_sub_s1, col_sub_s2 = st.columns([2, 1], gap="medium")
+        with col_sub_s1:
+            submit_snip_label = (
+                "💾 Mettre à jour le paragraphe type"
+                if snip_to_edit
+                else "➕ Ajouter le paragraphe type"
+            )
+            submitted_snip = st.form_submit_button(
+                submit_snip_label, type="primary", use_container_width=True
+            )
+
+        if submitted_snip:
+            try:
+                if snip_to_edit:
+                    update_relance_snippet(
+                        int(snip_to_edit["snippet_id"]),
+                        title=snip_title_input,
+                        content=snip_content_input,
+                        description=snip_desc_input,
+                        sort_order=int(snip_order_input),
+                    )
+                    st.session_state.relance_editing_snip_id = None
+                    _load_snippets.clear()
+                    st.toast("Paragraphe type mis à jour !", icon="✅")
+                    st.rerun()
+                else:
+                    create_relance_snippet(
+                        title=snip_title_input,
+                        content=snip_content_input,
+                        description=snip_desc_input,
+                        sort_order=int(snip_order_input),
+                    )
+                    _load_snippets.clear()
+                    st.toast("Paragraphe type créé avec succès !", icon="📑")
+                    st.rerun()
+            except ValueError as val_err:
+                st.error(f"⚠️ {val_err}")
+            except Exception as exc:
+                st.error(f"❌ Erreur lors de l'enregistrement : {exc}")
+
+    if snip_to_edit:
+        if st.button("❌ Annuler la modification", key="cancel_edit_snip_btn"):
+            st.session_state.relance_editing_snip_id = None
+            st.rerun()
+
+    st.divider()
+
+    st.subheader("📋 Paragraphes types enregistrés")
+
+    if not snippets:
+        st.info(
+            "💡 Aucun paragraphe type enregistré pour le moment. "
+            "Remplissez le formulaire ci-dessus pour créer votre premier bloc ou cliquez ci-dessous pour restaurer les blocs standards."
+        )
+    else:
+        for s in snippets:
+            with st.container(border=True):
+                col_snip_info, col_snip_acts = st.columns([5, 1], gap="small")
+                with col_snip_info:
+                    st.markdown(f"#### {s['title']}")
+                    if s.get("description"):
+                        st.caption(f"ℹ️ {s['description']}")
+                    st.text_area(
+                        "Contenu",
+                        value=s["content"],
+                        height=90,
+                        disabled=True,
+                        key=f"prev_snip_{s['snippet_id']}",
+                        label_visibility="collapsed",
+                    )
+                with col_snip_acts:
+                    st.write("")
+                    st.write("")
+                    if st.button("✏️ Modifier", key=f"edit_s_{s['snippet_id']}", use_container_width=True):
+                        st.session_state.relance_editing_snip_id = s["snippet_id"]
+                        st.rerun()
+                    if st.button("🗑️ Supprimer", key=f"del_s_{s['snippet_id']}", use_container_width=True):
+                        delete_relance_snippet(int(s["snippet_id"]))
+                        if st.session_state.get("relance_editing_snip_id") == s["snippet_id"]:
+                            st.session_state.relance_editing_snip_id = None
+                        _load_snippets.clear()
+                        st.toast(f"Paragraphe type '{s['title']}' supprimé !", icon="🗑️")
+                        st.rerun()
+
+    st.write("")
+    if st.button("🔄 Restaurer les 4 paragraphes types par défaut", help="Réinsère les blocs standards s'ils ont été supprimés"):
+        inserted = reset_default_relance_snippets()
+        _load_snippets.clear()
+        if inserted > 0:
+            st.toast(f"{inserted} paragraphe(s) par défaut restauré(s) !", icon="🔄")
+        else:
+            st.toast("Les paragraphes par défaut sont déjà tous présents.", icon="ℹ️")
+        st.rerun()
+
+
