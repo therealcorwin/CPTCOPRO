@@ -503,7 +503,7 @@ with tab_table:
                         "/", "-"
                     ),
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                 )
     else:
         if df_ref.empty:
@@ -569,7 +569,7 @@ with tab_table:
                     data=csv_buf.getvalue().encode("utf-8-sig"),
                     file_name=f"balance_coproprietaires_{selected_date_label.replace('/', '-')}.csv",
                     mime="text/csv",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
 # --- ONGLET 2: GRAPHIQUE ---

@@ -193,7 +193,7 @@ def render_header(
                 font_weight="700",
                 on_click=_toggle_privacy,
                 help=help_text,
-                use_container_width=False,
+                width="content",
             )
         elif is_privacy_enabled():
             st.markdown(

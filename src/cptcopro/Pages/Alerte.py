@@ -253,11 +253,11 @@ with tab_actives:
                     label_visibility="collapsed",
                 )
             with c_btn:
-                if st.button("✉️ Relancer", type="primary", use_container_width=True):
+                if st.button("✉️ Relancer", type="primary", width="stretch"):
                     st.session_state["target_relance_copro"] = selected_alert_code
                     st.switch_page("Pages/Relance.py")
             with c_fiche:
-                if st.button("👤 Fiche copro", use_container_width=True,
+                if st.button("👤 Fiche copro", width="stretch",
                              help="Ouvre la fiche 360° de ce copropriétaire"):
                     st.session_state["target_fiche_copro"] = selected_alert_code
                     st.switch_page("Pages/Rechercher_Copro.py")
@@ -567,7 +567,7 @@ with tab_config:
             col_sub, _ = st.columns([1.5, 3])
             with col_sub:
                 submitted = st.form_submit_button(
-                    "💾 Enregistrer la modification", type="primary", use_container_width=True
+                    "💾 Enregistrer la modification", type="primary", width="stretch"
                 )
 
             if submitted:

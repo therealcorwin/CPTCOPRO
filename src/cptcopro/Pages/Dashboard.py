@@ -330,7 +330,7 @@ with col_graph:
         margin=dict(t=20, b=20),
     )
     chart = apply_plotly_theme(chart)
-    st.plotly_chart(chart, use_container_width=True)
+    st.plotly_chart(chart, width="stretch")
 
 with col_aging:
     st.markdown("#### ⏳ Balance âgée")
@@ -366,7 +366,7 @@ with col_aging:
             height=280,
         )
         fig_donut = apply_plotly_theme(fig_donut)
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.plotly_chart(fig_donut, width="stretch")
         # Légende compacte sous le donut
         leg_cols = st.columns(2)
         tranche_colors = [("< 30 j", "#22c55e"), ("30-60 j", "#f59e0b"), ("60-90 j", "#f97316"), ("> 90 j", "#ef4444")]
@@ -400,7 +400,7 @@ else:
 
     st.dataframe(
         top5_display,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "Débit": st.column_config.TextColumn("Débit actuel"),
@@ -412,7 +412,7 @@ else:
     if nb_relances_dues > 0:
         col_btn, _ = st.columns([1.5, 4])
         with col_btn:
-            if st.button("✉️ Aller aux relances dues →", use_container_width=True, type="primary"):
+            if st.button("✉️ Aller aux relances dues →", width="stretch", type="primary"):
                 st.switch_page("Pages/Relance.py")
 
 st.divider()
@@ -422,7 +422,7 @@ st.divider()
 with st.expander("📋 Historique complet des relevés"):
     st.dataframe(
         debit_global_df.sort_values(by="date", ascending=False),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "date": st.column_config.DateColumn("Date", format="DD/MM/YYYY"),

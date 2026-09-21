@@ -158,7 +158,7 @@ if LOGO_PATH.exists():
 st.sidebar.divider()
 if st.sidebar.button(
     "🔄 Rafraîchir les données",
-    use_container_width=True,
+    width="stretch",
     help="Efface le cache local et recharge les données actualisées de la base",
 ):
     st.cache_data.clear()

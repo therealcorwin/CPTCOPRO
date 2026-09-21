@@ -256,7 +256,7 @@ fig_evol = px.line(
 fig_evol.update_traces(line_color="#0284C7", marker=dict(size=8, color="#38BDF8"))
 fig_evol.update_layout(margin=dict(t=20, b=20))
 fig_evol = apply_plotly_theme(fig_evol)
-st.plotly_chart(fig_evol, use_container_width=True)
+st.plotly_chart(fig_evol, width="stretch")
 
 st.divider()
 
@@ -305,7 +305,7 @@ else:
             height=260,
         )
         fig_donut = apply_plotly_theme(fig_donut)
-        st.plotly_chart(fig_donut, use_container_width=True)
+        st.plotly_chart(fig_donut, width="stretch")
 
     with col_aging_kpi:
         color_map = {"< 30 j": "#22c55e", "30-60 j": "#f59e0b", "60-90 j": "#f97316", "> 90 j": "#ef4444"}
@@ -325,7 +325,7 @@ else:
             st.markdown(f"**⚠️ {len(df_critique)} compte(s) en anomalie persistante (> 90 jours) :**")
             st.dataframe(
                 df_critique[["Copropriétaire", "Lot", "Type", "Débit (€)", "Ancienneté (j)"]],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "Débit (€)": st.column_config.NumberColumn(format="%.2f €"),
@@ -337,7 +337,7 @@ else:
     with st.expander("📋 Détail complet de la balance âgée", expanded=False):
         st.dataframe(
             aging_df.drop(columns=["order", "color"], errors="ignore"),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Débit (€)": st.column_config.NumberColumn(format="%.2f €"),
@@ -373,7 +373,7 @@ else:
         )
         fig_bar.update_layout(showlegend=False, margin=dict(t=20, b=20))
         fig_bar = apply_plotly_theme(fig_bar)
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, width="stretch")
     with col_pie:
         fig_pie = px.pie(
             type_repartition,
@@ -383,7 +383,7 @@ else:
         )
         fig_pie.update_layout(margin=dict(t=10, b=10))
         fig_pie = apply_plotly_theme(fig_pie)
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, width="stretch")
 
 st.divider()
 
@@ -430,7 +430,7 @@ else:
         ])
         st.dataframe(
             df_drafts,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Débit (€)": st.column_config.NumberColumn(format="%.2f €"),
@@ -457,7 +457,7 @@ with col_exp1:
             data=csv_buf.getvalue().encode("utf-8-sig"),
             file_name=f"balance_agee_{annee}.csv",
             mime="text/csv",
-            use_container_width=True,
+            width="stretch",
         )
 
 # Export CSV rapport complet
@@ -490,7 +490,7 @@ with col_exp2:
         data=rapport_txt.encode("utf-8"),
         file_name=f"rapport_AG_{annee}.txt",
         mime="text/plain",
-        use_container_width=True,
+        width="stretch",
     )
 
 st.caption(

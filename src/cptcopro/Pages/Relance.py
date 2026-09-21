@@ -276,7 +276,7 @@ with tab_generation:
             if st.button(
                 "✨ Rédiger les brouillons",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=edited_due.empty,
             ):
                 if not is_enabled:
@@ -416,7 +416,7 @@ with tab_destinataires:
     col_btn_dest, _ = st.columns([1.5, 3])
     with col_btn_dest:
         if st.button(
-            "💾 Enregistrer le carnet d'adresses", type="primary", use_container_width=True
+            "💾 Enregistrer le carnet d'adresses", type="primary", width="stretch"
         ):
             nb_saved = 0
             for row in edited_dest.to_dict("records"):

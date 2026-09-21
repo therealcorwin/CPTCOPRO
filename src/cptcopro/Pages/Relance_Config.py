@@ -276,7 +276,7 @@ with tab_modeles:
             )
         with bar_c3:
             st.write("")
-            if st.button("➕", key="btn_ins_var", use_container_width=True,
+            if st.button("➕", key="btn_ins_var", width="stretch",
                          help=f"Insérer {{{chosen_var}}}"):
                 _palette_insert(f"{{{chosen_var}}}")
 
@@ -296,7 +296,7 @@ with tab_modeles:
         with bar_c5:
             has_snip = bool(chosen_snippet_id and chosen_snippet_id in snip_content_map)
             st.write("")
-            if st.button("📝", key="btn_ins_snip", use_container_width=True,
+            if st.button("📝", key="btn_ins_snip", width="stretch",
                          help="Insérer ce bloc dans le corps", disabled=not has_snip):
                 if has_snip and chosen_snippet_id is not None:
                     _insert_snippet_into_body(snip_content_map[chosen_snippet_id])
@@ -326,7 +326,7 @@ with tab_modeles:
     with col_gen:
         if st.button(
             "🤖 Générer le corps avec Mistral",
-            use_container_width=True,
+            width="stretch",
             help=(
                 "Demande à Mistral de rédiger un corps de modèle type basé sur "
                 "le nom du modèle et les consignes IA saisies ci-dessus. "
@@ -363,7 +363,7 @@ with tab_modeles:
     st.write("")
     col_act_save, col_act_del, col_act_rst, _ = st.columns([2, 1.2, 1.2, 3], gap="small")
     with col_act_save:
-        if st.button("💾 Enregistrer le modèle", type="primary", use_container_width=True):
+        if st.button("💾 Enregistrer le modèle", type="primary", width="stretch"):
             nm = str(st.session_state.get("tpl_edit_name") or "").strip()
             sb = str(st.session_state.get("tpl_edit_subject") or "").strip()
             bd = str(st.session_state.get("tpl_edit_body") or "").strip()
@@ -406,7 +406,7 @@ with tab_modeles:
 
     with col_act_del:
         can_delete = not is_new and not selected_template.get("is_default", False)
-        if st.button("🗑️ Supprimer", disabled=not can_delete, use_container_width=True):
+        if st.button("🗑️ Supprimer", disabled=not can_delete, width="stretch"):
             delete_relance_template(selected_id)
             _load_templates.clear()
             st.session_state.last_template_edit_id = None
@@ -414,7 +414,7 @@ with tab_modeles:
             st.rerun()
 
     with col_act_rst:
-        if st.button("🔄 Réinitialiser", use_container_width=True,
+        if st.button("🔄 Réinitialiser", width="stretch",
                      help="Annule les modifications non enregistrées"):
             st.session_state.last_template_edit_id = None
             st.rerun()
@@ -502,7 +502,7 @@ with tab_modeles:
                     else "➕ Ajouter le paragraphe type"
                 )
                 submitted_snip = st.form_submit_button(
-                    submit_snip_label, type="primary", use_container_width=True
+                    submit_snip_label, type="primary", width="stretch"
                 )
 
             if submitted_snip:
@@ -566,10 +566,10 @@ with tab_modeles:
                     with col_snip_acts:
                         st.write("")
                         st.write("")
-                        if st.button("✏️ Modifier", key=f"edit_s_{s['snippet_id']}", use_container_width=True):
+                        if st.button("✏️ Modifier", key=f"edit_s_{s['snippet_id']}", width="stretch"):
                             st.session_state.relance_editing_snip_id = s["snippet_id"]
                             st.rerun()
-                        if st.button("🗑️ Supprimer", key=f"del_s_{s['snippet_id']}", use_container_width=True):
+                        if st.button("🗑️ Supprimer", key=f"del_s_{s['snippet_id']}", width="stretch"):
                             delete_relance_snippet(int(s["snippet_id"]))
                             if st.session_state.get("relance_editing_snip_id") == s["snippet_id"]:
                                 st.session_state.relance_editing_snip_id = None
@@ -639,7 +639,7 @@ with tab_modeles:
                     else "➕ Ajouter la variable personnalisée"
                 )
                 submitted_var = st.form_submit_button(
-                    submit_btn_label, type="primary", use_container_width=True
+                    submit_btn_label, type="primary", width="stretch"
                 )
 
             if submitted_var:
@@ -762,7 +762,7 @@ with tab_rules:
             )
 
         submitted_rules = st.form_submit_button(
-            "💾 Enregistrer les règles", type="primary", use_container_width=True
+            "💾 Enregistrer les règles", type="primary", width="stretch"
         )
         if submitted_rules:
             update_relance_config(
@@ -802,7 +802,7 @@ with tab_integrations:
         col_btn_auth, col_btn_check = st.columns(2, gap="medium")
 
         with col_btn_auth:
-            if st.button("🔑 Démarrer l'authentification Microsoft", use_container_width=True):
+            if st.button("🔑 Démarrer l'authentification Microsoft", width="stretch"):
                 flow = demarrer_device_flow_microsoft()
                 if flow:
                     st.session_state["ms_device_flow"] = flow
@@ -817,7 +817,7 @@ with tab_integrations:
                 if st.button(
                     "✅ Valider la connexion une fois approuvée",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     with st.spinner("Vérification auprès de Microsoft..."):
                         token_data = valider_device_flow_microsoft(st.session_state["ms_device_flow"])
@@ -852,7 +852,7 @@ with tab_integrations:
             col_imap_save, col_imap_test = st.columns([2, 1], gap="medium")
             with col_imap_save:
                 submitted_imap = st.form_submit_button(
-                    "💾 Enregistrer les réglages IMAP", type="primary", use_container_width=True
+                    "💾 Enregistrer les réglages IMAP", type="primary", width="stretch"
                 )
             if submitted_imap:
                 update_relance_config(
@@ -868,7 +868,7 @@ with tab_integrations:
 
         col_test_imap, _ = st.columns([1.5, 2])
         with col_test_imap:
-            if st.button("📡 Tester la connexion IMAP", use_container_width=True):
+            if st.button("📡 Tester la connexion IMAP", width="stretch"):
                 with st.spinner("Test de connexion IMAP..."):
                     ok, message_imap, dossiers = tester_connexion_imap(cfg)
                     if ok:
@@ -939,7 +939,7 @@ with tab_integrations:
             )
 
             submitted_llm = st.form_submit_button(
-                "💾 Enregistrer la configuration IA", type="primary", use_container_width=True
+                "💾 Enregistrer la configuration IA", type="primary", width="stretch"
             )
             if submitted_llm:
                 update_relance_config(
@@ -955,7 +955,7 @@ with tab_integrations:
 
         col_mistral, _ = st.columns([1.5, 2])
         with col_mistral:
-            if st.button("🧪 Tester l'API Mistral", use_container_width=True):
+            if st.button("🧪 Tester l'API Mistral", width="stretch"):
                 with st.spinner("Test de communication avec Mistral AI..."):
                     key_var = str(cfg.get("llm_api_key_env") or "MISTRAL_API_KEY")
                     api_k = os.getenv(key_var)

@@ -764,7 +764,7 @@ with tab_prevision:
             margin=dict(t=20, b=20),
         )
         fig_prev = apply_plotly_theme(fig_prev)
-        st.plotly_chart(fig_prev, use_container_width=True)
+        st.plotly_chart(fig_prev, width="stretch")
 
         st.caption(
             "⚠️ **Avertissement** : Cette prévision est purement mathématique (extrapolation de la tendance passée). "

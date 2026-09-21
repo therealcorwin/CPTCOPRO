@@ -237,7 +237,7 @@ with tab_annuaire:
                 data=csv_buf.getvalue().encode("utf-8-sig"),
                 file_name="annuaire_coproprietaires.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
             )
 
 
@@ -252,7 +252,7 @@ with tab_fiche:
             code_label = f" (Code : {target_copro_raw})" if target_owner_resolved and str(target_copro_raw) != target_owner_resolved else ""
             st.info(f"🎯 **Fiche ciblée active** pour **{display_name}**{code_label}.")
         with col_b2:
-            if st.button("Afficher tous les copropriétaires", key="reset_target_fiche_btn", use_container_width=True):
+            if st.button("Afficher tous les copropriétaires", key="reset_target_fiche_btn", width="stretch"):
                 st.session_state.pop("target_fiche_copro", None)
                 st.session_state["fiche_search_box"] = ""
                 st.rerun()
@@ -333,7 +333,7 @@ with tab_fiche:
                     "✉️ Préparer une relance",
                     type="primary",
                     help="Bascule vers le module de relance avec ce copropriétaire pré-sélectionné",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     st.session_state["target_relance_copro"] = code_copro
                     st.switch_page("Pages/Relance.py")
@@ -384,7 +384,7 @@ with tab_fiche:
                         placeholder="Ex: Promesse de virement de 450 € prévue le 28 du mois...",
                     )
                     submitted_notes = st.form_submit_button(
-                        "💾 Enregistrer les notes", use_container_width=False
+                        "💾 Enregistrer les notes", width="content"
                     )
                     if submitted_notes:
                         save_copro_notes(code_copro, notes_input)

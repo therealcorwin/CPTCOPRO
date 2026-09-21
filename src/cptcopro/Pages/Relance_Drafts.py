@@ -134,19 +134,19 @@ with tab_drafts:
         # --- Boutons de sélection en masse ---
         col_sel1, col_sel2, col_sel3, col_sel4 = st.columns([1.2, 1.2, 1.6, 1], gap="small")
         with col_sel1:
-            if st.button("☑️ Tout cocher", use_container_width=True):
+            if st.button("☑️ Tout cocher", width="stretch"):
                 st.session_state.drafts_selected_ids = set(
                     filtered_df["draft_id"].dropna().astype(int).tolist()
                 )
                 st.session_state.drafts_editor_version += 1
                 st.rerun()
         with col_sel2:
-            if st.button("◻️ Décocher tout", use_container_width=True):
+            if st.button("◻️ Décocher tout", width="stretch"):
                 st.session_state.drafts_selected_ids = set()
                 st.session_state.drafts_editor_version += 1
                 st.rerun()
         with col_sel3:
-            if st.button("⚠️ Locaux / Erreurs uniquement", use_container_width=True):
+            if st.button("⚠️ Locaux / Erreurs uniquement", width="stretch"):
                 st.session_state.drafts_selected_ids = set(
                     filtered_df[filtered_df["status"].isin(["draft_local", "error"])]["draft_id"]
                     .dropna()
@@ -221,7 +221,7 @@ with tab_drafts:
             if st.button(
                 "📤 Déposer la sélection dans Hotmail (IMAP)",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             ):
                 mask_act1 = edited_df["S"] == True  # noqa: E712
                 selected_rows = edited_df[mask_act1]
@@ -279,7 +279,7 @@ with tab_drafts:
                     st.rerun()
 
         with col_act2:
-            if st.button("🗑️ Supprimer les cochés", type="secondary", use_container_width=True):
+            if st.button("🗑️ Supprimer les cochés", type="secondary", width="stretch"):
                 mask_act2 = edited_df["S"] == True  # noqa: E712
                 selected_rows = edited_df[mask_act2]
                 if selected_rows.empty:
@@ -299,7 +299,7 @@ with tab_drafts:
                     st.rerun()
 
         with col_act3:
-            if st.button("🔄 Actualiser", use_container_width=True):
+            if st.button("🔄 Actualiser", width="stretch"):
                 st.session_state.drafts_selected_ids.clear()
                 st.session_state.drafts_editor_version += 1
                 _load_all_drafts.clear()
@@ -346,7 +346,7 @@ with tab_drafts:
                 col_b1, col_b2, col_b3 = st.columns([1.5, 1.5, 1], gap="medium")
                 with col_b1:
                     if st.form_submit_button(
-                        "💾 Sauvegarder modifications", type="primary", use_container_width=True
+                        "💾 Sauvegarder modifications", type="primary", width="stretch"
                     ):
                         save_relance_draft(
                             code_proprietaire=selected_draft["code_proprietaire"],
@@ -368,7 +368,7 @@ with tab_drafts:
 
                 with col_b2:
                     if st.form_submit_button(
-                        "📤 Déposer sur Hotmail (IMAP)", use_container_width=True
+                        "📤 Déposer sur Hotmail (IMAP)", width="stretch"
                     ):
                         try:
                             msg = build_email_message(
@@ -398,7 +398,7 @@ with tab_drafts:
                         st.rerun()
 
                 with col_b3:
-                    if st.form_submit_button("🗑️ Supprimer", use_container_width=True):
+                    if st.form_submit_button("🗑️ Supprimer", width="stretch"):
                         mark_relance_draft_status(
                             draft_id=selected_draft["draft_id"], status="deleted"
                         )
@@ -573,7 +573,7 @@ with tab_tracking:
                 data=csv_buffer.getvalue().encode("utf-8-sig"),
                 file_name="suivi_relances_coproprietaires.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
             )
 
 
@@ -645,7 +645,7 @@ with tab_history:
                 if st.button(
                     "👤 Voir la fiche copro",
                     key=f"fiche_{row.get('draft_id', idx)}",
-                    use_container_width=False,
+                    width="content",
                 ):
                     target = str(row.get("code_proprietaire") or row.get("nom_proprietaire") or "")
                     st.session_state["target_fiche_copro"] = target
