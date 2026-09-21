@@ -5,6 +5,7 @@ name: CodeQL Actions Placeholder
 
 jobs:
   noop:
+    permissions: {}
     runs-on: ubuntu-latest
     steps:
       - run: echo "Placeholder workflow to provide GitHub Actions source for CodeQL analyze."
