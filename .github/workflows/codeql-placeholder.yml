@@ -1,0 +1,10 @@
+name: CodeQL Actions Placeholder
+
+'on':
+  workflow_dispatch:
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Placeholder workflow to provide GitHub Actions source for CodeQL analyze."
