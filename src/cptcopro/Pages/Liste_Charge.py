@@ -54,6 +54,47 @@ def load_alertes_codes() -> set[str]:
         return set()
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def load_statut_relance_par_copro() -> dict[str, str]:
+    """Retourne dict {code: statut_relance} pour enrichissement du tableau."""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    code_proprietaire,
+                    MAX(created_at) AS derniere_relance,
+                    COUNT(*) AS nb_relances,
+                    MAX(status) AS dernier_statut
+                FROM relance_draft
+                WHERE status NOT IN ('deleted')
+                GROUP BY code_proprietaire
+                """
+            )
+            rows = cur.fetchall()
+        result = {}
+        for r in rows:
+            if not r or not r.get("code_proprietaire"):
+                continue
+            code = str(r["code_proprietaire"])
+            nb = int(r.get("nb_relances") or 0)
+            date_raw = r.get("derniere_relance")
+            date_str = str(date_raw)[:10] if date_raw else None
+            statut = str(r.get("dernier_statut") or "").lower()
+            if statut == "sent":
+                label = f"✅ Envoyé {date_str or ''}"
+            elif statut in ("draft_imap", "draft_local"):
+                label = f"📝 Brouillon ({date_str or '—'})"
+            elif statut == "error":
+                label = f"❌ Erreur relance"
+            else:
+                label = f"📬 {nb} relance(s)"
+            result[code] = label
+        return result
+    except Exception:
+        return {}
+
+
 def _determiner_statut(row: pd.Series, alert_codes: set[str]) -> str:
     """Détermine le statut synthétique d'un copropriétaire pour la balance de gestion."""
     code = str(row.get("code", ""))
@@ -153,6 +194,16 @@ with st.container():
             key="charges_date_ref",
         )
 
+# Toggle débiteurs
+col_tog, _ = st.columns([1.5, 5])
+with col_tog:
+    only_debiteurs = st.checkbox(
+        "🔴 Débiteurs seulement",
+        value=False,
+        key="charges_only_debiteurs",
+        help="N'afficher que les copropriétaires dont le débit est positif au relevé de référence.",
+    )
+
 # Application du périmètre de recherche et typologie
 df_scope = df_all.copy()
 if search_query:
@@ -186,6 +237,10 @@ elif quick_focus == "Top 10 Débits":
 elif quick_focus == "Débits > 0 uniquement":
     df_ref = df_ref[df_ref["debit"] > 0]
 
+# Application du toggle débiteurs seulement
+if only_debiteurs:
+    df_ref = df_ref[df_ref["debit"] > 0]
+
 # Périmètre historique correspondant pour les graphiques (jusqu'au relevé de référence)
 active_owners = (
     df_ref["proprietaire"].unique()
@@ -211,6 +266,10 @@ df_ref["solde_net"] = df_ref["debit"] - df_ref["credit"]
 
 alert_codes = load_alertes_codes()
 df_ref["statut"] = df_ref.apply(lambda r: _determiner_statut(r, alert_codes), axis=1)
+relance_statuts = load_statut_relance_par_copro()
+df_ref["statut_relance"] = df_ref["code"].map(
+    lambda c: relance_statuts.get(str(c), "—")
+)
 
 st.divider()
 
@@ -468,6 +527,7 @@ with tab_table:
                     "credit",
                     "delta_debit",
                     "statut",
+                    "statut_relance",
                 ],
                 column_config={
                     "proprietaire": st.column_config.TextColumn("Copropriétaire", width="medium"),
@@ -482,6 +542,10 @@ with tab_table:
                         help="Évolution de la dette par rapport au relevé précédent (positif = dette en hausse).",
                     ),
                     "statut": st.column_config.TextColumn("Statut", width="medium"),
+                    "statut_relance": st.column_config.TextColumn(
+                        "✉️ Relance",
+                        help="Statut de la dernière relance générée pour ce copropriétaire."
+                    ),
                 },
             )
 
@@ -497,6 +561,7 @@ with tab_table:
                     "credit",
                     "delta_debit",
                     "statut",
+                    "statut_relance",
                 ]
                 display_ref[export_cols].to_csv(csv_buf, index=False, sep=";")
                 st.download_button(

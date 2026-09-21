@@ -124,11 +124,17 @@ Relance_Config_page = st.Page(
     icon=":material/settings:",
 )
 
-# --- NAVIGATION SETUP (5 PÔLES THÉMATIQUES - 8 PAGES) ---
+Bilan_AG_page = st.Page(
+    "Pages/Bilan_AG.py",
+    title="Bilan AG & Rapport annuel",
+    icon=":material/description:",
+)
+
+# --- NAVIGATION SETUP (5 PÔLES THÉMATIQUES - 9 PAGES) ---
 menus = st.navigation(
     {
         "📊 Vue d'ensemble": [Dashboard_page],
-        "💳 Finances & Charges": [Liste_Charge_page],
+        "💳 Finances & Charges": [Liste_Charge_page, Bilan_AG_page],
         "👥 Copropriétaires": [Recherche_Copro_page],
         "🚨 Risques & Alertes": [
             Alerte_page,

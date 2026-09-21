@@ -78,7 +78,12 @@ copro_df = load_coproprietaires()
 
 
 if charges_df.empty:
-    st.warning("⚠️ Aucune donnée de charges disponible pour l'analyse.")
+    st.info(
+        "⚠️ **Aucune donnée disponible pour l'analyse.**\n\n"
+        "Cette page nécessite des données de charges importées dans la base. "
+        "Commencez par importer vos relevés via le module d'import, puis revenez ici "
+        "pour accéder aux analyses avancées (balance âgée, distributions, prévisions)."
+    )
     st.stop()
 
 derniere_date = charges_df["date"].max()
@@ -95,13 +100,14 @@ derniers_debits_typed["type_apt"] = (
     derniers_debits_typed["type_apt_copro"].fillna(derniers_debits_typed["type_apt"]).fillna("NA")
 )
 
-tab_aging, tab_distrib, tab_risques, tab_recidive, tab_saison = st.tabs(
+tab_aging, tab_distrib, tab_risques, tab_recidive, tab_saison, tab_prevision = st.tabs(
     [
         "⏳ 1. Balance Âgée (Aging)",
         "📊 2. Distribution & Ratios",
         "⚠️ 3. Détection Précoce (Risques)",
         "🔁 4. Récidives & Durée",
         "📅 5. Typologie & Saisonnalité",
+        "🔮 6. Prévision",
     ]
 )
 
@@ -610,3 +616,159 @@ with tab_saison:
         fig_saison.update_layout(coloraxis_showscale=False)
         fig_saison = apply_plotly_theme(fig_saison)
         st.plotly_chart(fig_saison, width="stretch")
+
+
+# ============================================================================
+# ONGLET 6: PRÉVISION DU DÉBIT GLOBAL
+# ============================================================================
+with tab_prevision:
+    import numpy as np
+
+    st.subheader("🔮 Prévision de l'évolution des créances")
+    st.caption(
+        "Projection basée sur une régression linéaire du débit global historique. "
+        "Indicatif uniquement — la tendance réelle dépend des recouvrements futurs."
+    )
+
+    # Agréger le débit global par date
+    debit_global = (
+        charges_df.groupby("date")["debit"]
+        .sum()
+        .reset_index()
+        .rename(columns={"debit": "debit_global"})
+        .sort_values("date")
+    )
+
+    if len(debit_global) < 3:
+        st.warning("⚠️ Pas assez de données historiques pour établir une prévision (minimum 3 relevés).")
+    else:
+        # Paramètre de prévision
+        col_p1, col_p2, _ = st.columns([1, 1, 2])
+        with col_p1:
+            horizon_mois = st.selectbox(
+                "Horizon de prévision",
+                options=[3, 6, 12],
+                index=1,
+                key="prevision_horizon",
+                format_func=lambda x: f"{x} mois",
+            )
+        with col_p2:
+            methode = st.radio(
+                "Méthode",
+                options=["Tendance linéaire", "Moyenne mobile"],
+                horizontal=True,
+                key="prevision_methode",
+            )
+
+        # Conversion dates en numérique (jours depuis premier relevé)
+        date_origine = debit_global["date"].min()
+        debit_global["jours"] = (debit_global["date"] - date_origine).dt.days
+        x = debit_global["jours"].values
+        y = debit_global["debit_global"].values
+
+        # Générer les dates futures (approximation : 30j par mois)
+        dernier_jour = int(x[-1])
+        futures_jours = np.array([
+            dernier_jour + (i + 1) * 30 for i in range(horizon_mois)
+        ])
+        futures_dates = [
+            date_origine + pd.Timedelta(days=int(j)) for j in futures_jours
+        ]
+
+        if methode == "Tendance linéaire":
+            # Régression linéaire (degré 1)
+            coeffs = np.polyfit(x, y, 1)
+            poly = np.poly1d(coeffs)
+            y_trend = poly(x)
+            y_future = poly(futures_jours)
+            tendance_label = (
+                f"Tendance : {coeffs[0]:+.1f} €/jour "
+                f"({'hausse' if coeffs[0] > 0 else 'baisse'})"
+            )
+        else:
+            # Moyenne mobile sur les 3 derniers relevés → projection plate
+            y_future = np.full(horizon_mois, float(np.mean(y[-3:])))
+            y_trend = np.full(len(x), float(np.mean(y)))
+            tendance_label = f"Moyenne des 3 derniers relevés : {float(np.mean(y[-3:])):,.0f} €".replace(",", " ")
+
+        # KPIs de prévision
+        val_actuelle = float(y[-1])
+        val_prevue = float(y_future[-1])
+        variation_prevue = val_prevue - val_actuelle
+        signe = "+" if variation_prevue >= 0 else ""
+
+        kpv1, kpv2, kpv3 = st.columns(3)
+        kpv1.metric(
+            "Débit global actuel",
+            f"{val_actuelle:,.0f} €".replace(",", " "),
+        )
+        kpv2.metric(
+            f"Prévision dans {horizon_mois} mois",
+            f"{val_prevue:,.0f} €".replace(",", " "),
+            delta=f"{signe}{variation_prevue:,.0f} €".replace(",", " "),
+            delta_color="inverse",
+        )
+        kpv3.metric(
+            "Tendance",
+            "📈 Hausse" if variation_prevue > 0 else "📉 Baisse" if variation_prevue < 0 else "➡️ Stable",
+            delta=tendance_label,
+            delta_color="off",
+        )
+
+        # Graphique combiné historique + prévision
+        fig_prev = go.Figure()
+
+        # Courbe historique
+        fig_prev.add_trace(go.Scatter(
+            x=debit_global["date"],
+            y=debit_global["debit_global"],
+            mode="lines+markers",
+            name="Débit réel",
+            line=dict(color="#0284C7", width=2),
+            marker=dict(size=6),
+        ))
+
+        # Courbe de tendance (sur historique)
+        if methode == "Tendance linéaire":
+            fig_prev.add_trace(go.Scatter(
+                x=debit_global["date"],
+                y=y_trend,
+                mode="lines",
+                name="Tendance",
+                line=dict(color="#94a3b8", width=1, dash="dot"),
+            ))
+
+        # Zone de prévision (futur)
+        fig_prev.add_trace(go.Scatter(
+            x=futures_dates,
+            y=y_future,
+            mode="lines+markers",
+            name=f"Prévision ({horizon_mois} mois)",
+            line=dict(color="#f97316", width=2, dash="dash"),
+            marker=dict(size=7, symbol="diamond"),
+        ))
+
+        # Ligne verticale séparant historique et prévision
+        fig_prev.add_vline(
+            x=debit_global["date"].max(),
+            line_dash="dash",
+            line_color="#64748b",
+            annotation_text="Aujourd'hui",
+            annotation_position="top left",
+        )
+
+        fig_prev.update_layout(
+            xaxis_title="Date",
+            yaxis_title="Débit global (€)",
+            legend=dict(orientation="h", y=-0.2),
+            margin=dict(t=20, b=20),
+        )
+        fig_prev = apply_plotly_theme(fig_prev)
+        st.plotly_chart(fig_prev, use_container_width=True)
+
+        st.caption(
+            "⚠️ **Avertissement** : Cette prévision est purement mathématique (extrapolation de la tendance passée). "
+            "Elle ne prend pas en compte les événements futurs (nouvelles relances, règlements, incidents). "
+            "À utiliser comme indicateur de tendance, non comme certitude."
+        )
+

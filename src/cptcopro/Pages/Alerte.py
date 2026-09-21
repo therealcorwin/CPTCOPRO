@@ -105,6 +105,28 @@ def load_config() -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def load_derniere_relance_par_copro() -> dict[str, str]:
+    """Retourne un dict {code_proprietaire: date_derniere_relance_str}."""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute(
+                "SELECT code_proprietaire, MAX(created_at) AS derniere_relance "
+                "FROM relance_draft "
+                "WHERE status NOT IN ('deleted') "
+                "GROUP BY code_proprietaire"
+            )
+            rows = cur.fetchall()
+        return {
+            str(r["code_proprietaire"]): str(r["derniere_relance"])[:10]
+            if r["derniere_relance"] else "—"
+            for r in rows
+            if r and r.get("code_proprietaire")
+        }
+    except Exception:
+        return {}
+
+
 def get_val(df: pd.DataFrame, col: str, default: int = 0) -> int:
     if col in df.columns and not df.empty:
         val = df[col].iat[0]
@@ -129,6 +151,7 @@ alertes_df, sommealertes_df = recup_alertes()
 suivi_alerte = recup_suivi_alertes()
 debits_df = recup_debits_proprietaires_alertes()
 config_df = load_config()
+relance_dates = load_derniere_relance_par_copro()
 
 tab_actives, tab_repartition, tab_evolution, tab_config = st.tabs(
     [
@@ -220,7 +243,7 @@ with tab_actives:
                 str(r["Code"]): f"{r['Proprietaire']} ({r['Code']} — {r['Debit']:,.2f} €)"
                 for _, r in alertes_df.iterrows()
             }
-            c_sel, c_btn = st.columns([2, 1])
+            c_sel, c_btn, c_fiche = st.columns([2, 1, 1])
             with c_sel:
                 selected_alert_code = st.selectbox(
                     "Action rapide :",
@@ -233,20 +256,27 @@ with tab_actives:
                 if st.button("✉️ Relancer", type="primary", use_container_width=True):
                     st.session_state["target_relance_copro"] = selected_alert_code
                     st.switch_page("Pages/Relance.py")
+            with c_fiche:
+                if st.button("👤 Fiche copro", use_container_width=True,
+                             help="Ouvre la fiche 360° de ce copropriétaire"):
+                    st.session_state["target_fiche_copro"] = selected_alert_code
+                    st.switch_page("Pages/Rechercher_Copro.py")
 
-        alertes_affiche = appliquer_confidentialite(
-            alertes_df[
-                [
-                    "Proprietaire",
-                    "Code",
-                    "Debit",
-                    "TypeApt",
-                    "Occurence",
-                    "FirstDetection",
-                    "LastDetection",
-                ]
-            ].copy()
+        alertes_work = alertes_df[
+            [
+                "Proprietaire",
+                "Code",
+                "Debit",
+                "TypeApt",
+                "Occurence",
+                "FirstDetection",
+                "LastDetection",
+            ]
+        ].copy()
+        alertes_work["DerniereRelance"] = alertes_work["Code"].map(
+            lambda c: relance_dates.get(str(c), "—")
         )
+        alertes_affiche = appliquer_confidentialite(alertes_work)
 
         st.dataframe(
             alertes_affiche,
@@ -265,6 +295,10 @@ with tab_actives:
                 ),
                 "LastDetection": st.column_config.DateColumn(
                     "Dernière détection", format="DD/MM/YYYY", width="small"
+                ),
+                "DerniereRelance": st.column_config.TextColumn(
+                    "✉️ Dernière relance", width="small",
+                    help="Date de la dernière relance générée pour ce copropriétaire."
                 ),
             },
         )

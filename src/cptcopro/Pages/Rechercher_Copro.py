@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 try:
-    from cptcopro.Database import get_copro_notes, save_copro_notes
+    from cptcopro.Database import get_copro_notes, get_relance_drafts, save_copro_notes
 except ImportError:
     import importlib
     import sys
@@ -19,7 +19,7 @@ except ImportError:
     if "cptcopro.Database" in sys.modules:
         importlib.reload(sys.modules["cptcopro.Database"])
 
-    from cptcopro.Database.Relance_Config import get_copro_notes, save_copro_notes
+    from cptcopro.Database.Relance_Config import get_copro_notes, get_relance_drafts, save_copro_notes
 from cptcopro.Database.connection import get_db_cursor
 from cptcopro.utils.db_helpers import fetch_dataframe, normalize_date_columns
 from cptcopro.utils.privacy import (
@@ -126,11 +126,31 @@ def filter_coproprietaires(query: str, all_owners: list[str]) -> list[str]:
     return matched
 
 
+TAB_ANNUAIRE = "📋 Annuaire des Lots & Résidents"
+TAB_FICHE = "👤 Fiche Individuelle 360° & Notes"
+
+target_copro_raw = st.session_state.get("target_fiche_copro")
+target_owner_resolved = None
+
+if target_copro_raw:
+    target_str = str(target_copro_raw).strip()
+    if not charges_df.empty:
+        by_code = charges_df[charges_df["code"].astype(str).str.lower() == target_str.lower()]
+        if not by_code.empty:
+            target_owner_resolved = by_code.iloc[0]["proprietaire"]
+        elif target_str in proprietaires_uniques:
+            target_owner_resolved = target_str
+        else:
+            cand = filter_coproprietaires(target_str, proprietaires_uniques)
+            if cand:
+                target_owner_resolved = cand[0]
+    st.session_state["fiche_search_box"] = target_owner_resolved or target_str
+
+default_tab = TAB_FICHE if target_copro_raw else TAB_ANNUAIRE
+
 tab_annuaire, tab_fiche = st.tabs(
-    [
-        "📋 Annuaire des Lots & Résidents",
-        "👤 Fiche Individuelle 360° & Notes",
-    ]
+    [TAB_ANNUAIRE, TAB_FICHE],
+    default=default_tab,
 )
 
 # ============================================================================
@@ -225,15 +245,25 @@ with tab_annuaire:
 # ONGLET 2: FICHE INDIVIDUELLE 360° & BLOC-NOTES
 # ============================================================================
 with tab_fiche:
+    if target_copro_raw:
+        col_b1, col_b2 = st.columns([3, 1], gap="medium")
+        with col_b1:
+            display_name = target_owner_resolved or target_copro_raw
+            code_label = f" (Code : {target_copro_raw})" if target_owner_resolved and str(target_copro_raw) != target_owner_resolved else ""
+            st.info(f"🎯 **Fiche ciblée active** pour **{display_name}**{code_label}.")
+        with col_b2:
+            if st.button("Afficher tous les copropriétaires", key="reset_target_fiche_btn", use_container_width=True):
+                st.session_state.pop("target_fiche_copro", None)
+                st.session_state["fiche_search_box"] = ""
+                st.rerun()
+
     col_s1, col_s2 = st.columns([1.2, 2], gap="medium")
 
-    # Pré-sélection depuis un autre onglet ou page
-    default_search = st.session_state.get("target_fiche_copro", "")
-
     with col_s1:
+        current_search = st.session_state.get("fiche_search_box", "")
         search_filter = st.text_input(
             "🔍 Rechercher un copropriétaire :",
-            value=default_search,
+            value=current_search,
             placeholder="Ex: Dupont, D001, 12, T3...",
             key="fiche_search_box",
         ).strip()
@@ -245,6 +275,10 @@ with tab_fiche:
             st.warning(f"Aucun compte trouvé pour : '{search_filter}'")
             selected_copro = None
         else:
+            default_index = 0
+            if target_owner_resolved and target_owner_resolved in matching_proprietaires:
+                default_index = matching_proprietaires.index(target_owner_resolved)
+
             label_select = (
                 f"Sélectionnez le copropriétaire ({len(matching_proprietaires)} résultat"
                 f"{'s' if len(matching_proprietaires) > 1 else ''}) :"
@@ -252,7 +286,7 @@ with tab_fiche:
             selected_copro = st.selectbox(
                 label_select,
                 options=matching_proprietaires,
-                index=0,
+                index=default_index,
                 format_func=lambda p: (
                     f"{p}  (Code: {copro_meta_df.loc[p, 'code']} | Lot: "
                     f"{copro_meta_df.loc[p, 'num_apt']} - "
@@ -410,3 +444,60 @@ with tab_fiche:
                         "credit": st.column_config.NumberColumn("Crédit (€)", format="%.2f €"),
                     },
                 )
+
+            # --- Historique des relances reçues ---
+            with st.expander(
+                "📬 Historique des relances envoyées",
+                expanded=False,
+            ):
+                @st.cache_data(ttl=60, show_spinner=False)
+                def _load_relances_copro(code: str) -> list:
+                    try:
+                        return get_relance_drafts(code_proprietaire=code, limit=50)
+                    except Exception:
+                        return []
+
+                drafts_copro = _load_relances_copro(code_copro)
+                if not drafts_copro:
+                    st.info("Aucune relance enregistrée pour ce copropriétaire.")
+                else:
+                    # KPIs relances
+                    nb_relances = len(drafts_copro)
+                    derniere_relance = drafts_copro[0]  # trié DESC par created_at
+                    date_derniere = derniere_relance.get("created_at") or derniere_relance.get("sent_at")
+                    st.caption(
+                        f"{nb_relances} relance(s) enregistrée(s) — "
+                        f"Dernière : {str(date_derniere)[:10] if date_derniere else 'N/A'}"
+                    )
+                    for draft in drafts_copro:
+                        status = str(draft.get("status") or "").lower()
+                        icon = {
+                            "sent": "✅",
+                            "draft_imap": "📤",
+                            "draft_local": "📝",
+                            "error": "❌",
+                            "deleted": "🗑️",
+                        }.get(status, "📄")
+                        created_raw = draft.get("created_at")
+                        date_str = str(created_raw)[:10] if created_raw else "—"
+                        subject_str = str(draft.get("subject") or "(sans objet)")
+                        provider_str = str(draft.get("llm_provider") or "—")
+                        with st.expander(
+                            f"{icon} {date_str} — {subject_str[:60]}",
+                            expanded=False,
+                        ):
+                            c1, c2, c3 = st.columns(3)
+                            c1.metric("Statut", status.upper())
+                            c2.metric("Rédigé par", provider_str)
+                            c3.metric("Montant", f"{float(draft.get('debit') or 0):,.2f} €".replace(",", " "))
+                            st.markdown(f"**Objet :** {subject_str}")
+                            st.text_area(
+                                "Corps du message",
+                                value=str(draft.get("body") or ""),
+                                height=120,
+                                disabled=True,
+                                label_visibility="collapsed",
+                            )
+                            if draft.get("error_message"):
+                                st.error(f"Erreur : {draft['error_message']}")
+

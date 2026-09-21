@@ -79,6 +79,19 @@ render_header(
 
 cfg, due_df = _load_due_data()
 
+# Bannière OAuth2 si token Hotmail expiré
+try:
+    from cptcopro.utils.hotmail_oauth import verifier_statut_token_hotmail
+    _token_ok, _token_msg = verifier_statut_token_hotmail()
+    if not _token_ok:
+        st.warning(
+            "📧 **Hotmail non connecté** : Le token OAuth2 est expiré ou absent. "
+            "Les brouillons générés ne pourront pas être déposés sur votre boîte Hotmail. "
+            "🔐 [Configurer dans Paramètres & Modèles]",
+            icon="⚠️",
+        )
+except Exception:
+    pass
 
 is_enabled = bool(int(cfg.get("enabled", 1) or 1))
 if not is_enabled:
@@ -177,6 +190,18 @@ with tab_generation:
         available_due_cols = [c for c in due_cols if c in due_only.columns]
         due_display = due_only[available_due_cols].copy()
 
+        # Score de priorité : débit × log(1 + jours d'attente) × (1 + 0.3 × nb_relances)
+        import math
+        def _score_urgence(row: pd.Series) -> float:
+            debit = float(row.get("debit", 0) or 0)
+            jours = float(row.get("jours_depuis_derniere_relance", 0) or 0)
+            nb = float(row.get("nb_relances_total", 0) or 0)
+            return round(debit * math.log1p(jours) * (1 + 0.3 * nb), 1)
+
+        if "debit" in due_display.columns:
+            due_display["Score"] = due_display.apply(_score_urgence, axis=1)
+            due_display = due_display.sort_values("Score", ascending=False)
+
         # Si cible spécifiée, cocher uniquement cette cible
         if target_code:
             due_display.insert(0, "Generer", due_display["code_proprietaire"] == target_code)
@@ -223,6 +248,13 @@ with tab_generation:
                 ),
                 "email_to": st.column_config.TextColumn(
                     "Email destinataire", disabled=True, width="medium"
+                ),
+                "Score": st.column_config.NumberColumn(
+                    "🔥 Urgence",
+                    format="%.0f",
+                    disabled=True,
+                    width="small",
+                    help="Score = Débit × log(1+Jours) × (1+0.3×NbRelances). Plus le score est élevé, plus la relance est urgente."
                 ),
                 "Template": st.column_config.SelectboxColumn(
                     "Modèle", options=template_names, required=True, width="medium"

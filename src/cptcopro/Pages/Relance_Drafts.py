@@ -63,6 +63,20 @@ render_header(
 
 cfg = _load_config()
 
+# Bannière OAuth2 si token Hotmail expiré
+try:
+    from cptcopro.utils.hotmail_oauth import verifier_statut_token_hotmail
+    _token_ok, _token_msg = verifier_statut_token_hotmail()
+    if not _token_ok:
+        st.warning(
+            "📧 **Hotmail non connecté** : Le token OAuth2 est expiré ou absent. "
+            "L'envoi IMAP vers Hotmail ne fonctionnera pas. "
+            "🔐 Allez dans **Paramètres & Modèles → 🔧 Intégrations** pour vous authentifier.",
+            icon="⚠️",
+        )
+except Exception:
+    pass
+
 tab_drafts, tab_tracking, tab_history = st.tabs(
     [
         "📬 Brouillons & Actions en Masse",
@@ -594,7 +608,7 @@ with tab_history:
         if status_hist_filter != "Tous":
             df_hist = df_hist[df_hist["status"] == status_hist_filter]
 
-        for _, row in df_hist.iterrows():
+        for idx, (_, row) in enumerate(df_hist.iterrows()):
             sent_label = row.get("sent_at") or row.get("created_at")
             status_icon = (
                 "✓ (Hotmail)"
@@ -627,3 +641,13 @@ with tab_history:
                 )
                 if row.get("error_message"):
                     st.error(f"Détail erreur : {row['error_message']}")
+
+                if st.button(
+                    "👤 Voir la fiche copro",
+                    key=f"fiche_{row.get('draft_id', idx)}",
+                    use_container_width=False,
+                ):
+                    target = str(row.get("code_proprietaire") or row.get("nom_proprietaire") or "")
+                    st.session_state["target_fiche_copro"] = target
+                    st.switch_page("Pages/Rechercher_Copro.py")
+

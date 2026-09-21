@@ -526,6 +526,114 @@ def save_draft_to_imap(config: dict[str, Any], message: EmailMessage) -> str:
             client.logout()
 
 
+def generer_corps_template_avec_mistral(
+    nom_modele: str,
+    tone_instruction: str,
+    corps_existant: str,
+    config: dict[str, Any],
+) -> tuple[str, str, str | None]:
+    """Génère un corps de modèle de relance type via Mistral.
+
+    Utilisé depuis l'éditeur de modèles pour aider à rédiger un gabarit.
+    Contrairement à generate_relance_draft_with_llm, ne traite pas de données
+    réelles de copropriétaire — génère un texte avec des placeholders {variable}.
+
+    Returns:
+        (corps_genere, model_utilise, erreur_ou_none)
+        corps_genere est vide si une erreur survient.
+    """
+    model = str(config.get("llm_model") or "mistral-small-latest")
+    api_base = str(config.get("llm_api_base") or "https://api.mistral.ai/v1").rstrip("/")
+    api_key_env = str(config.get("llm_api_key_env") or "MISTRAL_API_KEY")
+    api_key = os.getenv(api_key_env, "").strip()
+    temperature = 0.5
+    try:
+        temperature = float(config.get("llm_temperature") or 0.5)
+    except (TypeError, ValueError):
+        pass
+
+    if not api_key:
+        return (
+            "",
+            model,
+            "Clé API Mistral introuvable. Vérifiez la variable d'environnement "
+            f"'{api_key_env}' dans la page Intégrations.",
+        )
+    if not api_base.lower().startswith("https://"):
+        return "", model, f"URL API Mistral invalide : '{api_base}'."
+
+    tone = tone_instruction.strip() or "courtois, professionnel et ferme"
+    corps_guide = ""
+    if corps_existant.strip():
+        corps_guide = (
+            "\n\nS'inspirer de cette ébauche existante pour la structure "
+            "(ne pas recopier) :\n" + corps_existant.strip()
+        )
+
+    system_prompt = (
+        "Tu es un assistant expert en communication de syndic de copropriété. "
+        "Tu rédiges des modèles types de courrier de relance en français. "
+        "Tes textes sont factuels, professionnels et n'inventent aucune pénalité légale."
+    )
+    user_prompt = (
+        f"Rédige un modèle type de corps d'email de relance intitulé : '{nom_modele}'.\n\n"
+        "Contraintes :\n"
+        f"- Ton : {tone}.\n"
+        "- Longueur : 150 à 250 mots, concis et actionnable.\n"
+        "- Utilise obligatoirement les placeholders suivants là où pertinent : "
+        "{nom_proprietaire}, {debit_fmt}, {num_apt}, {date_origin}, {date_du_jour}, {sender_name}.\n"
+        "- Inclure une formule de politesse d'ouverture et de clôture.\n"
+        "- Inclure une invitation à contacter le syndic en cas de désaccord.\n"
+        "- Retourner uniquement le corps du mail (sans ligne 'Objet:').\n"
+        f"{corps_guide}"
+    )
+
+    payload = {
+        "model": model,
+        "temperature": temperature,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(
+                url=f"{api_base}/chat/completions",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=30) as response:  # nosec B310
+                raw = response.read().decode("utf-8")
+            content = json.loads(raw)
+            body = content.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+            if body:
+                logger.success(f"Corps de modèle '{nom_modele}' généré avec succès via Mistral.")
+                return body, model, None
+            return "", model, "Mistral a renvoyé une réponse vide."
+        except urllib.error.HTTPError as http_err:
+            if http_err.code == 429 and attempt < 2:
+                wait = 5.0 * (attempt + 1)
+                logger.warning(f"Rate limit Mistral (HTTP 429), attente {wait}s…")
+                time.sleep(wait)
+                continue
+            raw_err = http_err.read().decode("utf-8", errors="ignore")
+            try:
+                detail = json.loads(raw_err).get("message") or raw_err
+            except Exception:
+                detail = raw_err
+            return "", model, f"Erreur HTTP {http_err.code} Mistral : {detail}"
+        except Exception as exc:
+            return "", model, f"Erreur de connexion Mistral : {exc}"
+
+    return "", model, "Nombre maximal de tentatives Mistral atteint (rate limit)."
+
+
 def generer_brouillons_relances(
     deposer_imap: bool = False,
     force_llm: bool | None = None,
