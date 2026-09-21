@@ -313,12 +313,13 @@ def save_copro_notes(code_proprietaire: str, notes: str) -> None:
 
 
 def list_relances_due(
-    db_path: str | None = None,
     frequency_days: int | None = None,
+    db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Retourne les coproprietaires en debit eligibles a une nouvelle relance."""
-    if isinstance(db_path, int) and frequency_days is None:
-        frequency_days = db_path
+    if isinstance(frequency_days, str) and db_path is None:
+        db_path = frequency_days
+        frequency_days = None
 
     if frequency_days is None:
         cfg = get_relance_config()

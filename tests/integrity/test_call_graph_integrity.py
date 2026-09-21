@@ -282,12 +282,12 @@ def test_cli_options_documented(call_graph_content: str):
 
 
 def test_all_streamlit_pages_documented(call_graph_content: str):
-    """Vérifie que les 8 pages Streamlit du dossier Pages/ sont mentionnées dans call_graph.md."""
+    """Vérifie que les 9 pages Streamlit du dossier Pages/ sont mentionnées dans call_graph.md."""
     pages_dir = get_project_root_dir() / "src" / "cptcopro" / "Pages"
     page_files = sorted(p.name for p in pages_dir.glob("*.py"))
 
-    assert len(page_files) == 8, (
-        f"Nombre inattendu de pages dans Pages/ : {len(page_files)} (8 attendues)."
+    assert len(page_files) == 9, (
+        f"Nombre inattendu de pages dans Pages/ : {len(page_files)} (9 attendues)."
     )
 
     for pf in page_files:

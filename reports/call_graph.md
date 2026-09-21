@@ -12,7 +12,7 @@ Pour une vue synthétique du projet, voir `README.md` et `.github/copilot-instru
 
 1. **Vue d'ensemble (runtime)** : Cartographie macroscopique des flux d'exécution lors d'un lancement standard via CLI.
 2. **Déroulé du flux principal** : Ordre chronologique concret des appels dans `main.py`.
-3. **Cartographie Streamlit** : Structuration de la navigation (5 pôles), des 8 pages et de leurs fonctions de chargement `@st.cache_data`.
+3. **Cartographie Streamlit** : Structuration de la navigation (5 pôles), des 9 pages et de leurs fonctions de chargement `@st.cache_data`.
 4. **Sous-système de Relances (IA & Messagerie)** : Pipeline de génération de messages (Mistral AI ou modèles statiques), gestion des brouillons et synchronisation IMAP Hotmail (OAuth2).
 5. **Confidentialité & Sécurité** : Anonymisation des données sensibles et flux d'autorisation Microsoft OAuth2 Device Flow.
 6. **Matrices de référence** : Catalogue des modules, matrice CRUD des tables MariaDB, options CLI et constantes de timing.
@@ -45,7 +45,7 @@ flowchart TB
     end
 
     subgraph LAYER4["Couche 4 : Présentation, IA & Actions"]
-        L4_st["Affichage_Stream.py & 8 Pages Streamlit (5 Pôles thématiques)"]
+        L4_st["Affichage_Stream.py & 9 Pages Streamlit (5 Pôles thématiques)"]
         L4_ai["Mistral AI API REST (Rédaction contextuelle des relances)"]
         L4_imap["utils/relance_mailer.py (Dépôt IMAP Hotmail / Microsoft OAuth2 Device Flow)"]
     end
@@ -309,7 +309,7 @@ sequenceDiagram
 ## Cartographie Streamlit complète
 
 L'application web Streamlit est articulée autour de `src/cptcopro/Affichage_Stream.py`.
-Au démarrage, elle initialise et vérifie le pool MariaDB via `@st.cache_resource`, configure la charte graphique et orchestre la navigation en **5 pôles fonctionnels** regroupant **8 pages**.
+Au démarrage, elle initialise et vérifie le pool MariaDB via `@st.cache_resource`, configure la charte graphique et orchestre la navigation en **5 pôles fonctionnels** regroupant **9 pages**.
 
 ```mermaid
 flowchart LR
@@ -325,6 +325,7 @@ flowchart LR
 
     subgraph SEC2["2. 💳 Finances & Charges"]
         p_lc["Pages/Liste_Charge.py"]
+        p_bag["Pages/Bilan_AG.py"]
     end
 
     subgraph SEC3["3. 👥 Copropriétaires"]
@@ -615,8 +616,8 @@ flowchart LR
 | `src/cptcopro/Database/Relance_Config.py` | Paramétrage et requêtes des relances | `get_relance_config()`, `update_relance_config()`, `list_relances_due()`, `save_relance_draft()`, `get_relance_drafts()`, `get_relances_tracking_summary()`, `get_copro_notes()`, `save_copro_notes()`, `upsert_relance_destinataire()`, `get_relance_destinataires()`, `mark_relance_draft_status()` |
 | `src/cptcopro/Database/Relance_Templates.py` | Gestion des modèles de relance | `list_relance_templates()`, `get_relance_template()`, `create_relance_template()`, `update_relance_template()`, `delete_relance_template()`, `get_all_template_placeholders()` |
 | `src/cptcopro/Database/Relance_Variables.py` | Gestion des variables de personnalisation des relances | `list_relance_variables()`, `get_relance_variable()`, `create_relance_variable()`, `update_relance_variable()`, `delete_relance_variable()`, `get_custom_variables_dict()`, `normalize_variable_name()` |
-| `src/cptcopro/Affichage_Stream.py` | Point d'entrée Streamlit & structure de navigation | Configuration multi-pages (5 pôles, 8 pages), injection CSS, initialisation du pool de connexions |
-| `src/cptcopro/Pages/*.py` | 8 pages applicatives Streamlit | Visualisations, tableaux de bord, fiches individuelles 360°, centre d'alertes et gestion des relances |
+| `src/cptcopro/Affichage_Stream.py` | Point d'entrée Streamlit & structure de navigation | Configuration multi-pages (5 pôles, 9 pages), injection CSS, initialisation du pool de connexions |
+| `src/cptcopro/Pages/*.py` | 9 pages applicatives Streamlit | Visualisations, tableaux de bord, bilans AG, fiches individuelles 360°, centre d'alertes et gestion des relances |
 | `scripts/migrate_sqlite_to_mariadb.py` | Outil de migration initiale SQLite vers MariaDB | Migration paginée par lots avec barre de progression Rich et validation de parité |
 
 ---
