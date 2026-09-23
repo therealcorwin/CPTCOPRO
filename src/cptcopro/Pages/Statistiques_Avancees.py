@@ -672,7 +672,7 @@ with tab_prevision:
             dernier_jour + (i + 1) * 30 for i in range(horizon_mois)
         ])
         futures_dates = [
-            date_origine + pd.Timedelta(days=int(j)) for j in futures_jours
+            date_origine + pd.Timedelta(int(j), unit="D") for j in futures_jours
         ]
 
         if methode == "Tendance linéaire":
