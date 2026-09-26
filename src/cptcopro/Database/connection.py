@@ -23,7 +23,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import pymysql
 import pymysql.cursors
@@ -53,40 +53,92 @@ _DEADLOCK_MAX_RETRIES = 3
 _DEADLOCK_BACKOFF_BASE = 0.1  # secondes — double a chaque tentative
 
 
+class DatabaseConnectionError(RuntimeError):
+    """Exception levée lorsque la base de données MariaDB est inaccessible."""
+
+
+def _diagnose_db_error(exc: Exception, cfg: dict[str, Any]) -> str:
+    """Analyse l'exception reçue et produit un message clair et actionnable."""
+    host = cfg.get("host", "127.0.0.1")
+    port = cfg.get("port", "3306")
+    database = cfg.get("database", "")
+    user = cfg.get("user", "")
+
+    err_code = None
+    if isinstance(exc, pymysql.err.MySQLError) and exc.args:
+        err_code = exc.args[0]
+    elif hasattr(exc, "__cause__") and isinstance(exc.__cause__, pymysql.err.MySQLError) and exc.__cause__.args:
+        err_code = exc.__cause__.args[0]
+
+    err_str = str(exc)
+
+    if err_code == 2003 or "10061" in err_str or "connection refused" in err_str.lower():
+        return (
+            f"Le serveur MariaDB est injoignable sur {host}:{port} "
+            "(connexion refusée : service arrêté ou hôte/port inaccessible)."
+        )
+    if err_code == 1045 or "access denied" in err_str.lower():
+        return (
+            f"Authentification refusée pour l'utilisateur '{user}' sur {host}:{port}. "
+            "Vérifiez l'utilisateur et le mot de passe dans le fichier .env."
+        )
+    if err_code == 1049 or "unknown database" in err_str.lower():
+        return (
+            f"La base de données '{database}' n'existe pas sur le serveur MariaDB ({host}:{port})."
+        )
+    if "timed out" in err_str.lower() or "timeout" in err_str.lower():
+        return (
+            f"Délai d'attente dépassé lors de la connexion au serveur MariaDB ({host}:{port})."
+        )
+
+    return f"Échec de connexion au serveur MariaDB ({host}:{port}/{database}) : {exc}"
+
+
 def _get_pool() -> PooledDB:
     """Retourne le pool singleton, en le creant si necessaire."""
     global _pool
     if _pool is None:
         cfg = get_mariadb_config()
-        _pool = PooledDB(
-            creator=pymysql,
-            # Taille du pool
-            mincached=1,
-            maxcached=5,
-            maxconnections=10,
-            # Parametres pymysql
-            host=cfg["host"],
-            port=int(cfg["port"]),
-            user=cfg["user"],
-            password=cfg["password"],
-            database=cfg["database"],
-            charset="utf8mb4",
-            cursorclass=pymysql.cursors.DictCursor,
-            autocommit=False,
-            conv=_DB_CONVERSIONS,
-            # Timeouts reseau
-            connect_timeout=5,
-            read_timeout=30,
-            write_timeout=30,
-            # Reconnexion transparente : teste la connexion avant chaque emprunt.
-            # Indispensable car MariaDB ferme les connexions inactives apres
-            # wait_timeout (souvent 8h par defaut, parfois 30 min en prod).
-            # Sans ping=1 -> OperationalError: (2006, MySQL server has gone away).
-            ping=1,
-        )
-        _logger.success(
-            f"Pool MariaDB initialise ({cfg['host']}:{cfg['port']} / {cfg['database']})"
-        )
+        try:
+            _pool = PooledDB(
+                creator=pymysql,
+                # Taille du pool
+                mincached=1,
+                maxcached=5,
+                maxconnections=10,
+                # Parametres pymysql
+                host=cfg["host"],
+                port=int(cfg["port"]),
+                user=cfg["user"],
+                password=cfg["password"],
+                database=cfg["database"],
+                charset="utf8mb4",
+                cursorclass=pymysql.cursors.DictCursor,
+                autocommit=False,
+                conv=_DB_CONVERSIONS,
+                # Timeouts reseau
+                connect_timeout=5,
+                read_timeout=30,
+                write_timeout=30,
+                # Reconnexion transparente : teste la connexion avant chaque emprunt.
+                # Indispensable car MariaDB ferme les connexions inactives apres
+                # wait_timeout (souvent 8h par defaut, parfois 30 min en prod).
+                # Sans ping=1 -> OperationalError: (2006, MySQL server has gone away).
+                ping=1,
+            )
+            _logger.success(
+                f"Pool MariaDB initialise ({cfg['host']}:{cfg['port']} / {cfg['database']})"
+            )
+        except Exception as exc:
+            _pool = None
+            diag = _diagnose_db_error(exc, cfg)
+            _logger.critical(f"ÉCHEC CRITIQUE DE CONNEXION BDD : {diag}")
+            _logger.critical(
+                "Action requise : vérifiez que le service MariaDB est démarré et que la configuration dans .env est correcte."
+            )
+            raise DatabaseConnectionError(
+                f"Base de donnees MariaDB inaccessible : {diag}"
+            ) from exc
     return _pool
 
 
@@ -197,18 +249,27 @@ def get_db_cursor() -> Generator[pymysql.cursors.DictCursor, None, None]:
 def verif_connexion_db() -> None:
     """Teste la connexion MariaDB au demarrage via SELECT 1.
 
-    Appele juste apres validate_startup_env() dans main.py, avant tout
-    scraping Playwright. Si MariaDB est injoignable, l'application sort
-    proprement avec un message clair plutot qu'une stack trace au milieu
-    d'une operation metier.
+    Appele au demarrage avant tout scraping Playwright ou traitement metier.
+    Si MariaDB est injoignable, logue un message critique clair avec le diagnostic
+    et leve une DatabaseConnectionError explicite.
 
     Raises:
-        RuntimeError: Si la connexion est impossible.
+        DatabaseConnectionError: Si la connexion est impossible.
     """
     try:
         with get_db_cursor() as cur:
             cur.execute("SELECT 1")
         _logger.success("Connexion MariaDB verifiee.")
+    except DatabaseConnectionError:
+        # Deja capturee et loguee au niveau CRITICAL avec diagnostic detaille
+        raise
     except Exception as exc:
-        _logger.critical(f"Impossible de se connecter a MariaDB : {exc}")
-        raise RuntimeError("Base de donnees MariaDB inaccessible") from exc
+        cfg = get_mariadb_config()
+        diag = _diagnose_db_error(exc, cfg)
+        _logger.critical(f"ÉCHEC CRITIQUE DE CONNEXION BDD : {diag}")
+        _logger.critical(
+            "Action requise : vérifiez que le service MariaDB est démarré et que la configuration dans .env est correcte."
+        )
+        raise DatabaseConnectionError(
+            f"Base de donnees MariaDB inaccessible : {diag}"
+        ) from exc

@@ -23,7 +23,12 @@ from .Charges_To_BDD import (
     enregistrer_charges,
     valider_charges_presentes,
 )
-from .connection import get_db_connection, get_db_cursor, verif_connexion_db
+from .connection import (
+    DatabaseConnectionError,
+    get_db_connection,
+    get_db_cursor,
+    verif_connexion_db,
+)
 from .constants import (
     DEFAULT_ALERT_THRESHOLDS,
     DEFAULT_THRESHOLD_FALLBACK,
@@ -102,6 +107,7 @@ __all__ = [
     "TEMPLATE_PLACEHOLDERS",
     "CollecteChargesVideError",
     "CollecteCoproprietairesInvalideError",
+    "DatabaseConnectionError",
     "IncoherenceLotsError",
     "backup_db",
     "create_relance_snippet",

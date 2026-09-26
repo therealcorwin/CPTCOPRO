@@ -37,8 +37,8 @@ CLEANUP_TABLES = [
 def clean_db(request):
     """Nettoie les tables de donnees avant chaque test BDD et s'assure du schema."""
     module_path = str(request.fspath).replace("\\", "/")
-    # Les tests unitaires purs (traitement, utils, parsing, integrity) n'ont pas besoin de réinitialiser la BDD
-    needs_db = any(k in module_path for k in ("/bdd/", "/security/"))
+    # Les tests unitaires purs (traitement, utils, parsing, integrity) et les tests de panne n'ont pas besoin de réinitialiser la BDD
+    needs_db = any(k in module_path for k in ("/bdd/", "/security/")) and request.node.name != "test_verif_connexion_db_failure"
     if not needs_db:
         yield
         return

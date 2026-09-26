@@ -48,7 +48,6 @@ import cptcopro.Traitement.Lots_Copro as tlc
 import cptcopro.utils.streamlit_launcher as usl
 from cptcopro.utils.paths import get_log_path
 
-dtb.verif_connexion_db()
 # Configurer les logs avec le bon chemin
 LOG_PATH = str(get_log_path("app.log"))
 
@@ -384,6 +383,18 @@ def main() -> None:
     args = _parse_cli_args()
 
     logger.info("Démarrage du script principal")
+
+    # 1. Vérification préalable de la connectivité MariaDB avant toute opération
+    try:
+        dtb.verif_connexion_db()
+    except (dtb.DatabaseConnectionError, RuntimeError) as exc:
+        err_msg = str(exc).rstrip(".")
+        logger.critical(
+            f"ARRÊT CRITIQUE : {err_msg}. "
+            "Le traitement est interrompu immédiatement avant tout scraping."
+        )
+        sys.exit(1)
+
     data_charges, data_copros, date_suivi = _scrape_and_parse(args.no_headless)
 
     if not data_charges or not data_copros:
