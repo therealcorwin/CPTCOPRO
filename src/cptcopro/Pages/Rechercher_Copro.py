@@ -144,7 +144,9 @@ if target_copro_raw:
             cand = filter_coproprietaires(target_str, proprietaires_uniques)
             if cand:
                 target_owner_resolved = cand[0]
-    st.session_state["fiche_search_box"] = target_owner_resolved or target_str
+    if st.session_state.get("_applied_target_fiche") != target_copro_raw:
+        st.session_state["fiche_search_box"] = target_owner_resolved or target_str
+        st.session_state["_applied_target_fiche"] = target_copro_raw
 
 default_tab = TAB_FICHE if target_copro_raw else TAB_ANNUAIRE
 
@@ -254,16 +256,15 @@ with tab_fiche:
         with col_b2:
             if st.button("Afficher tous les copropriétaires", key="reset_target_fiche_btn", width="stretch"):
                 st.session_state.pop("target_fiche_copro", None)
+                st.session_state.pop("_applied_target_fiche", None)
                 st.session_state["fiche_search_box"] = ""
                 st.rerun()
 
     col_s1, col_s2 = st.columns([1.2, 2], gap="medium")
 
     with col_s1:
-        current_search = st.session_state.get("fiche_search_box", "")
         search_filter = st.text_input(
             "🔍 Rechercher un copropriétaire :",
-            value=current_search,
             placeholder="Ex: Dupont, D001, 12, T3...",
             key="fiche_search_box",
         ).strip()

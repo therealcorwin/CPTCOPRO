@@ -7,12 +7,12 @@ import ast
 from cptcopro.utils.paths import get_project_root_dir
 
 
-def test_eight_pages_exist_and_compile():
-    """Vérifie que les 8 pages Streamlit sont présentes et compilent sans SyntaxError."""
+def test_nine_pages_exist_and_compile():
+    """Vérifie que les 9 pages Streamlit sont présentes et compilent sans SyntaxError."""
     pages_dir = get_project_root_dir() / "src" / "cptcopro" / "Pages"
     page_files = sorted(pages_dir.glob("*.py"))
 
-    assert len(page_files) == 8, f"8 pages attendues, trouvé {len(page_files)}"
+    assert len(page_files) == 9, f"9 pages attendues, trouvé {len(page_files)}"
 
     for pf in page_files:
         code = pf.read_text(encoding="utf-8")
@@ -150,7 +150,22 @@ def test_tester_connexion_mistral_rate_limit_429(monkeypatch):
     assert "Rate limit exceeded" in msg
 
 
-
-
-
-
+def test_rechercher_copro_search_box_no_duplicate_default_value():
+    """Vérifie que le widget text_input fiche_search_box ne passe pas d'argument 'value'
+    pour éviter le warning Streamlit de duplication d'état avec Session State.
+    """
+    page_file = get_project_root_dir() / "src" / "cptcopro" / "Pages" / "Rechercher_Copro.py"
+    tree = ast.parse(page_file.read_text(encoding="utf-8"))
+    found = False
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "text_input"
+        ):
+            keywords = {kw.arg: kw.value for kw in node.keywords if kw.arg}
+            key_node = keywords.get("key")
+            if isinstance(key_node, ast.Constant) and key_node.value == "fiche_search_box":
+                found = True
+                assert "value" not in keywords, "fiche_search_box ne doit pas avoir d'argument 'value'"
+    assert found, "Le widget fiche_search_box doit exister"
