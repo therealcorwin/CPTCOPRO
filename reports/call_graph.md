@@ -13,9 +13,10 @@ Pour une vue synthétique du projet, voir `README.md` et `.github/copilot-instru
 1. **Vue d'ensemble (runtime)** : Cartographie macroscopique des flux d'exécution lors d'un lancement standard via CLI.
 2. **Déroulé du flux principal** : Ordre chronologique concret des appels dans `main.py`.
 3. **Cartographie Streamlit** : Structuration de la navigation (5 pôles), des 9 pages et de leurs fonctions de chargement `@st.cache_data`.
-4. **Sous-système de Relances (IA & Messagerie)** : Pipeline de génération de messages (Mistral AI ou modèles statiques), gestion des brouillons et synchronisation IMAP Hotmail (OAuth2).
+4. **Sous-système de Relances (IA & Messagerie)** : Pipeline de génération de messages (Mistral AI ou modèles statiques), snippets types, gestion des brouillons et synchronisation IMAP Hotmail (OAuth2).
 5. **Confidentialité & Sécurité** : Anonymisation des données sensibles et flux d'autorisation Microsoft OAuth2 Device Flow.
-6. **Matrices de référence** : Catalogue des modules, matrice CRUD des tables MariaDB, options CLI et constantes de timing.
+6. **Orchestration continue & Ingestion automatisée (n8n)** : Pipeline autonome headless Playwright/Browserless, boucle de résilience auto-retry 3x et notifications Telegram.
+7. **Matrices de référence** : Catalogue des modules, matrice CRUD des tables MariaDB, options CLI et constantes de timing.
 
 ---
 
@@ -29,6 +30,7 @@ flowchart TB
         L1_playwright["Playwright (Sessions Chromium parallèles isolées)"]
         L1_selectolax["Selectolax HTMLParser (Parsing haute performance)"]
         L1_commun["Parsing/Commun.py (Gestion des retries et de la synchronisation)"]
+        L1_n8n["Orchestrateur n8n (Workflow autonome planifié & auto-retry 3x)"]
     end
 
     subgraph LAYER2["Couche 2 : Extraction & Consolidation Métier"]
@@ -38,8 +40,8 @@ flowchart TB
     end
 
     subgraph LAYER3["Couche 3 : Persistance MariaDB & Sauvegardes Cloud"]
-        L3_conn["Database/connection.py (Pool PooledDB, retry deadlocks, ping=1)"]
-        L3_tables["Tables InnoDB : charge (System Versioning), coproprietaires, alertes, relances"]
+        L3_conn["Database/connection.py (Pool PooledDB, retry deadlocks, ping=1, DatabaseConnectionError)"]
+        L3_tables["Tables InnoDB : charge (System Versioning), coproprietaires, alertes, relances, snippets"]
         L3_backup["Database/Backup_DB.py (Dump logique .sql.gz en Python pur)"]
         L3_pcloud["Database/Backup_DB_Pcloud.py & utils/pcloud_oauth.py (Sauvegarde, Restauration & OAuth Playwright)"]
     end
@@ -450,6 +452,15 @@ stateDiagram-v2
     deleted --> [*]
 ```
 
+### Bibliothèque de snippets types (`relance_snippet`)
+
+Le sous-système intègre un catalogue de paragraphes types modifiables (`Database/Relance_Snippets.py`), permettant à l'utilisateur d'insérer rapidement des blocs standardisés dans les courriers :
+- Constat factuel de solde débiteur & rappel du lot concerné (`{date_origin}`, `{debit_fmt}`, `{num_apt}`, `{type_apt}`).
+- Coordonnées bancaires & instructions de virement avec référence normalisée (`{code_proprietaire}`, `{nom_proprietaire}`).
+- Formules de clôture et invitation au dialogue ou à la contestation amiable.
+
+Ces snippets sont persistés dans la table MariaDB `relance_snippet` et administrables directement depuis la page `Relance_Config.py`.
+
 ---
 
 ## Sécurité & Authentification OAuth2 (Hotmail & pCloud)
@@ -585,6 +596,95 @@ flowchart LR
 
 ---
 
+## Ingestion & Orchestration continue automatisée (n8n)
+
+En complément de l'exécution interactive par ligne de commande (`main.py`), CPTCOPRO intègre un moteur d'orchestration continue autonome basé sur **n8n** (workflow `CPTCOPRO - Suivi des Copropriétaires`).
+Ce workflow assure la collecte quotidienne planifiée sans intervention humaine, avec une gestion avancée de la résilience et de la tolérance aux pannes.
+
+### Architecture du workflow n8n
+
+```mermaid
+flowchart TB
+    subgraph TRIGGER["Planification & Déclencheur"]
+        n_sched["Schedule Trigger (Quotidien)"]
+        n_init_c["Init Tentatives Charges (3 essais)"]
+        n_init_l["Init Tentatives Lots (3 essais)"]
+    end
+
+    subgraph LOOP_CTRL["Contrôleurs de résilience (splitInBatches v3)"]
+        n_loop_c{"Loop Charges (batchSize=1)"}
+        n_loop_l{"Loop Lots (batchSize=1)"}
+    end
+
+    subgraph SCRAPING_C["Scraping & Extraction Charges (Chromium plop)"]
+        c_nav["Site Copro (Portail syndic)"]
+        c_login["Login (Soumission formulaire)"]
+        c_menu["Mon Immeuble > Soldes"]
+        c_extract["Soldes1 (runCustomScript: Extraction SQL ISO & Soldes)"]
+        c_if{"If Charges Présentes ?"}
+    end
+
+    subgraph SCRAPING_L["Scraping & Extraction Lots (Chromium piloup)"]
+        l_nav["Site Copro1 (Portail syndic)"]
+        l_login["Login1 (Soumission formulaire)"]
+        l_menu["Mon Immeuble1 > Liste > Lots > Lots Full"]
+        l_extract["Traitement Lot (runCustomScript: 64 lots & propriétaires)"]
+        l_if{"If 64 Lots & Données valides ?"}
+    end
+
+    subgraph PERSIST["Persistance BDD MariaDB"]
+        c_sql["Execute SQL query (INSERT ON DUPLICATE KEY UPDATE charge)"]
+        c_close["Playwright: closeSession (plop)"]
+        l_sql["Execute SQL query1 (INSERT ON DUPLICATE KEY UPDATE coproprietaires)"]
+        l_close["Playwright4: closeSession (piloup)"]
+    end
+
+    subgraph RETRY_C["Procédure d'Auto-Relance Charges"]
+        c_close_retry["Close Session Plop Retry"]
+        c_wait["Wait 1 Min Charges (60s)"]
+    end
+
+    subgraph RETRY_L["Procédure d'Auto-Relance Lots"]
+        l_close_retry["Close Session Piloup Retry"]
+        l_wait["Wait 1 Min Lots (60s)"]
+    end
+
+    subgraph ALERTS["Escalade & Notifications d'Échec (après 3 tentatives)"]
+        c_alert["Alerte Charges 1 Msg (Format HTML)"]
+        c_tele["Telegram Charges (Bot Telegram)"]
+        c_stop["Stop & Error Charges"]
+        l_alert["Alerte Lots 1 Msg (Format HTML)"]
+        l_tele["Telegram Lots (Bot Telegram)"]
+        l_stop["Stop & Error Lots"]
+    end
+
+    n_sched --> n_init_c --> n_loop_c
+    n_sched --> n_init_l --> n_loop_l
+
+    n_loop_c -- "loop (Port 1)" --> c_nav --> c_login --> c_menu --> c_extract --> c_if
+    c_if -- "OUI (Succès)" --> c_sql --> c_close
+    c_if -- "NON (Erreur/Timeout)" --> c_close_retry --> c_wait --> n_loop_c
+    n_loop_c -- "done (Port 0 - après 3 échecs)" --> c_alert --> c_tele --> c_stop
+
+    n_loop_l -- "loop (Port 1)" --> l_nav --> l_login --> l_menu --> l_extract --> l_if
+    l_if -- "OUI (Succès)" --> l_sql --> l_close
+    l_if -- "NON (Erreur/Timeout)" --> l_close_retry --> l_wait --> n_loop_l
+    n_loop_l -- "done (Port 0 - après 3 échecs)" --> l_alert --> l_tele --> l_stop
+```
+
+### Principes clés de résilience du workflow
+
+| Mécanisme | Description technique | Bénéfice opérationnel |
+| :--- | :--- | :--- |
+| **Double branche isolée** | Sessions Playwright `plop` et `piloup` exécutées indépendamment | L'échec d'une branche ne compromet pas l'autre ; si les charges réussissent, seuls les lots sont relancés |
+| **Boucle par lots native** | Nœuds `splitInBatches` v3 injectant 3 tentatives (`attempt: 1, 2, 3`) | Aucun état global complexe ; interruption immédiate en cas de succès et sortie `done` après 3 échecs |
+| **Temporisation d'1 minute** | Nœuds `Wait` de 60 secondes entre chaque tentative | Laisse le temps au serveur distant et au réseau de se stabiliser avant reconnexion |
+| **Fermeture préventive** | Nœuds `closeSession` systématiques en succès et avant retry | Évite toute fuite mémoire ou accumulation de contextes orphelins dans Browserless |
+| **Tolérance aux erreurs** | Paramètre `onError: "continueRegularOutput"` sur les nœuds Playwright | Empêche le plantage brutal du workflow et redirige proprement vers la boucle de reprise |
+| **Suppression des faux positifs** | Messages Telegram branchés exclusivement sur la sortie finale `done` | Aucune alerte paniquante n'est émise si la 2ème tentative résout un pépin transitoire |
+
+---
+
 ## Organisation des modules du projet
 
 | Module / Chemin | Responsabilité technique | Fonctions & Composants clés |
@@ -606,7 +706,9 @@ flowchart LR
 | `src/cptcopro/Parsing/constants.py` | Codes d'erreurs KO_* et constantes de temporisation | `ERROR_GO_TO_URL`, `TIMEOUT_URL_ACCESS`, `DELAY_PARALLEL_LOGIN` |
 | `src/cptcopro/Traitement/Charge_Copro.py` | Extraction et analyse des soldes débiteurs | `recuperer_date_situation_copro()`, `recuperer_situation_copro()`, `afficher_etat_coproprietaire()`, `normalise_somme()` |
 | `src/cptcopro/Traitement/Lots_Copro.py` | Extraction et consolidation des lots et propriétaires | `extraire_lignes_brutes()`, `consolider_proprietaires_lots()`, `afficher_avec_rich()` |
-| `src/cptcopro/Database/connection.py` | **Fondation MariaDB** : Pool PooledDB, transactions et retry | `init_pool()`, `get_db_connection()`, `get_db_cursor()`, `execute_with_retry()`, `verif_connexion_db()`, `close_pool()` |
+| `src/cptcopro/Database/connection.py` | **Fondation MariaDB** : Pool PooledDB, transactions, retry et diagnostic | `init_pool()`, `get_db_connection()`, `get_db_cursor()`, `execute_with_retry()`, `verif_connexion_db()`, `_diagnose_db_error()`, `DatabaseConnectionError`, `close_pool()` |
+| `src/cptcopro/Database/constants.py` | Constantes métier MariaDB & seuils d'alertes | `DEFAULT_ALERT_THRESHOLDS`, `DEFAULT_THRESHOLD_FALLBACK`, `NOMBRE_LOTS_ATTENDU` (64 lots) |
+| `src/cptcopro/Database/Relance_Snippets.py` | Gestion des paragraphes types de relance (snippets MariaDB) | `list_relance_snippets()`, `get_relance_snippet()`, `create_relance_snippet()`, `update_relance_snippet()`, `delete_relance_snippet()`, `init_relance_snippets_if_missing()`, `reset_default_relance_snippets()` |
 | `src/cptcopro/Database/Creation_BDD.py` | DDL MariaDB, triggers, vues et intégrité | `creer_base_db()`, `integrite_db()`, `verif_presence_db()`, `purger_alertes_pour_rebuild()` |
 | `src/cptcopro/Database/Charges_To_BDD.py` | Persistance optimisée des charges | `enregistrer_charges()` (batch UPSERT `INSERT ... ON DUPLICATE KEY UPDATE`), `_normaliser_lignes_charge()` |
 | `src/cptcopro/Database/Coproprietaires_To_BDD.py` | Persistance et intégrité du parc de copropriétaires | `enregistrer_coproprietaires()` (batch UPSERT), `_valider_collecte()` (contrôle d'intégrité anti-écrasement) |
@@ -637,6 +739,7 @@ Cette matrice récapitule les opérations de lecture (**R**) et d'écriture (**W
 | `relance_destinataire` | Table InnoDB | `Relance.py` (`upsert_relance_destinataire`), `Rechercher_Copro.py` (`save_copro_notes`) | `Relance.py`, `Relance_Config.py` (`list_relances_due`, `get_copro_notes`), `Backup_DB.py` |
 | `relance_template` | Table InnoDB | `Relance_Config.py` (Page & DB) | `Relance.py`, `Relance_Config.py`, `Backup_DB.py` |
 | `relance_variable` | Table InnoDB | `Relance_Config.py` (Page & DB) | `Relance_Config.py`, `relance_mailer.py`, `Backup_DB.py` |
+| `relance_snippet` | Table InnoDB | `Relance_Snippets.py`, `Relance_Config.py` | `Relance.py`, `Relance_Snippets.py`, `Relance_Config.py`, `Backup_DB.py` |
 | `relance_draft` | Table InnoDB | `Relance.py`, `Relance_Drafts.py` | `Relance_Drafts.py`, `Relance_Config.py` (tracking summary), `Backup_DB.py` |
 | `vw_charge_coproprietaires` | Vue SQL *(ROW_NUMBER)* | `Creation_BDD.py` (`CREATE OR REPLACE VIEW`) | `Dashboard.py`, `Liste_Charge.py`, `Rechercher_Copro.py`, `Alerte.py` |
 
@@ -697,7 +800,10 @@ La refonte v2.0 (passage de SQLite local à MariaDB client-serveur) a introduit 
 
 ## Notes d'architecture & Bonnes pratiques
 
-- **Pool de connexions MariaDB centralisé** : Tout appel à la base transite par `src/cptcopro/Database/connection.py`. Il fournit un pool `DBUtils.PooledDB` avec `ping=1` (test automatique de vivacité évitant les déconnexions `MySQL server has gone away` après inactivité), des context managers sécurisés avec rollback sur exception, et un mécanisme de réessai exponentiel automatique en cas de deadlock (erreur 1213).
+- **Pool de connexions MariaDB centralisé & Diagnostic fin** : Tout appel à la base transite par `src/cptcopro/Database/connection.py`. Il fournit un pool `DBUtils.PooledDB` avec `ping=1` (test automatique de vivacité évitant les déconnexions `MySQL server has gone away` après inactivité), des context managers sécurisés avec rollback sur exception, un mécanisme de réessai exponentiel automatique en cas de deadlock (erreur 1213), ainsi qu'une analyse diagnostique précise (`_diagnose_db_error`) levant l'exception explicite `DatabaseConnectionError` en cas d'inaccessibilité (erreur 2003, 1045, 1049 ou timeout).
+- **Dualité d'ingestion (CLI interactive vs n8n headless)** : Le projet supporte deux modes d'ingestion complémentaires :
+  - *Mode CLI (`main.py`)* : Orchestration locale complète avec parsing Selectolax, vérifications d'intégrité, sauvegarde pCloud immédiate et lancement optionnel de l'interface Streamlit.
+  - *Mode Orchestration Continue (`n8n`)* : Workflow Docker autonome programmé sur un cron, parallélisant les flux Playwright sous Browserless avec auto-retry (3 tentatives, 1 minute d'intervalle) et escalade d'alerte Telegram.
 - **Précision financière exacte** : Les colonnes monétaires (`debit`, `credit`, `threshold`, `charge_moyenne`) sont typées en `DECIMAL(12, 2)` au niveau du schéma MariaDB, avec conversion transparente en `float` via les convertisseurs PyMySQL du pool pour compatibilité avec Pandas, Plotly et Streamlit.
 - **Audit comptable & Historique infalsifiable** : La table `charge` utilise le **System Versioning** MariaDB (`WITH SYSTEM VERSIONING`), permettant des requêtes temporelles natives (`FOR SYSTEM_TIME AS OF`) pour analyser l'évolution des comptes sans complexification applicative.
 - **Réduction drastique de la latence réseau** :
