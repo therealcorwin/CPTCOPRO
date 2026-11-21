@@ -40,13 +40,13 @@ from cptcopro.utils.env_loader import validate_startup_env
 
 validate_startup_env()
 
-import cptcopro.Database as dtb
-import cptcopro.Database.Backup_DB_Pcloud as bckp_pcloud
-import cptcopro.Parsing.Commun as pc
-import cptcopro.Traitement.Charge_Copro as tp
-import cptcopro.Traitement.Lots_Copro as tlc
-import cptcopro.utils.streamlit_launcher as usl
-from cptcopro.utils.paths import get_log_path
+import cptcopro.Database as dtb  # noqa: E402
+import cptcopro.Database.Backup_DB_Pcloud as bckp_pcloud  # noqa: E402
+import cptcopro.Parsing.Commun as pc  # noqa: E402
+import cptcopro.Traitement.Charge_Copro as tp  # noqa: E402
+import cptcopro.Traitement.Lots_Copro as tlc  # noqa: E402
+import cptcopro.utils.streamlit_launcher as usl  # noqa: E402
+from cptcopro.utils.paths import get_log_path  # noqa: E402
 
 # Configurer les logs avec le bon chemin
 LOG_PATH = str(get_log_path("app.log"))

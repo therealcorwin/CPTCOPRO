@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.analytics import compute_aging_balance, load_charges_dataset
 from cptcopro.utils.db_helpers import fetch_dataframe
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
@@ -15,20 +16,12 @@ from cptcopro.utils.privacy import (
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 
-@st.cache_data(ttl=300, show_spinner=False)
 def load_charges() -> pd.DataFrame:
-    with get_db_cursor() as cur:
-        cur.execute(
-            "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, "
-            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires"
-        )
-        df = fetch_dataframe(cur)
+    df = load_charges_dataset()
     if df.empty:
         df["mois"] = pd.Series(dtype=int)
         df["annee"] = pd.Series(dtype=int)
         return df
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df = df.dropna(subset=["date"])
     df["mois"] = df["date"].dt.month
     df["annee"] = df["date"].dt.year
     return df
@@ -121,62 +114,18 @@ with tab_aging:
         "Ventilation de l'ancienneté des soldes débiteurs ininterrompus par tranches d'âge standard (<30j, 30-60j, 60-90j, >90j)."
     )
 
-    aging_records = []
-    for code, group in charges_df.groupby("code"):
-        group_sorted = group.sort_values("date", ascending=True)
-        derniere_ligne = group_sorted.iloc[-1]
-        debit_actuel = float(derniere_ligne["debit"])
-
-        if debit_actuel > 0:
-            reversed_rows = group_sorted.iloc[::-1]
-            date_debut_dette = derniere_ligne["date"]
-            for _, r in reversed_rows.iterrows():
-                if float(r["debit"]) > 0:
-                    date_debut_dette = r["date"]
-                else:
-                    break
-
-            jours_anciennete = max(0, (derniere_date - date_debut_dette).days)
-
-            if jours_anciennete <= 30:
-                tranche = "< 30 jours"
-                tranche_order = 1
-            elif jours_anciennete <= 60:
-                tranche = "30 - 60 jours"
-                tranche_order = 2
-            elif jours_anciennete <= 90:
-                tranche = "60 - 90 jours"
-                tranche_order = 3
-            else:
-                tranche = "> 90 jours"
-                tranche_order = 4
-
-            aging_records.append(
-                {
-                    "code": code,
-                    "proprietaire": derniere_ligne["proprietaire"],
-                    "num_apt": derniere_ligne.get("num_apt", "N/A"),
-                    "type_apt": derniere_ligne.get("type_apt", "N/A"),
-                    "debit": debit_actuel,
-                    "date_debut_dette": date_debut_dette,
-                    "jours_anciennete": jours_anciennete,
-                    "tranche": tranche,
-                    "tranche_order": tranche_order,
-                }
-            )
-
-    if not aging_records:
+    df_aging = compute_aging_balance(charges_df, derniere_date)
+    if df_aging.empty:
         st.success("🎉 Aucun compte débiteur au dernier relevé ! Toutes les charges sont apurées.")
     else:
-        df_aging = pd.DataFrame(aging_records)
 
         total_creances = df_aging["debit"].sum()
         nb_debiteurs = len(df_aging)
 
-        tranche_30 = df_aging[df_aging["tranche"] == "< 30 jours"]
-        tranche_60 = df_aging[df_aging["tranche"] == "30 - 60 jours"]
-        tranche_90 = df_aging[df_aging["tranche"] == "60 - 90 jours"]
-        tranche_plus90 = df_aging[df_aging["tranche"] == "> 90 jours"]
+        tranche_30 = df_aging[df_aging["tranche"] == "< 30 j"]
+        tranche_60 = df_aging[df_aging["tranche"] == "30-60 j"]
+        tranche_90 = df_aging[df_aging["tranche"] == "60-90 j"]
+        tranche_plus90 = df_aging[df_aging["tranche"] == "> 90 j"]
 
         col_k1, col_k2, col_k3, col_k4, col_k5 = st.columns(5, gap="small")
         with col_k1:
@@ -188,28 +137,28 @@ with tab_aging:
             )
         with col_k2:
             st.metric(
-                "< 30 jours (Courant)",
+                "< 30 j (Courant)",
                 f"{tranche_30['debit'].sum():,.2f} €".replace(",", " "),
                 delta=f"{len(tranche_30)} compte(s)",
                 delta_color="off",
             )
         with col_k3:
             st.metric(
-                "30 - 60 jours (Rappel)",
+                "30-60 j (Rappel)",
                 f"{tranche_60['debit'].sum():,.2f} €".replace(",", " "),
                 delta=f"{len(tranche_60)} compte(s)",
                 delta_color="inverse",
             )
         with col_k4:
             st.metric(
-                "60 - 90 jours (Alerte)",
+                "60-90 j (Alerte)",
                 f"{tranche_90['debit'].sum():,.2f} €".replace(",", " "),
                 delta=f"{len(tranche_90)} compte(s)",
                 delta_color="inverse",
             )
         with col_k5:
             st.metric(
-                "> 90 jours (Critique)",
+                "> 90 j (Critique)",
                 f"{tranche_plus90['debit'].sum():,.2f} €".replace(",", " "),
                 delta=f"{len(tranche_plus90)} compte(s)",
                 delta_color="inverse",
@@ -219,10 +168,10 @@ with tab_aging:
 
         col_g_age1, col_g_age2 = st.columns([1.5, 1], gap="large")
         colors_map = {
-            "< 30 jours": "#10B981",
-            "30 - 60 jours": "#F59E0B",
-            "60 - 90 jours": "#F97316",
-            "> 90 jours": "#EF4444",
+            "< 30 j": "#10B981",
+            "30-60 j": "#F59E0B",
+            "60-90 j": "#F97316",
+            "> 90 j": "#EF4444",
         }
 
         with col_g_age1:
@@ -265,7 +214,7 @@ with tab_aging:
         with col_filtre_age:
             filtre_tranche = st.selectbox(
                 "Filtrer le tableau par classe d'âge :",
-                options=["Toutes", "< 30 jours", "30 - 60 jours", "60 - 90 jours", "> 90 jours"],
+                options=["Toutes", "< 30 j", "30-60 j", "60-90 j", "> 90 j"],
                 index=0,
                 key="aging_tranche_filter",
             )
@@ -643,22 +592,24 @@ with tab_prevision:
         st.warning("⚠️ Pas assez de données historiques pour établir une prévision (minimum 3 relevés).")
     else:
         # Paramètre de prévision
-        col_p1, col_p2, _ = st.columns([1, 1, 2])
+        col_p1, col_p2, _ = st.columns([1.2, 1.6, 1.2], gap="medium")
         with col_p1:
-            horizon_mois = st.selectbox(
+            horizon_raw = st.pills(
                 "Horizon de prévision",
                 options=[3, 6, 12],
-                index=1,
-                key="prevision_horizon",
+                default=6,
+                key="prevision_horizon_pills",
                 format_func=lambda x: f"{x} mois",
             )
+            horizon_mois = int(horizon_raw) if horizon_raw else 6
         with col_p2:
-            methode = st.radio(
-                "Méthode",
+            methode_raw = st.segmented_control(
+                "Méthode de projection",
                 options=["Tendance linéaire", "Moyenne mobile"],
-                horizontal=True,
-                key="prevision_methode",
+                default="Tendance linéaire",
+                key="prevision_methode_seg",
             )
+            methode = str(methode_raw or "Tendance linéaire")
 
         # Conversion dates en numérique (jours depuis premier relevé)
         date_origine = debit_global["date"].min()

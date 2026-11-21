@@ -59,21 +59,24 @@ def verifier_statut_token_hotmail(
     if not cache_path.exists():
         return False, "Aucun token trouvé en cache (autorisation requise)."
 
-    cache = _load_cache(cache_path)
-    app = msal.PublicClientApplication(
-        client_id,
-        authority=authority,
-        token_cache=cache,
-    )
-    accounts = app.get_accounts()
-    if not accounts:
-        return False, "Aucun compte associé dans le cache (réinitialisation nécessaire)."
+    try:
+        cache = _load_cache(cache_path)
+        app = msal.PublicClientApplication(
+            client_id,
+            authority=authority,
+            token_cache=cache,
+        )
+        accounts = app.get_accounts()
+        if not accounts:
+            return False, "Aucun compte associé dans le cache (réinitialisation nécessaire)."
 
-    result = app.acquire_token_silent(scopes, account=accounts[0])
-    if isinstance(result, dict) and result.get("access_token"):
-        username = accounts[0].get("username") or "compte inconnu"
-        return True, f"Token valide pour {username}"
-    return False, "Token expiré ou impossible à renouveler silencieusement."
+        result = app.acquire_token_silent(scopes, account=accounts[0])
+        if isinstance(result, dict) and result.get("access_token"):
+            username = accounts[0].get("username") or "compte inconnu"
+            return True, f"Token valide pour {username}"
+        return False, "Token expiré ou impossible à renouveler silencieusement."
+    except Exception as exc:
+        return False, f"Vérification hors-ligne ou erreur token : {exc}"
 
 
 def demarrer_device_flow_microsoft(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import imaplib
 import json
 import os
@@ -336,14 +337,67 @@ def generate_relance_draft_with_llm(
     return (subject, body, provider, model)
 
 
+def format_email_html(subject: str, body: str) -> str:
+    """Convertit un message de relance texte en version HTML responsive et accessible."""
+    escaped_subject = html.escape(subject)
+    paragraphs = [p.strip() for p in body.split("\n\n") if p.strip()]
+    formatted_paragraphs: list[str] = []
+    for p in paragraphs:
+        lines = [html.escape(line) for line in p.split("\n")]
+        formatted_paragraphs.append(
+            f'<p style="margin: 0 0 14px 0; line-height: 1.6; color: #1E293B; font-size: 15px;">{"<br>".join(lines)}</p>'
+        )
+
+    content_html = "\n".join(formatted_paragraphs)
+
+    return f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{escaped_subject}</title>
+</head>
+<body style="margin: 0; padding: 24px 12px; background-color: #F8FAFC; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="100%" style="max-width: 600px; background-color: #FFFFFF; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); overflow: hidden;" border="0" cellspacing="0" cellpadding="0">
+                    <tr>
+                        <td style="background-color: #0284C7; padding: 18px 24px; color: #FFFFFF;">
+                            <h2 style="margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em;">{escaped_subject}</h2>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 24px;">
+                            {content_html}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="background-color: #F1F5F9; padding: 14px 24px; border-top: 1px solid #E2E8F0; font-size: 12px; color: #64748B; text-align: center;">
+                            Ce message vous est adressé par le conseil syndical / syndic de copropriété.
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
 def build_email_message(
     sender_email: str,
     sender_name: str,
     to_email: str,
     subject: str,
     body: str,
+    html_body: str | None = None,
 ) -> EmailMessage:
-    """Construit un email RFC822 pret a etre stocke en brouillon."""
+    """Construit un email RFC822/MIME prêt à être stocké en brouillon ou envoyé.
+
+    Génère un message multipart/alternative contenant la version texte brut
+    et une alternative HTML responsive accessible.
+    """
     msg = EmailMessage()
     from_header = sender_email.strip()
     if sender_name.strip():
@@ -352,6 +406,13 @@ def build_email_message(
     msg["To"] = to_email.strip()
     msg["Subject"] = subject
     msg.set_content(body)
+
+    # Alternative HTML moderne
+    if html_body is None:
+        html_body = format_email_html(subject, body)
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
+
     return msg
 
 

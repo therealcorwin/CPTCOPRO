@@ -6,11 +6,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from cptcopro.Database import (
-    DEFAULT_THRESHOLD_FALLBACK,
-    get_config_alertes,
-    update_config_alerte,
-)
+from cptcopro.Database import get_config_alertes
 from cptcopro.Database.connection import get_db_cursor
 from cptcopro.utils.db_helpers import normalize_date_columns
 from cptcopro.utils.privacy import (
@@ -158,7 +154,7 @@ tab_actives, tab_repartition, tab_evolution, tab_config = st.tabs(
         "🚨 Alertes Actives & Actions",
         "📊 Répartition & Récidives",
         "📈 Évolution Temporelle",
-        "⚙️ Configuration des Seuils",
+        "⚙️ Consultation des Seuils",
     ]
 )
 
@@ -170,13 +166,13 @@ with tab_actives:
     raw_date_precedent = suivi_alerte["date_releve"].iat[1] if len(suivi_alerte) >= 2 else None
 
     date_releve_str = (
-        raw_date_releve.strftime("%d/%m/%Y")
-        if hasattr(raw_date_releve, "strftime")
+        str(raw_date_releve.strftime("%d/%m/%Y"))
+        if raw_date_releve is not None and hasattr(raw_date_releve, "strftime")
         else (str(raw_date_releve) if raw_date_releve is not None else "N/A")
     )
     date_precedent_str = (
-        raw_date_precedent.strftime("%d/%m/%Y")
-        if hasattr(raw_date_precedent, "strftime")
+        str(raw_date_precedent.strftime("%d/%m/%Y"))
+        if raw_date_precedent is not None and hasattr(raw_date_precedent, "strftime")
         else (str(raw_date_precedent) if raw_date_precedent is not None else None)
     )
 
@@ -278,10 +274,13 @@ with tab_actives:
         )
         alertes_affiche = appliquer_confidentialite(alertes_work)
 
-        st.dataframe(
+        alertes_event = st.dataframe(
             alertes_affiche,
             width="stretch",
             hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="alertes_table_selection",
             column_config={
                 "Proprietaire": st.column_config.TextColumn("Copropriétaire", width="large"),
                 "Code": st.column_config.TextColumn("Code", width="small"),
@@ -302,6 +301,30 @@ with tab_actives:
                 ),
             },
         )
+
+        selected_rows = (
+            alertes_event.get("selection", {}).get("rows", [])
+            if isinstance(alertes_event, dict)
+            else getattr(getattr(alertes_event, "selection", None), "rows", [])
+        )
+        if selected_rows and len(selected_rows) > 0:
+            sel_idx = int(selected_rows[0])
+            if sel_idx < len(alertes_work):
+                sel_copro = alertes_work.iloc[sel_idx]
+                sel_nom = str(sel_copro["Proprietaire"])
+                sel_code = str(sel_copro["Code"])
+                sel_deb = float(sel_copro["Debit"])
+                col_sel_info, col_sel_relance, col_sel_fiche = st.columns([2, 1.2, 1.2], gap="small")
+                with col_sel_info:
+                    st.info(f"👉 Sélectionné : **{sel_nom}** (Code : `{sel_code}` — **{sel_deb:,.2f} €**)")
+                with col_sel_relance:
+                    if st.button("✉️ Préparer une relance", type="primary", key="alert_btn_relance", width="stretch"):
+                        st.session_state["target_relance_copro"] = sel_code
+                        st.switch_page("Pages/Relance.py")
+                with col_sel_fiche:
+                    if st.button("👤 Voir la fiche 360°", key="alert_btn_fiche", width="stretch"):
+                        st.session_state["target_fiche_copro"] = sel_code
+                        st.switch_page("Pages/Rechercher_Copro.py")
 
 
 # ============================================================================
@@ -441,7 +464,7 @@ with tab_evolution:
 
 
 # ============================================================================
-# ONGLET 4: CONFIGURATION DES SEUILS (Ex-Config_Alertes)
+# ONGLET 4: CONSULTATION DES SEUILS (LECTURE & ACCÈS CONFIGURATION)
 # ============================================================================
 with tab_config:
     if config_df.empty:
@@ -476,7 +499,7 @@ with tab_config:
             )
 
             if not default_row.empty:
-                seuil_def = default_row["Seuil Alerte (€)"].values[0]
+                seuil_def = float(default_row["Seuil Alerte (€)"].values[0])
                 st.info(f"🔄 **Seuil par défaut** (pour lots non classés) : **{seuil_def:.2f} €**")
 
         with col_t2:
@@ -492,95 +515,10 @@ with tab_config:
 
         st.divider()
 
-        st.subheader("✏️ Modifier les seuils d'une typologie")
-
-        types_disponibles = display_df["Type Apt"].tolist()
-        if "default" not in types_disponibles:
-            types_disponibles.append("default")
-
-        col_sel_type, _ = st.columns([1.5, 2])
-        with col_sel_type:
-            type_selectionne = st.selectbox(
-                "Sélectionnez la typologie de lot à ajuster :",
-                options=types_disponibles,
-                format_func=lambda x: (
-                    f"Type {x.upper()}" if x != "default" else "Valeur par défaut (Générique)"
-                ),
-                key="config_alertes_type_selectionne",
+        col_link, _ = st.columns([1.8, 2])
+        with col_link:
+            st.page_link(
+                "Pages/Relance_Config.py",
+                label="⚙️ Modifier les seuils d'alerte dans la Configuration Globale",
+                icon=":material/settings:",
             )
-
-        if type_selectionne == "default":
-            current_row = default_row
-        else:
-            current_row = display_df[display_df["Type Apt"] == type_selectionne]
-
-        if not current_row.empty:
-            current_charge = float(current_row["Charge Moyenne (€)"].values[0])
-            current_taux = float(current_row["Taux"].values[0])
-            current_threshold = float(current_row["Seuil Alerte (€)"].values[0])
-        else:
-            current_charge = DEFAULT_THRESHOLD_FALLBACK
-            current_taux = 1.33
-            current_threshold = DEFAULT_THRESHOLD_FALLBACK
-
-        with st.form("form_modifier_seuil_integre"):
-            col_a, col_b, col_c = st.columns(3, gap="medium")
-
-            with col_a:
-                new_charge = st.number_input(
-                    "Charge Moyenne (€)",
-                    min_value=0.0,
-                    max_value=10000.0,
-                    value=current_charge,
-                    step=50.0,
-                    help="Montant trimestriel moyen typique pour ce type de logement.",
-                    key="config_alertes_charge_moyenne",
-                )
-
-            with col_b:
-                new_taux = st.number_input(
-                    "Coefficient multiplicateur",
-                    min_value=1.0,
-                    max_value=3.0,
-                    value=current_taux,
-                    step=0.05,
-                    help="Multiplicateur d'alerte (ex: 1.33 = +33%).",
-                    key="config_alertes_taux",
-                )
-
-            with col_c:
-                calculated_threshold = new_charge * new_taux
-                new_threshold = st.number_input(
-                    "Seuil d'Alerte résultant (€)",
-                    min_value=0.0,
-                    max_value=20000.0,
-                    value=calculated_threshold,
-                    step=50.0,
-                    help="Seuil absolu au-delà duquel l'alerte est active.",
-                    key="config_alertes_threshold",
-                )
-
-            st.caption(
-                f"📐 **Simulation** : {new_charge:,.2f} € × {new_taux:.2f} = **{calculated_threshold:,.2f} €**"
-            )
-
-            col_sub, _ = st.columns([1.5, 3])
-            with col_sub:
-                submitted = st.form_submit_button(
-                    "💾 Enregistrer la modification", type="primary", width="stretch"
-                )
-
-            if submitted:
-                success = update_config_alerte(
-                    type_selectionne,
-                    charge_moyenne=new_charge,
-                    taux=new_taux,
-                    threshold=new_threshold,
-                )
-
-                if success:
-                    load_config.clear()
-                    st.toast(f"Seuil mis à jour pour {type_selectionne.upper()} !", icon="💾")
-                    st.rerun()
-                else:
-                    st.error("❌ Erreur lors de la sauvegarde.")

@@ -169,3 +169,48 @@ def test_rechercher_copro_search_box_no_duplicate_default_value():
                 found = True
                 assert "value" not in keywords, "fiche_search_box ne doit pas avoir d'argument 'value'"
     assert found, "Le widget fiche_search_box doit exister"
+
+
+def test_compute_aging_balance_unique_columns():
+    """Garantit que compute_aging_balance retourne un DataFrame avec des colonnes uniques
+    pour éviter tout crash pyarrow (ValueError: Duplicate column names found).
+    """
+    import pandas as pd
+
+    from cptcopro.utils.analytics import compute_aging_balance
+
+    # Test avec un DataFrame avec des colonnes françaises ou standard
+    sample_df = pd.DataFrame({
+        "Compte": ["450001", "450002"],
+        "Nom": ["DUPONT", "MARTIN"],
+        "Débit": [1500.0, 300.0],
+        "Crédit": [0.0, 0.0],
+        "Date": [pd.Timestamp("2026-01-01"), pd.Timestamp("2026-02-01")],
+    })
+
+    aging = compute_aging_balance(sample_df)
+    assert aging.columns.is_unique, f"Les colonnes doivent être uniques, trouvé {list(aging.columns)}"
+
+    # Vérification que le dictionnaire explicite garantit l'unicité
+    top5 = aging.head(5).copy()
+    top5_display = pd.DataFrame({
+        "Copropriétaire": top5["nom"],
+        "Lot": top5["num_apt"],
+        "Type": top5["type_apt"],
+        "Débit": top5["debit"],
+        "Ancienneté": top5["jours_anciennete"],
+        "Tranche": top5["tranche"],
+    })
+    assert top5_display.columns.is_unique
+    assert list(top5_display.columns) == ["Copropriétaire", "Lot", "Type", "Débit", "Ancienneté", "Tranche"]
+
+
+def test_relance_config_load_config_alertes_converts_to_dataframe():
+    """Vérifie dans Relance_Config.py que _load_config_alertes convertit bien la liste en DataFrame."""
+    page_file = get_project_root_dir() / "src" / "cptcopro" / "Pages" / "Relance_Config.py"
+    code = page_file.read_text(encoding="utf-8")
+    assert "def _load_config_alertes() -> pd.DataFrame:" in code
+    assert "df = pd.DataFrame(config)" in code
+    assert '"Type Apt"' in code
+    assert '"Seuil Alerte (€)"' in code
+

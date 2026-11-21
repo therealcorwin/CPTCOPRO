@@ -18,68 +18,10 @@ import streamlit as st
 
 from cptcopro.Database import get_relance_config, get_relance_drafts, list_relances_due
 from cptcopro.Database.connection import get_db_cursor
-from cptcopro.utils.db_helpers import normalize_date_columns
+from cptcopro.utils.analytics import compute_aging_balance, load_charges_dataset
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
-
-# ── Chargements de données ─────────────────────────────────────────────────
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def _load_debit_global() -> pd.DataFrame:
-    """Débit global agrégé par date (historique)."""
-    try:
-        with get_db_cursor() as cur:
-            cur.execute(
-                "SELECT sum(debit) AS 'debit global', date "
-                "FROM vw_charge_coproprietaires GROUP BY date"
-            )
-            df = pd.DataFrame(cur.fetchall())
-        df = normalize_date_columns(df, ["date"])
-        if "debit global" in df.columns:
-            df["debit global"] = pd.to_numeric(df["debit global"], errors="coerce").fillna(0)
-        return df.dropna(subset=["date"]).sort_values("date")
-    except Exception as e:
-        st.error(f"Erreur chargement débit global : {e}")
-        return pd.DataFrame()
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def _load_snapshot_derniere_date() -> pd.DataFrame:
-    """Snapshot complet du dernier relevé : débit, crédit, nom, lot, type par copropriétaire."""
-    try:
-        with get_db_cursor() as cur:
-            cur.execute(
-                "SELECT nom_proprietaire, code_proprietaire, num_apt, type_apt, debit, credit, date "
-                "FROM vw_charge_coproprietaires "
-                "WHERE date = (SELECT MAX(date) FROM vw_charge_coproprietaires)"
-            )
-            df = pd.DataFrame(cur.fetchall())
-        if df.empty:
-            return df
-        df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0)
-        df["credit"] = pd.to_numeric(df["credit"], errors="coerce").fillna(0)
-        return df
-    except Exception as e:
-        st.error(f"Erreur chargement snapshot : {e}")
-        return pd.DataFrame()
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def _load_historique_charges() -> pd.DataFrame:
-    """Historique complet de tous les relevés (pour calcul ancienneté)."""
-    try:
-        with get_db_cursor() as cur:
-            cur.execute(
-                "SELECT code_proprietaire, debit, date "
-                "FROM vw_charge_coproprietaires ORDER BY date ASC"
-            )
-            df = pd.DataFrame(cur.fetchall())
-        df = normalize_date_columns(df, ["date"])
-        df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0)
-        return df.dropna(subset=["date"])
-    except Exception as e:
-        return pd.DataFrame()
+# ── Chargements de données complémentaires ───────────────────────────────────
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -94,7 +36,7 @@ def _load_alertes_count() -> tuple[int, int]:
         actuel = int(rows[0]["nombre_alertes"]) if rows else 0
         precedent = int(rows[1]["nombre_alertes"]) if len(rows) >= 2 else actuel
         return actuel, precedent
-    except Exception as e:
+    except Exception:
         return 0, 0
 
 
@@ -124,73 +66,30 @@ def _load_brouillons_en_attente() -> int:
         return 0
 
 
-# ── Calculs de la balance âgée (ancienneté ininterrompue) ─────────────────
-
-
-def _compute_aging(snapshot_df: pd.DataFrame, hist_df: pd.DataFrame) -> pd.DataFrame:
-    """Calcule la tranche d'âge de la dette pour chaque débiteur du dernier relevé."""
-    if snapshot_df.empty or hist_df.empty:
-        return pd.DataFrame()
-
-    derniere_date = snapshot_df["date"].max() if "date" in snapshot_df.columns else pd.NaT
-    debiteurs = snapshot_df[snapshot_df["debit"] > 0].copy()
-    if debiteurs.empty:
-        return pd.DataFrame()
-
-    records = []
-    for _, row in debiteurs.iterrows():
-        code = row["code_proprietaire"]
-        copro_hist = hist_df[hist_df["code_proprietaire"] == code].sort_values("date")
-        if copro_hist.empty:
-            continue
-        date_debut = row.get("date", derniere_date) if pd.notna(row.get("date")) else derniere_date
-        for _, h in copro_hist.iloc[::-1].iterrows():
-            if float(h["debit"]) > 0:
-                date_debut = h["date"]
-            else:
-                break
-        jours = max(0, (derniere_date - date_debut).days) if pd.notna(derniere_date) and pd.notna(date_debut) else 0
-        if jours <= 30:
-            tranche = "< 30 j"
-            order = 1
-            color = "#22c55e"
-        elif jours <= 60:
-            tranche = "30-60 j"
-            order = 2
-            color = "#f59e0b"
-        elif jours <= 90:
-            tranche = "60-90 j"
-            order = 3
-            color = "#f97316"
-        else:
-            tranche = "> 90 j"
-            order = 4
-            color = "#ef4444"
-        records.append({
-            "code": code,
-            "nom": row["nom_proprietaire"],
-            "num_apt": row.get("num_apt", "—"),
-            "type_apt": row.get("type_apt", "—"),
-            "debit": float(row["debit"]),
-            "jours": jours,
-            "tranche": tranche,
-            "order": order,
-            "color": color,
-        })
-    return pd.DataFrame(records).sort_values("debit", ascending=False)
-
-
-# ── Chargement ────────────────────────────────────────────────────────────
+# ── Chargement principal ───────────────────────────────────────────────────
 
 loguru.logger.info("Dashboard: chargement données")
 
-debit_global_df = _load_debit_global()
-snapshot_df = _load_snapshot_derniere_date()
-hist_df = _load_historique_charges()
+charges_all = load_charges_dataset()
+if not charges_all.empty:
+    debit_global_df = (
+        charges_all.groupby("date")["debit"]
+        .sum()
+        .reset_index()
+        .rename(columns={"debit": "debit global"})
+        .sort_values("date")
+    )
+    derniere_date = charges_all["date"].max()
+    snapshot_df = charges_all[charges_all["date"] == derniere_date].copy()
+    aging_df = compute_aging_balance(charges_all)
+else:
+    debit_global_df = pd.DataFrame()
+    snapshot_df = pd.DataFrame()
+    aging_df = pd.DataFrame()
+
 nbre_alerte, nbre_alerte_precedent = _load_alertes_count()
 nb_relances_dues = _load_relances_due_count()
 nb_brouillons_attente = _load_brouillons_en_attente()
-aging_df = _compute_aging(snapshot_df, hist_df)
 
 # ── Header ────────────────────────────────────────────────────────────────
 
@@ -269,7 +168,7 @@ with k4:
         help="Copropriétaires dont le débit dépasse le seuil configuré.",
     )
 
-st.write("")
+st.space("small")
 
 # ── Ligne 2 : 4 KPIs secondaires ─────────────────────────────────────────
 
@@ -387,27 +286,59 @@ if aging_df.empty:
     st.info("Aucun compte débiteur au dernier relevé.")
 else:
     top5 = aging_df.head(5).copy()
-    top5["Ancienneté"] = top5["jours"].apply(
+    anc_series = top5["jours"].apply(
         lambda j: f"{'🟢' if j <= 30 else '🟡' if j <= 60 else '🟠' if j <= 90 else '🔴'} {j} j"
     )
-    top5["Débit"] = top5["debit"].apply(lambda v: f"{v:,.2f} €".replace(",", " "))
-    top5_display = top5.rename(columns={
-        "nom": "Copropriétaire",
-        "num_apt": "Lot",
-        "type_apt": "Type",
-        "tranche": "Tranche",
-    })[["Copropriétaire", "Lot", "Type", "Débit", "Ancienneté", "Tranche"]]
+    debit_series = top5["debit"].apply(lambda v: f"{v:,.2f} €".replace(",", " "))
+    nom_series = top5["nom"] if "nom" in top5.columns else top5.get("proprietaire", "")
+    num_apt_series = top5["num_apt"] if "num_apt" in top5.columns else "—"
+    type_apt_series = top5["type_apt"] if "type_apt" in top5.columns else "—"
 
-    st.dataframe(
+    top5_display = pd.DataFrame({
+        "Copropriétaire": nom_series,
+        "Lot": num_apt_series,
+        "Type": type_apt_series,
+        "Débit": debit_series,
+        "Ancienneté": anc_series,
+        "Tranche": top5["tranche"],
+    })
+
+    top5_event = st.dataframe(
         top5_display,
         width="stretch",
         hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="dashboard_top5_selection",
         column_config={
             "Débit": st.column_config.TextColumn("Débit actuel"),
             "Ancienneté": st.column_config.TextColumn("Ancienneté dette"),
             "Tranche": st.column_config.TextColumn("Balance âgée"),
         },
     )
+
+    selected_rows = (
+        top5_event.get("selection", {}).get("rows", [])
+        if isinstance(top5_event, dict)
+        else getattr(getattr(top5_event, "selection", None), "rows", [])
+    )
+    if selected_rows and len(selected_rows) > 0:
+        sel_idx = int(selected_rows[0])
+        if sel_idx < len(top5):
+            sel_copro = top5.iloc[sel_idx]
+            sel_nom = str(sel_copro["nom"])
+            sel_code = str(sel_copro["code"])
+            col_sel_info, col_sel_fiche, col_sel_relance = st.columns([2, 1.2, 1.2], gap="small")
+            with col_sel_info:
+                st.info(f"👉 Sélectionné : **{sel_nom}** (Code : `{sel_code}` — {sel_copro['Débit']})")
+            with col_sel_fiche:
+                if st.button("👤 Voir la fiche 360°", key="top5_btn_fiche", width="stretch"):
+                    st.session_state["target_fiche_copro"] = sel_code
+                    st.switch_page("Pages/Rechercher_Copro.py")
+            with col_sel_relance:
+                if st.button("✉️ Préparer une relance", type="primary", key="top5_btn_relance", width="stretch"):
+                    st.session_state["target_relance_copro"] = sel_code
+                    st.switch_page("Pages/Relance.py")
 
     if nb_relances_dues > 0:
         col_btn, _ = st.columns([1.5, 4])

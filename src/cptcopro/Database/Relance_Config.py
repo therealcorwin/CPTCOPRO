@@ -371,6 +371,23 @@ def list_relances_due(
         return list(cur.fetchall())
 
 
+def _strip_legacy_db_arg(args: tuple[Any, ...]) -> list[Any]:
+    """Écarte le premier argument s'il s'agit d'un db_path SQLite obsolète."""
+    pos = list(args)
+    if pos:
+        if (
+            pos[0] is None
+            or isinstance(pos[0], Path)
+            or (isinstance(pos[0], str) and any(ext in pos[0] for ext in ("/", "\\", ".sqlite", ".db")))
+        ):
+            return pos[1:]
+        if len(pos) >= 9 and isinstance(pos[4], (int, float)):
+            return pos[1:]
+        if len(pos) > 1 and not isinstance(pos[0], int) and isinstance(pos[1], int):
+            return pos[1:]
+    return pos
+
+
 def save_relance_draft(
     *args: Any,
     code_proprietaire: str | None = None,
@@ -388,21 +405,8 @@ def save_relance_draft(
     db_path: str | None = None,
 ) -> int:
     """Enregistre ou met a jour un brouillon de relance en base et retourne son identifiant."""
-    # Polymorphisme : detection du 1er argument db_path
-    pos = list(args)
+    pos = _strip_legacy_db_arg(args)
     if pos:
-        if (
-            pos[0] is None
-            or isinstance(pos[0], Path)
-            or (
-                isinstance(pos[0], str)
-                and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
-            )
-        ):
-            pos = pos[1:]
-        elif len(pos) >= 9 and isinstance(pos[4], (int, float)):
-            pos = pos[1:]
-
         if len(pos) >= 1 and code_proprietaire is None:
             code_proprietaire = pos[0]
         if len(pos) >= 2 and nom_proprietaire is None:
@@ -506,21 +510,11 @@ def get_relance_drafts(
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Liste les brouillons de relance, les plus recents d'abord."""
-    pos = list(args)
-    if pos:
-        if (
-            pos[0] is None
-            or isinstance(pos[0], Path)
-            or (
-                isinstance(pos[0], str)
-                and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
-            )
-        ):
-            pos = pos[1:]
-        if pos and status is None and isinstance(pos[0], (str, type(None))):
-            status = pos[0]
-            if len(pos) > 1 and isinstance(pos[1], int):
-                limit = pos[1]
+    pos = _strip_legacy_db_arg(args)
+    if pos and status is None and isinstance(pos[0], (str, type(None))):
+        status = pos[0]
+        if len(pos) > 1 and isinstance(pos[1], int):
+            limit = pos[1]
 
     with get_db_cursor() as cur:
         query = """
@@ -574,27 +568,15 @@ def mark_relance_draft_status(
     db_path: str | None = None,
 ) -> bool:
     """Met a jour le statut d'un brouillon."""
-    pos = list(args)
-    if pos:
-        if (
-            pos[0] is None
-            or isinstance(pos[0], Path)
-            or (
-                isinstance(pos[0], str)
-                and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
-            )
-        ):
-            pos = pos[1:]
-        elif len(pos) > 1 and not isinstance(pos[0], int) and isinstance(pos[1], int):
-            pos = pos[1:]
-        if pos and draft_id is None:
-            draft_id = int(pos[0])
-            if len(pos) > 1 and status is None:
-                status = str(pos[1])
-            if len(pos) > 2 and error_message is None:
-                error_message = pos[2]
-            if len(pos) > 3 and remote_draft_id is None:
-                remote_draft_id = pos[3]
+    pos = _strip_legacy_db_arg(args)
+    if pos and draft_id is None:
+        draft_id = int(pos[0])
+        if len(pos) > 1 and status is None:
+            status = str(pos[1])
+        if len(pos) > 2 and error_message is None:
+            error_message = pos[2]
+        if len(pos) > 3 and remote_draft_id is None:
+            remote_draft_id = pos[3]
 
     stat = (status or "").strip().lower()
     if not stat:

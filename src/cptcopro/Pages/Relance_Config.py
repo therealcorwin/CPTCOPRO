@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 from typing import Any, cast
 
+import pandas as pd
 import streamlit as st
 
 from cptcopro.Database import (
     DEFAULT_RELANCE_CONFIG,
+    DEFAULT_THRESHOLD_FALLBACK,
     GENERATION_MODES,
     create_relance_snippet,
     create_relance_template,
@@ -17,13 +19,16 @@ from cptcopro.Database import (
     delete_relance_template,
     delete_relance_variable,
     get_all_template_placeholders,
+    get_config_alertes,
     get_relance_config,
+    init_config_alerte_if_missing,
     init_relance_config_if_missing,
     init_relance_snippets_if_missing,
     list_relance_snippets,
     list_relance_templates,
     list_relance_variables,
     reset_default_relance_snippets,
+    update_config_alerte,
     update_relance_config,
     update_relance_snippet,
     update_relance_template,
@@ -96,6 +101,78 @@ def _insert_snippet_into_body(snippet: str) -> None:
     st.rerun()
 
 
+@st.dialog("⚠️ Confirmer la suppression du modèle")
+def _dialog_confirmer_suppression_modele(template_id: int | str, template_name: str) -> None:
+    st.write(f"Êtes-vous sûr de vouloir supprimer définitivement le modèle **'{template_name}'** ?")
+    st.caption("Cette action est irréversible.")
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        if st.button("🗑️ Confirmer", type="primary", key="confirm_del_tpl_btn", width="stretch"):
+            delete_relance_template(int(template_id))
+            _load_templates.clear()
+            st.session_state.last_template_edit_id = None
+            st.toast("Modèle supprimé.", icon="🗑️")
+            st.rerun()
+    with col_c2:
+        if st.button("Annuler", key="cancel_del_tpl_btn", width="stretch"):
+            st.rerun()
+
+
+@st.dialog("⚠️ Confirmer la suppression du paragraphe type")
+def _dialog_confirmer_suppression_snippet(snippet_id: int, snippet_title: str) -> None:
+    st.write(f"Êtes-vous sûr de vouloir supprimer le paragraphe type **'{snippet_title}'** ?")
+    st.caption("Cette action est irréversible.")
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        if st.button("🗑️ Confirmer", type="primary", key="confirm_del_snip_btn", width="stretch"):
+            delete_relance_snippet(snippet_id)
+            if st.session_state.get("relance_editing_snip_id") == snippet_id:
+                st.session_state.relance_editing_snip_id = None
+            _load_snippets.clear()
+            st.toast(f"Paragraphe type '{snippet_title}' supprimé !", icon="🗑️")
+            st.rerun()
+    with col_c2:
+        if st.button("Annuler", key="cancel_del_snip_btn", width="stretch"):
+            st.rerun()
+
+
+@st.dialog("🔄 Restaurer les paragraphes types par défaut")
+def _dialog_confirmer_restauration_snippets() -> None:
+    st.write("Voulez-vous réinsérer les 4 paragraphes types standards ?")
+    st.caption("Les paragraphes existants ne seront pas écrasés.")
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        if st.button("🔄 Restaurer", type="primary", key="confirm_rst_snip_btn", width="stretch"):
+            inserted = reset_default_relance_snippets()
+            _load_snippets.clear()
+            if inserted > 0:
+                st.toast(f"{inserted} paragraphe(s) par défaut restauré(s) !", icon="🔄")
+            else:
+                st.toast("Les paragraphes par défaut sont déjà tous présents.", icon="ℹ️")
+            st.rerun()
+    with col_c2:
+        if st.button("Annuler", key="cancel_rst_snip_btn", width="stretch"):
+            st.rerun()
+
+
+@st.dialog("⚠️ Confirmer la suppression de la variable")
+def _dialog_confirmer_suppression_variable(var_id: int, var_name: str) -> None:
+    st.write(f"Êtes-vous sûr de vouloir supprimer la variable **'{{{var_name}}}'** ?")
+    st.caption("Les modèles utilisant cette balise n'auront plus de valeur de remplacement automatique.")
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        if st.button("🗑️ Confirmer", type="primary", key="confirm_del_var_btn", width="stretch"):
+            delete_relance_variable(var_id)
+            if st.session_state.get("relance_editing_var_id") == var_id:
+                st.session_state.relance_editing_var_id = None
+            _load_custom_variables.clear()
+            st.toast(f"Variable {{{var_name}}} supprimée !", icon="🗑️")
+            st.rerun()
+    with col_c2:
+        if st.button("Annuler", key="cancel_del_var_btn", width="stretch"):
+            st.rerun()
+
+
 @st.cache_data(ttl=120, show_spinner=False)
 def _load_relance_config() -> dict[str, Any]:
     init_relance_config_if_missing()
@@ -118,9 +195,27 @@ def _load_snippets() -> list[dict[str, Any]]:
     return cast(list[dict[str, Any]], list_relance_snippets())
 
 
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_config_alertes() -> pd.DataFrame:
+    init_config_alerte_if_missing()
+    config = get_config_alertes()
+    if config:
+        df = pd.DataFrame(config)
+        return df.rename(
+            columns={
+                "type_apt": "Type Apt",
+                "charge_moyenne": "Charge Moyenne (€)",
+                "taux": "Taux",
+                "threshold": "Seuil Alerte (€)",
+                "last_update": "Dernière MAJ",
+            }
+        )
+    return pd.DataFrame()
+
+
 render_header(
-    "⚙️ Configuration & Modèles de Relance",
-    "Gestion des modèles types, règles d'envoi, variables personnalisées, messagerie IMAP Hotmail et IA",
+    "⚙️ Configuration & Paramètres Globaux",
+    "Gestion centralisée des modèles de relance, règles d'envoi, intégrations Hotmail/Mistral et seuils d'alerte",
 )
 
 cfg = _load_relance_config()
@@ -131,11 +226,12 @@ snippets = _load_snippets()
 enabled = bool(int(cfg.get("enabled", 1)))
 frequency_days = int(cfg.get("frequency_days", 14) or 14)
 
-tab_modeles, tab_rules, tab_integrations = st.tabs(
+tab_modeles, tab_rules, tab_integrations, tab_seuils = st.tabs(
     [
         "📝 Modèles & Contenu",
         "📋 Règles & Fréquence",
         "🔧 Intégrations",
+        "🚨 Seuils d'Alerte & Budget",
     ]
 )
 
@@ -210,16 +306,14 @@ with tab_modeles:
     with col_name:
         st.text_input("Nom du modèle", key="tpl_edit_name")
     with col_mode:
-        st.radio(
+        st.segmented_control(
             "Mode de rédaction",
             options=list(GENERATION_MODES),
             format_func=lambda m: _MODE_LABELS.get(m, m),
             key="tpl_edit_mode",
-            horizontal=True,
         )
     with col_def:
-        st.write("")
-        st.write("")
+        st.space("small")
         st.checkbox("⭐ Modèle par défaut", key="tpl_edit_default")
 
     all_placeholders = get_all_template_placeholders()
@@ -407,11 +501,7 @@ with tab_modeles:
     with col_act_del:
         can_delete = not is_new and not selected_template.get("is_default", False)
         if st.button("🗑️ Supprimer", disabled=not can_delete, width="stretch"):
-            delete_relance_template(selected_id)
-            _load_templates.clear()
-            st.session_state.last_template_edit_id = None
-            st.toast("Modèle supprimé.", icon="🗑️")
-            st.rerun()
+            _dialog_confirmer_suppression_modele(selected_id, str(selected_template.get("name", "")))
 
     with col_act_rst:
         if st.button("🔄 Réinitialiser", width="stretch",
@@ -570,22 +660,11 @@ with tab_modeles:
                             st.session_state.relance_editing_snip_id = s["snippet_id"]
                             st.rerun()
                         if st.button("🗑️ Supprimer", key=f"del_s_{s['snippet_id']}", width="stretch"):
-                            delete_relance_snippet(int(s["snippet_id"]))
-                            if st.session_state.get("relance_editing_snip_id") == s["snippet_id"]:
-                                st.session_state.relance_editing_snip_id = None
-                            _load_snippets.clear()
-                            st.toast(f"Paragraphe type '{s['title']}' supprimé !", icon="🗑️")
-                            st.rerun()
+                            _dialog_confirmer_suppression_snippet(int(s["snippet_id"]), s["title"])
 
         st.write("")
         if st.button("🔄 Restaurer les 4 paragraphes types par défaut", help="Réinsère les blocs standards s'ils ont été supprimés"):
-            inserted = reset_default_relance_snippets()
-            _load_snippets.clear()
-            if inserted > 0:
-                st.toast(f"{inserted} paragraphe(s) par défaut restauré(s) !", icon="🔄")
-            else:
-                st.toast("Les paragraphes par défaut sont déjà tous présents.", icon="ℹ️")
-            st.rerun()
+            _dialog_confirmer_restauration_snippets()
 
     # -------------------------------------------------------------------------
     # Sous-section : Variables Personnalisées — expander discret
@@ -699,12 +778,7 @@ with tab_modeles:
                             st.rerun()
                     with col_b2:
                         if st.button("🗑️", key=f"del_v_{v['var_id']}", help="Supprimer"):
-                            delete_relance_variable(int(v["var_id"]))
-                            if st.session_state.get("relance_editing_var_id") == v["var_id"]:
-                                st.session_state.relance_editing_var_id = None
-                            _load_custom_variables.clear()
-                            st.toast(f"Variable {{{v['name']}}} supprimée !", icon="🗑️")
-                            st.rerun()
+                            _dialog_confirmer_suppression_variable(int(v["var_id"]), v["name"])
 
         st.divider()
         st.subheader("📚 Répertoire de toutes les variables disponibles")
@@ -869,11 +943,16 @@ with tab_integrations:
         col_test_imap, _ = st.columns([1.5, 2])
         with col_test_imap:
             if st.button("📡 Tester la connexion IMAP", width="stretch"):
-                with st.spinner("Test de connexion IMAP..."):
+                with st.status("Test de la connexion IMAP Hotmail/Outlook...", expanded=True) as status_box:
+                    status_box.write("Connexion au serveur IMAP et vérification OAuth2...")
                     ok, message_imap, dossiers = tester_connexion_imap(cfg)
                     if ok:
+                        status_box.update(label="Connexion IMAP réussie !", state="complete", expanded=False)
                         st.success(f"✅ {message_imap}")
+                        if dossiers:
+                            st.caption(f"📁 Dossiers détectés : {', '.join(dossiers[:5])}{'...' if len(dossiers) > 5 else ''}")
                     else:
+                        status_box.update(label="Échec de connexion IMAP", state="error", expanded=True)
                         st.error(f"❌ {message_imap}")
 
     st.divider()
@@ -956,7 +1035,8 @@ with tab_integrations:
         col_mistral, _ = st.columns([1.5, 2])
         with col_mistral:
             if st.button("🧪 Tester l'API Mistral", width="stretch"):
-                with st.spinner("Test de communication avec Mistral AI..."):
+                with st.status("Test de communication avec Mistral AI...", expanded=True) as status_box:
+                    status_box.write("Vérification de la clé API et envoi d'une requête test...")
                     key_var = str(cfg.get("llm_api_key_env") or "MISTRAL_API_KEY")
                     api_k = os.getenv(key_var)
                     model_name = str(cfg.get("llm_model") or "mistral-small-latest")
@@ -965,8 +1045,10 @@ with tab_integrations:
                         api_k, model=model_name, api_base=api_b
                     )
                     if ok_mistral:
+                        status_box.update(label="Connexion à l'API Mistral réussie !", state="complete", expanded=False)
                         st.success(f"✅ {msg_mistral}")
                     else:
+                        status_box.update(label="Échec du test Mistral", state="error", expanded=True)
                         st.error(f"❌ {msg_mistral}")
 
     st.info(
@@ -977,3 +1059,155 @@ with tab_integrations:
         "- **Gestion du Retry-After** : En cas de pic de charge, l'application réessaie après l'en-tête `Retry-After` ou une attente de 5 secondes.\n"
         "- **Secours garanti** : En cas de dépassement de quota ou de panne, CPTCOPRO bascule sur vos modèles types locaux pour ne jamais perdre de données."
     )
+
+
+# ============================================================================
+# ONGLET 4 : SEUILS D'ALERTE & BUDGET
+# ============================================================================
+with tab_seuils:
+    st.subheader("Configuration des seuils de déclenchement d'alerte")
+    st.caption(
+        "Définissez les charges trimestrielles moyennes et les coefficients déclencheurs par typologie de lot."
+    )
+
+    config_df = _load_config_alertes()
+    if config_df.empty:
+        st.warning("⚠️ Aucune configuration de seuils trouvée dans la base de données.")
+    else:
+        display_df = config_df[config_df["Type Apt"] != "default"].copy()
+        default_row = config_df[config_df["Type Apt"] == "default"]
+
+        col_t1, col_t2 = st.columns([1.8, 1], gap="large")
+
+        with col_t1:
+            st.subheader("📊 Grille des seuils paramétrés")
+            st.dataframe(
+                display_df,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Type Apt": st.column_config.TextColumn("Type Lot", width="small"),
+                    "Charge Moyenne (€)": st.column_config.NumberColumn(
+                        "Charge Moyenne (€)", format="%.2f €", width="medium"
+                    ),
+                    "Taux": st.column_config.NumberColumn(
+                        "Coefficient", format="%.2f", width="small"
+                    ),
+                    "Seuil Alerte (€)": st.column_config.NumberColumn(
+                        "Seuil d'Alerte (€)", format="%.2f €", width="medium"
+                    ),
+                    "Dernière MAJ": st.column_config.DateColumn(
+                        "Dernière MAJ", format="DD/MM/YYYY", width="medium"
+                    ),
+                },
+            )
+
+            if not default_row.empty:
+                seuil_def = float(default_row["Seuil Alerte (€)"].values[0])
+                st.info(f"🔄 **Seuil par défaut** (pour lots non classés) : **{seuil_def:.2f} €**")
+
+        with col_t2:
+            st.subheader("📐 Formule de calcul")
+            st.markdown(r"""
+            Une alerte est déclenchée pour un copropriétaire si son débit dépasse le seuil défini :
+
+            $$\text{Seuil} = \text{Charge Moyenne} \times \text{Taux}$$
+
+            - **Taux 1.33** = Alerte dès 33% au-dessus de la moyenne
+            - **Taux 1.50** = Alerte dès 50% au-dessus de la moyenne
+            """)
+
+        st.divider()
+
+        st.subheader("✏️ Modifier les seuils d'une typologie")
+
+        types_disponibles = display_df["Type Apt"].tolist()
+        if "default" not in types_disponibles:
+            types_disponibles.append("default")
+
+        col_sel_type, _ = st.columns([1.5, 2])
+        with col_sel_type:
+            type_selectionne = st.selectbox(
+                "Sélectionnez la typologie de lot à ajuster :",
+                options=types_disponibles,
+                format_func=lambda x: (
+                    f"Type {x.upper()}" if x != "default" else "Valeur par défaut (Générique)"
+                ),
+                key="config_alertes_type_selectionne",
+            )
+
+        if type_selectionne == "default":
+            current_row = default_row
+        else:
+            current_row = display_df[display_df["Type Apt"] == type_selectionne]
+
+        if not current_row.empty:
+            current_charge = float(current_row["Charge Moyenne (€)"].values[0])
+            current_taux = float(current_row["Taux"].values[0])
+            current_threshold = float(current_row["Seuil Alerte (€)"].values[0])
+        else:
+            current_charge = DEFAULT_THRESHOLD_FALLBACK
+            current_taux = 1.33
+            current_threshold = DEFAULT_THRESHOLD_FALLBACK
+
+        with st.form("form_modifier_seuil_integre"):
+            col_a, col_b, col_c = st.columns(3, gap="medium")
+
+            with col_a:
+                new_charge = st.number_input(
+                    "Charge Moyenne (€)",
+                    min_value=0.0,
+                    max_value=10000.0,
+                    value=current_charge,
+                    step=50.0,
+                    help="Montant trimestriel moyen typique pour ce type de logement.",
+                    key="config_alertes_charge_moyenne",
+                )
+
+            with col_b:
+                new_taux = st.number_input(
+                    "Coefficient multiplicateur",
+                    min_value=1.0,
+                    max_value=3.0,
+                    value=current_taux,
+                    step=0.05,
+                    help="Multiplicateur d'alerte (ex: 1.33 = +33%).",
+                    key="config_alertes_taux",
+                )
+
+            with col_c:
+                calculated_threshold = new_charge * new_taux
+                new_threshold = st.number_input(
+                    "Seuil d'Alerte résultant (€)",
+                    min_value=0.0,
+                    max_value=20000.0,
+                    value=calculated_threshold,
+                    step=50.0,
+                    help="Seuil absolu au-delà duquel l'alerte est active.",
+                    key="config_alertes_threshold",
+                )
+
+            st.caption(
+                f"📐 **Simulation** : {new_charge:,.2f} € × {new_taux:.2f} = **{calculated_threshold:,.2f} €**"
+            )
+
+            col_sub, _ = st.columns([1.5, 3])
+            with col_sub:
+                submitted = st.form_submit_button(
+                    "💾 Enregistrer la modification", type="primary", width="stretch"
+                )
+
+            if submitted:
+                success = update_config_alerte(
+                    type_selectionne,
+                    charge_moyenne=new_charge,
+                    taux=new_taux,
+                    threshold=new_threshold,
+                )
+
+                if success:
+                    _load_config_alertes.clear()
+                    st.toast(f"Seuil mis à jour pour {type_selectionne.upper()} !", icon="💾")
+                    st.rerun()
+                else:
+                    st.error("❌ Erreur lors de la sauvegarde.")

@@ -129,25 +129,27 @@ def list_relance_templates(db_path: str | None = None) -> list[dict[str, Any]]:
         return list(cur.fetchall())
 
 
+def _strip_legacy_db_arg(args: tuple[Any, ...]) -> list[Any]:
+    """Écarte le premier argument s'il s'agit d'un db_path SQLite obsolète."""
+    pos = list(args)
+    if pos and (
+        pos[0] is None
+        or isinstance(pos[0], Path)
+        or (isinstance(pos[0], str) and any(ext in pos[0] for ext in ("/", "\\", ".sqlite", ".db")))
+    ):
+        return pos[1:]
+    return pos
+
+
 def get_relance_template(
     *args: Any,
     template_id: int | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any] | None:
     """Retourne un template par id, ou le template par defaut si `template_id` est None."""
-    pos = list(args)
-    if pos:
-        if (
-            pos[0] is None
-            or isinstance(pos[0], Path)
-            or (
-                isinstance(pos[0], str)
-                and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
-            )
-        ):
-            pos = pos[1:]
-        if pos and template_id is None:
-            template_id = pos[0]
+    pos = _strip_legacy_db_arg(args)
+    if pos and template_id is None:
+        template_id = pos[0]
 
     init_relance_templates_if_missing()
     with get_db_cursor() as cur:
@@ -187,17 +189,7 @@ def create_relance_template(
     if not tone_instruction and prompt_instructions is not None:
         tone_instruction = prompt_instructions
 
-    pos = list(args)
-    if pos and (
-        pos[0] is None
-        or isinstance(pos[0], Path)
-        or (
-            isinstance(pos[0], str)
-            and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
-        )
-    ):
-        pos = pos[1:]
-
+    pos = _strip_legacy_db_arg(args)
     if pos:
         if len(pos) >= 1 and name is None:
             name = pos[0]
@@ -276,16 +268,7 @@ def update_relance_template(
     if tone_instruction is None and prompt_instructions is not None:
         tone_instruction = prompt_instructions
 
-    pos = list(args)
-    if pos and (
-        pos[0] is None
-        or isinstance(pos[0], Path)
-        or (
-            isinstance(pos[0], str)
-            and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
-        )
-    ):
-        pos = pos[1:]
+    pos = _strip_legacy_db_arg(args)
     if pos and template_id is None:
         template_id = int(pos[0])
 
@@ -341,16 +324,7 @@ def delete_relance_template(
     *args: Any, template_id: int | None = None, db_path: str | None = None
 ) -> bool:
     """Supprime un template. Refuse de supprimer le dernier template restant."""
-    pos = list(args)
-    if pos and (
-        pos[0] is None
-        or isinstance(pos[0], Path)
-        or (
-            isinstance(pos[0], str)
-            and ("/" in pos[0] or "\\" in pos[0] or ".sqlite" in pos[0] or ".db" in pos[0])
-        )
-    ):
-        pos = pos[1:]
+    pos = _strip_legacy_db_arg(args)
     if pos and template_id is None:
         template_id = int(pos[0])
 

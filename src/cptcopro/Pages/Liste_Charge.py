@@ -16,11 +16,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from cptcopro.Database.connection import get_db_cursor
-from cptcopro.utils.db_helpers import (
-    fetch_dataframe,
-    normalize_date_columns,
-    normalize_numeric_columns,
-)
+from cptcopro.utils.analytics import load_charges_dataset, load_relance_status_map
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
     is_privacy_enabled,
@@ -54,47 +50,6 @@ def load_alertes_codes() -> set[str]:
         return set()
 
 
-@st.cache_data(ttl=120, show_spinner=False)
-def load_statut_relance_par_copro() -> dict[str, str]:
-    """Retourne dict {code: statut_relance} pour enrichissement du tableau."""
-    try:
-        with get_db_cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    code_proprietaire,
-                    MAX(created_at) AS derniere_relance,
-                    COUNT(*) AS nb_relances,
-                    MAX(status) AS dernier_statut
-                FROM relance_draft
-                WHERE status NOT IN ('deleted')
-                GROUP BY code_proprietaire
-                """
-            )
-            rows = cur.fetchall()
-        result = {}
-        for r in rows:
-            if not r or not r.get("code_proprietaire"):
-                continue
-            code = str(r["code_proprietaire"])
-            nb = int(r.get("nb_relances") or 0)
-            date_raw = r.get("derniere_relance")
-            date_str = str(date_raw)[:10] if date_raw else None
-            statut = str(r.get("dernier_statut") or "").lower()
-            if statut == "sent":
-                label = f"✅ Envoyé {date_str or ''}"
-            elif statut in ("draft_imap", "draft_local"):
-                label = f"📝 Brouillon ({date_str or '—'})"
-            elif statut == "error":
-                label = f"❌ Erreur relance"
-            else:
-                label = f"📬 {nb} relance(s)"
-            result[code] = label
-        return result
-    except Exception:
-        return {}
-
-
 def _determiner_statut(row: pd.Series, alert_codes: set[str]) -> str:
     """Détermine le statut synthétique d'un copropriétaire pour la balance de gestion."""
     code = str(row.get("code", ""))
@@ -115,29 +70,13 @@ def _determiner_statut(row: pd.Series, alert_codes: set[str]) -> str:
     return "🟢 À jour"
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_charges() -> pd.DataFrame:
-    """Charger la vue `vw_charge_coproprietaires` depuis MariaDB et normaliser la date."""
-    with get_db_cursor() as cur:
-        cur.execute(
-            "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, "
-            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires"
-        )
-        df = fetch_dataframe(cur)
-    df = normalize_date_columns(df, ["date"])
-    df = normalize_numeric_columns(df, ["debit", "credit"])
-    if "date" in df.columns:
-        df = df.dropna(subset=["date"]).sort_values("date")
-    return df
-
-
 # --- En-tête de la page ---
 render_header(
     "💳 Suivi des Charges & Débits",
     "Consultation détaillée, filtres à facettes et analyse graphique de l'historique financier",
 )
 
-df_all = load_charges()
+df_all = load_charges_dataset()
 
 
 if df_all.empty:
@@ -155,37 +94,17 @@ all_types = ["Tous", *sorted(t for t in df_all["type_apt"].dropna().unique() if 
 # FILTRES ERGONOMIQUES
 # ============================================================================
 with st.container():
-    col_f1, col_f2, col_f3, col_f4 = st.columns([1.4, 0.9, 1.1, 1.1], gap="medium")
+    col_f1, col_f2, col_f3 = st.columns([1.6, 1.2, 0.7], gap="medium")
 
     with col_f1:
         search_query = st.text_input(
             "🔍 Recherche rapide",
             placeholder="Nom ou code copropriétaire...",
             key="charges_search_input",
+            live=True,
         ).strip()
 
     with col_f2:
-        selected_type = st.selectbox(
-            "Type de lot",
-            options=all_types,
-            index=0,
-            key="charges_type_filter",
-        )
-
-    with col_f3:
-        quick_focus = st.selectbox(
-            "Filtre prédéfini",
-            options=[
-                "Tous les copropriétaires",
-                "Débits > 0 uniquement",
-                "Top 5 Débits",
-                "Top 10 Débits",
-            ],
-            index=0,
-            key="charges_quick_focus",
-        )
-
-    with col_f4:
         selected_date_label = st.selectbox(
             "📅 Relevé de référence",
             options=date_labels,
@@ -194,14 +113,36 @@ with st.container():
             key="charges_date_ref",
         )
 
-# Toggle débiteurs
-col_tog, _ = st.columns([1.5, 5])
-with col_tog:
-    only_debiteurs = st.checkbox(
-        "🔴 Débiteurs seulement",
-        value=False,
-        key="charges_only_debiteurs",
-        help="N'afficher que les copropriétaires dont le débit est positif au relevé de référence.",
+    with col_f3:
+        st.write("")
+        st.write("")
+        with st.popover("⚙️ Filtres avancés"):
+            selected_type = st.selectbox(
+                "Type de lot",
+                options=all_types,
+                index=0,
+                key="charges_type_filter",
+            )
+            only_debiteurs = st.checkbox(
+                "🔴 Débiteurs seulement",
+                value=False,
+                key="charges_only_debiteurs",
+                help="N'afficher que les copropriétaires dont le débit est positif au relevé de référence.",
+            )
+
+    quick_focus = (
+        st.pills(
+            "Focus rapide",
+            options=[
+                "Tous les copropriétaires",
+                "Débits > 0 uniquement",
+                "Top 5 Débits",
+                "Top 10 Débits",
+            ],
+            default="Tous les copropriétaires",
+            key="charges_quick_focus",
+        )
+        or "Tous les copropriétaires"
     )
 
 # Application du périmètre de recherche et typologie
@@ -266,9 +207,9 @@ df_ref["solde_net"] = df_ref["debit"] - df_ref["credit"]
 
 alert_codes = load_alertes_codes()
 df_ref["statut"] = df_ref.apply(lambda r: _determiner_statut(r, alert_codes), axis=1)
-relance_statuts = load_statut_relance_par_copro()
+relance_map = load_relance_status_map()
 df_ref["statut_relance"] = df_ref["code"].map(
-    lambda c: relance_statuts.get(str(c), "—")
+    lambda c: relance_map.get(str(c), {}).get("label", "—")
 )
 
 st.divider()
@@ -514,10 +455,13 @@ with tab_table:
             ).copy()
             display_ref = appliquer_confidentialite(df_ref_sorted)
 
-            st.dataframe(
+            charges_event = st.dataframe(
                 display_ref,
                 width="stretch",
                 hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="charges_table_selection",
                 column_order=[
                     "proprietaire",
                     "code",
@@ -548,6 +492,30 @@ with tab_table:
                     ),
                 },
             )
+
+            selected_rows = (
+                charges_event.get("selection", {}).get("rows", [])
+                if isinstance(charges_event, dict)
+                else getattr(getattr(charges_event, "selection", None), "rows", [])
+            )
+            if selected_rows and len(selected_rows) > 0:
+                sel_idx = int(selected_rows[0])
+                if sel_idx < len(df_ref_sorted):
+                    selected_copro_data = df_ref_sorted.iloc[sel_idx]
+                    sel_code = str(selected_copro_data["code"])
+                    sel_nom = str(selected_copro_data["proprietaire"])
+                    sel_deb = float(selected_copro_data["debit"])
+                    col_act_info, col_act_btn1, col_act_btn2 = st.columns([2, 1.2, 1.2], gap="small")
+                    with col_act_info:
+                        st.info(f"👉 Sélectionné : **{sel_nom}** (Débit : **{sel_deb:,.2f} €**)")
+                    with col_act_btn1:
+                        if st.button("👤 Voir fiche 360°", key=f"btn_fiche_{sel_code}", width="stretch"):
+                            st.session_state["target_fiche_copro"] = sel_code
+                            st.switch_page("Pages/Rechercher_Copro.py")
+                    with col_act_btn2:
+                        if sel_deb > 0 and st.button("✉️ Préparer relance", type="primary", key=f"btn_relance_{sel_code}", width="stretch"):
+                            st.session_state["target_relance_copro"] = sel_code
+                            st.switch_page("Pages/Relance.py")
 
             col_csv, _ = st.columns([1, 3])
             with col_csv:

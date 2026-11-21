@@ -15,8 +15,6 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
-
 _LOG = logging.getLogger(__name__)
 
 
@@ -186,7 +184,7 @@ def init_env() -> bool:
     """Charge le fichier .env (délégué à env_loader.load_env_file)."""
     from cptcopro.utils.env_loader import load_env_file
 
-    return load_env_file()
+    return bool(load_env_file())
 
 
 # Afficher les chemins au chargement du module (debug)

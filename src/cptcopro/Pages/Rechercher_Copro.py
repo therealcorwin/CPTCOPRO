@@ -3,24 +3,21 @@
 from __future__ import annotations
 
 import io
+from typing import Any, cast
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-try:
-    from cptcopro.Database import get_copro_notes, get_relance_drafts, save_copro_notes
-except ImportError:
-    import importlib
-    import sys
-
-    if "cptcopro.Database.Relance_Config" in sys.modules:
-        importlib.reload(sys.modules["cptcopro.Database.Relance_Config"])
-    if "cptcopro.Database" in sys.modules:
-        importlib.reload(sys.modules["cptcopro.Database"])
-
-    from cptcopro.Database.Relance_Config import get_copro_notes, get_relance_drafts, save_copro_notes
+from cptcopro.Database import (
+    get_copro_notes,
+    get_relance_destinataires,
+    get_relance_drafts,
+    save_copro_notes,
+    upsert_relance_destinataire,
+)
 from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.analytics import load_charges_dataset
 from cptcopro.utils.db_helpers import fetch_dataframe, normalize_date_columns
 from cptcopro.utils.privacy import (
     appliquer_confidentialite,
@@ -28,15 +25,22 @@ from cptcopro.utils.privacy import (
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _load_destinataires_map() -> dict[str, dict[str, Any]]:
+    """Charge les adresses emails et contacts configurés."""
+    rows = get_relance_destinataires()
+    return {
+        str(r["code_proprietaire"]): dict(r)
+        for r in rows
+        if r and r.get("code_proprietaire")
+    }
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_all_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Charge les données des charges, alertes et seuils."""
+    charges_df = load_charges_dataset()
     with get_db_cursor() as cur:
-        cur.execute(
-            "SELECT nom_proprietaire AS proprietaire, code_proprietaire AS code, "
-            "num_apt, type_apt, debit, credit, date FROM vw_charge_coproprietaires"
-        )
-        charges_df = fetch_dataframe(cur)
         cur.execute(
             "SELECT code_proprietaire AS code, debit, type_alerte, first_detection, "
             "last_detection, occurence FROM alertes_debit_eleve"
@@ -45,8 +49,6 @@ def load_all_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         cur.execute("SELECT type_apt, threshold FROM config_alerte")
         config_df = fetch_dataframe(cur)
 
-    charges_df = normalize_date_columns(charges_df, ["date"])
-    charges_df = charges_df.dropna(subset=["date"]).sort_values("date")
     alertes_df = normalize_date_columns(alertes_df, ["first_detection", "last_detection"])
     return charges_df, alertes_df, config_df
 
@@ -179,20 +181,24 @@ with tab_annuaire:
 
         st.divider()
 
-        col_f1, col_f2 = st.columns([2, 1], gap="medium")
+        col_f1, col_f2 = st.columns([1.6, 1.4], gap="medium")
         with col_f1:
             search_annuaire = st.text_input(
                 "🔍 Recherche rapide dans l'annuaire",
                 placeholder="Filtrer par nom, code ou n° de lot...",
                 key="annuaire_quick_search",
+                live=True,
             ).strip()
         with col_f2:
             types_dispo = ["Tous", *sorted(t for t in df_copros["Type"].dropna().unique() if t)]
-            filtre_type = st.selectbox(
-                "Type de lot",
-                options=types_dispo,
-                index=0,
-                key="annuaire_type_sel",
+            filtre_type = (
+                st.pills(
+                    "Type de lot",
+                    options=types_dispo,
+                    default="Tous",
+                    key="annuaire_type_pills",
+                )
+                or "Tous"
             )
 
         df_filtre_annuaire = df_copros.copy()
@@ -212,10 +218,13 @@ with tab_annuaire:
         st.markdown(f"**{len(df_filtre_annuaire)} copropriétaire(s) affiché(s)**")
 
         display_annuaire = appliquer_confidentialite(df_filtre_annuaire)
-        st.dataframe(
+        annuaire_event = st.dataframe(
             display_annuaire,
             width="stretch",
             hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="annuaire_table_selection",
             column_config={
                 "Proprietaire": st.column_config.TextColumn(
                     "Nom du copropriétaire", width="large"
@@ -228,6 +237,31 @@ with tab_annuaire:
                 ),
             },
         )
+
+        selected_rows = (
+            annuaire_event.get("selection", {}).get("rows", [])
+            if isinstance(annuaire_event, dict)
+            else getattr(getattr(annuaire_event, "selection", None), "rows", [])
+        )
+        if selected_rows and len(selected_rows) > 0:
+            sel_idx = int(selected_rows[0])
+            if sel_idx < len(df_filtre_annuaire):
+                selected_copro_data = df_filtre_annuaire.iloc[sel_idx]
+                col_sel_action, _ = st.columns([2, 1])
+                with col_sel_action:
+                    st.info(
+                        f"👉 Copropriétaire sélectionné : **{selected_copro_data['Proprietaire']}** "
+                        f"(Code : `{selected_copro_data['Code']}`, Lot : {selected_copro_data['Numero']})"
+                    )
+                    if st.button(
+                        f"👤 Consulter la fiche 360° de {selected_copro_data['Proprietaire']}",
+                        type="primary",
+                        key="btn_open_fiche_from_annuaire",
+                    ):
+                        st.session_state["target_fiche_copro"] = selected_copro_data["Code"]
+                        st.session_state.pop("_applied_target_fiche", None)
+                        st.session_state["fiche_search_box"] = selected_copro_data["Proprietaire"]
+                        st.rerun()
 
         # Export CSV
         col_csv, _ = st.columns([1, 3])
@@ -267,6 +301,7 @@ with tab_fiche:
             "🔍 Rechercher un copropriétaire :",
             placeholder="Ex: Dupont, D001, 12, T3...",
             key="fiche_search_box",
+            live=True,
         ).strip()
 
     matching_proprietaires = filter_coproprietaires(search_filter, proprietaires_uniques)
@@ -371,6 +406,56 @@ with tab_fiche:
                         delta_color="normal",
                     )
 
+            # --- Coordonnées & Email de relance ---
+            dest_map = _load_destinataires_map()
+            current_dest = dest_map.get(code_copro, {})
+            current_email = str(current_dest.get("email_to") or "")
+            current_contact = str(current_dest.get("contact_name") or "")
+
+            with st.expander(
+                f"📧 Coordonnées & Email de notification ({current_email or 'Non renseigné'})",
+                expanded=not bool(current_email),
+            ):
+                with st.form(f"dest_form_{code_copro}"):
+                    c_em1, c_em2 = st.columns(2, gap="medium")
+                    with c_em1:
+                        new_email = st.text_input(
+                            "Adresse email pour les relances :",
+                            value=current_email,
+                            placeholder="copropriétaire@exemple.fr",
+                            help="Email utilisé par l'assistant de relances et la boîte d'envoi.",
+                        ).strip()
+                    with c_em2:
+                        new_contact = st.text_input(
+                            "Nom du contact / Titre de civilité (optionnel) :",
+                            value=current_contact,
+                            placeholder="Ex: M. Jean Dupont",
+                        ).strip()
+
+                    col_save_em, _ = st.columns([1.5, 3])
+                    with col_save_em:
+                        save_em_btn = st.form_submit_button(
+                            "💾 Enregistrer les coordonnées",
+                            type="primary",
+                            width="stretch",
+                        )
+
+                    if save_em_btn:
+                        if new_email and "@" in new_email:
+                            upsert_relance_destinataire(
+                                code_proprietaire=code_copro,
+                                email_to=new_email,
+                                contact_name=new_contact or None,
+                                nom_proprietaire=selected_copro,
+                            )
+                            _load_destinataires_map.clear()
+                            st.toast("Coordonnées enregistrées avec succès !", icon="💾")
+                            st.rerun()
+                        elif not new_email:
+                            st.warning("Veuillez renseigner une adresse email valide.")
+                        else:
+                            st.error("Format d'adresse email invalide.")
+
             # --- Bloc-notes interne & Suivi des promesses de paiement ---
             with st.expander(
                 "📝 Bloc-notes interne & Promesses de paiement (Gestionnaire)",
@@ -452,9 +537,9 @@ with tab_fiche:
                 expanded=False,
             ):
                 @st.cache_data(ttl=60, show_spinner=False)
-                def _load_relances_copro(code: str) -> list:
+                def _load_relances_copro(code: str) -> list[dict[str, Any]]:
                     try:
-                        return get_relance_drafts(code_proprietaire=code, limit=50)
+                        return cast(list[dict[str, Any]], get_relance_drafts(code_proprietaire=code, limit=50))
                     except Exception:
                         return []
 

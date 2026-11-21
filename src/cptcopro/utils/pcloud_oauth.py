@@ -7,7 +7,15 @@ from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
 from loguru import logger
-from playwright.async_api import Error as PlaywrightError, Page, Route, async_playwright
+from playwright.async_api import (
+    Error as PlaywrightError,
+)
+from playwright.async_api import (
+    Frame,
+    Page,
+    Route,
+    async_playwright,
+)
 
 from cptcopro.utils.browser_launcher import launch_browser
 
@@ -71,10 +79,10 @@ async def _configurer_interception_callback(
         else:
             try:
                 await route.continue_()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Impossible de poursuivre la route : {e}")
 
-    async def handle_frame_navigated(frame) -> None:
+    async def handle_frame_navigated(frame: Frame) -> None:
         url = frame.url
         if callback_path in url or (parsed_redirect.netloc and parsed_redirect.netloc in url):
             code = extraire_code_depuis_url(url)

@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 
+import atexit
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -153,12 +154,10 @@ def close_pool() -> None:
     if _pool is not None:
         try:
             _pool.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.debug(f"Erreur lors de la fermeture du pool de connexions : {exc}")
         _pool = None
 
-
-import atexit
 
 atexit.register(close_pool)
 

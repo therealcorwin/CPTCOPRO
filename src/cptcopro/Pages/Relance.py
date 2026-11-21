@@ -2,27 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import time
 from contextlib import suppress
 from typing import Any, cast
 
 import pandas as pd
 import streamlit as st
-
-# Charger le .env pour s'assurer que MISTRAL_API_KEY est disponible
-try:
-    from cptcopro.utils.paths import init_env
-
-    init_env()
-except Exception:
-    with suppress(Exception):
-        from dotenv import load_dotenv
-
-        from cptcopro.utils.paths import get_env_file_path
-
-        env_path = get_env_file_path()
-        if env_path and env_path.exists():
-            load_dotenv(env_path)
 
 from cptcopro.Database import (
     get_relance_config,
@@ -31,11 +17,20 @@ from cptcopro.Database import (
     save_relance_draft,
     upsert_relance_destinataire,
 )
+from cptcopro.utils.paths import init_env
 from cptcopro.utils.relance_mailer import (
     generate_relance_draft_with_llm,
     render_relance_template,
 )
+from cptcopro.utils.relance_views import (
+    render_drafts_management,
+    render_history_log,
+    render_tracking_dashboard,
+)
 from cptcopro.utils.ui_components import render_header
+
+# Charger le .env pour s'assurer que MISTRAL_API_KEY est disponible
+init_env()
 
 if "drafts_to_edit" not in st.session_state:
     st.session_state.drafts_to_edit = []
@@ -80,7 +75,7 @@ render_header(
 cfg, due_df = _load_due_data()
 
 # Bannière OAuth2 si token Hotmail expiré
-try:
+with suppress(Exception):
     from cptcopro.utils.hotmail_oauth import verifier_statut_token_hotmail
     _token_ok, _token_msg = verifier_statut_token_hotmail()
     if not _token_ok:
@@ -90,8 +85,6 @@ try:
             "🔐 [Configurer dans Paramètres & Modèles]",
             icon="⚠️",
         )
-except Exception:
-    pass
 
 is_enabled = bool(int(cfg.get("enabled", 1) or 1))
 if not is_enabled:
@@ -107,12 +100,12 @@ if not due_df.empty:
         if val is None or pd.isna(val) or val == "":
             return "-"
         if hasattr(val, "strftime"):
-            return val.strftime("%d/%m/%Y")
+            return str(val.strftime("%d/%m/%Y"))
         try:
             dt = pd.to_datetime(val)
             if pd.isna(dt):
                 return "-"
-            return dt.strftime("%d/%m/%Y")
+            return str(dt.strftime("%d/%m/%Y"))
         except Exception:
             return str(val)
 
@@ -120,10 +113,12 @@ if not due_df.empty:
         if dcol in due_df.columns:
             due_df[dcol] = due_df[dcol].apply(_format_date_col)
 
-tab_generation, tab_destinataires = st.tabs(
+tab_generation, tab_drafts, tab_tracking, tab_destinataires = st.tabs(
     [
-        "🎯 Copropriétaires à relancer & Rédaction",
-        "👥 Carnet d'adresses des destinataires",
+        "🎯 1. À relancer & Rédaction",
+        "📬 2. Brouillons & Boîte d'envoi",
+        "📊 3. Suivi du Recouvrement",
+        "👥 4. Carnet d'adresses",
     ]
 )
 
@@ -190,8 +185,7 @@ with tab_generation:
         available_due_cols = [c for c in due_cols if c in due_only.columns]
         due_display = due_only[available_due_cols].copy()
 
-        # Score de priorité : débit × log(1 + jours d'attente) × (1 + 0.3 × nb_relances)
-        import math
+        # Score de priorité : débit * log(1 + jours d'attente) * (1 + 0.3 * nb_relances)
         def _score_urgence(row: pd.Series) -> float:
             debit = float(row.get("debit", 0) or 0)
             jours = float(row.get("jours_depuis_derniere_relance", 0) or 0)
@@ -290,9 +284,8 @@ with tab_generation:
                 else:
                     st.session_state.drafts_to_edit = []
                     total_to_generate = len(rows_to_generate)
-                    progress_bar = st.progress(0, text="Initialisation de la rédaction...")
 
-                    with st.spinner("Rédaction des brouillons en cours..."):
+                    with st.status("Rédaction assistée des relances...", expanded=True) as status_box:
                         nb_generated = 0
                         for idx, (_, edited_row) in enumerate(rows_to_generate.iterrows()):
                             code = str(edited_row["code_proprietaire"])
@@ -311,18 +304,14 @@ with tab_generation:
                                 and selected_template.get("generation_mode") == "llm"
                             )
 
+                            nom_copro = payload.get("nom_proprietaire", code)
+
                             # Respect du rate-limit Mistral (pause de 2.0s recommandée par Mistral pour rester sous 32 RPM)
                             if use_llm and idx > 0:
-                                progress_bar.progress(
-                                    idx / total_to_generate,
-                                    text=f"Pause de temporisation Mistral (2s)... ({idx}/{total_to_generate})",
-                                )
+                                status_box.write(f"⏳ Temporisation de conformité API (2s)... ({idx}/{total_to_generate})")
                                 time.sleep(2.0)
 
-                            progress_bar.progress(
-                                (idx + 0.5) / total_to_generate,
-                                text=f"Rédaction pour {payload.get('nom_proprietaire')} ({idx + 1}/{total_to_generate})...",
-                            )
+                            status_box.write(f"✍️ Rédaction pour **{nom_copro}** ({idx + 1}/{total_to_generate})...")
 
                             if use_llm:
                                 subject, body, provider, model = generate_relance_draft_with_llm(
@@ -361,7 +350,11 @@ with tab_generation:
                             )
                             nb_generated += 1
 
-                    progress_bar.empty()
+                        status_box.update(
+                            label=f"Rédaction terminée avec succès ({nb_generated} relances générées) !",
+                            state="complete",
+                            expanded=False,
+                        )
                     st.toast(f"✅ {nb_generated} brouillon(s) généré(s) avec succès !", icon="📬")
                     _load_due_data.clear()
                     st.success(
@@ -370,7 +363,23 @@ with tab_generation:
 
 
 # ============================================================================
-# ONGLET 2: CARNET D'ADRESSES DESTINATAIRES
+# ONGLET 2: BROUILLONS & BOÎTE D'ENVOI
+# ============================================================================
+with tab_drafts:
+    render_drafts_management(cfg)
+
+
+# ============================================================================
+# ONGLET 3: SUIVI DU RECOUVREMENT & JOURNAL
+# ============================================================================
+with tab_tracking:
+    render_tracking_dashboard()
+    st.divider()
+    render_history_log()
+
+
+# ============================================================================
+# ONGLET 4: CARNET D'ADRESSES DESTINATAIRES
 # ============================================================================
 with tab_destinataires:
     st.subheader("Gestion des adresses emails des copropriétaires")

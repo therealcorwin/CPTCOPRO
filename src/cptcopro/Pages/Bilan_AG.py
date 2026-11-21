@@ -15,41 +15,23 @@ from __future__ import annotations
 
 import io
 from datetime import date
+from typing import Any
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from cptcopro.Database import get_relance_config, get_relance_drafts
+from cptcopro.Database import get_relance_drafts
 from cptcopro.Database.connection import get_db_cursor
+from cptcopro.utils.analytics import compute_aging_balance, load_charges_dataset
 from cptcopro.utils.ui_components import apply_plotly_theme, render_header
-
 
 # ── Chargements ────────────────────────────────────────────────────────────
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def _load_all_charges() -> pd.DataFrame:
-    try:
-        with get_db_cursor() as cur:
-            cur.execute(
-                "SELECT nom_proprietaire, code_proprietaire, num_apt, type_apt, debit, credit, date "
-                "FROM vw_charge_coproprietaires"
-            )
-            df = pd.DataFrame(cur.fetchall())
-        # Conversion explicite en datetime64 (normalize_date_columns insuffisant sur certains types)
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df["debit"] = pd.to_numeric(df["debit"], errors="coerce").fillna(0)
-        df["credit"] = pd.to_numeric(df["credit"], errors="coerce").fillna(0)
-        return df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
-    except Exception as e:
-        st.error(f"Erreur chargement charges : {e}")
-        return pd.DataFrame()
-
-
 @st.cache_data(ttl=120, show_spinner=False)
-def _load_drafts() -> list[dict]:
+def _load_drafts() -> list[dict[str, Any]]:
     try:
         return get_relance_drafts(limit=2000) or []
     except Exception:
@@ -67,51 +49,6 @@ def _load_nb_copros() -> int:
         return 0
 
 
-# ── Calculs ────────────────────────────────────────────────────────────────
-
-
-def _compute_aging(df_annee: pd.DataFrame, annee: int) -> pd.DataFrame:
-    """Balance âgée au dernier relevé de l'année."""
-    if df_annee.empty:
-        return pd.DataFrame()
-    derniere_date = df_annee["date"].max()
-    snap = df_annee[df_annee["date"] == derniere_date]
-    debiteurs = snap[snap["debit"] > 0].copy()
-    if debiteurs.empty:
-        return pd.DataFrame()
-
-    records = []
-    for _, row in debiteurs.iterrows():
-        code = row["code_proprietaire"]
-        hist = df_annee[df_annee["code_proprietaire"] == code].sort_values("date")
-        date_debut = derniere_date
-        for _, h in hist.iloc[::-1].iterrows():
-            if float(h["debit"]) > 0:
-                date_debut = h["date"]
-            else:
-                break
-        jours = max(0, (derniere_date - date_debut).days)
-        if jours <= 30:
-            tranche, order, color = "< 30 j", 1, "#22c55e"
-        elif jours <= 60:
-            tranche, order, color = "30-60 j", 2, "#f59e0b"
-        elif jours <= 90:
-            tranche, order, color = "60-90 j", 3, "#f97316"
-        else:
-            tranche, order, color = "> 90 j", 4, "#ef4444"
-        records.append({
-            "Copropriétaire": row["nom_proprietaire"],
-            "Lot": row.get("num_apt", "—"),
-            "Type": row.get("type_apt", "—"),
-            "Débit (€)": float(row["debit"]),
-            "Ancienneté (j)": jours,
-            "Tranche": tranche,
-            "order": order,
-            "color": color,
-        })
-    return pd.DataFrame(records).sort_values("Débit (€)", ascending=False)
-
-
 # ── Header ─────────────────────────────────────────────────────────────────
 
 render_header(
@@ -119,7 +56,7 @@ render_header(
     "Synthèse financière annuelle pour l'Assemblée Générale de copropriété",
 )
 
-charges_all = _load_all_charges()
+charges_all = load_charges_dataset()
 drafts_all = _load_drafts()
 nb_copros_total = _load_nb_copros()
 
@@ -132,14 +69,15 @@ if charges_all.empty:
 annees_disponibles = sorted(charges_all["date"].dt.year.unique(), reverse=True)
 annee_courante = date.today().year
 
-col_sel, col_info, _ = st.columns([1.2, 2.5, 3], gap="medium")
+col_sel, col_info = st.columns([2, 2], gap="medium")
 with col_sel:
-    annee = st.selectbox(
+    annee_selected = st.pills(
         "📅 Année du bilan :",
         options=annees_disponibles,
-        index=0 if annees_disponibles[0] == annee_courante else 0,
-        key="bilan_annee",
+        default=annees_disponibles[0] if annees_disponibles else date.today().year,
+        key="bilan_annee_pills",
     )
+    annee = int(annee_selected) if annee_selected else (annees_disponibles[0] if annees_disponibles else date.today().year)
 with col_info:
     st.info(
         f"Rapport pour l'exercice **{annee}** — données du {annee}/01/01 au {annee}/12/31."
@@ -268,13 +206,13 @@ st.caption(
     "jusqu'au premier relevé où le débit était positif sans interruption."
 )
 
-aging_df = _compute_aging(charges_all, annee)
+aging_df = compute_aging_balance(charges_all, derniere_date_annee)
 
 if aging_df.empty:
     st.success("🎉 Aucun compte débiteur au dernier relevé de l'exercice.")
 else:
     aging_summary = (
-        aging_df.groupby(["Tranche", "order", "color"])["Débit (€)"]
+        aging_df.groupby(["tranche", "order", "color"])["debit"]
         .agg(["sum", "count"])
         .reset_index()
         .sort_values("order")
@@ -283,10 +221,10 @@ else:
     col_donut, col_aging_kpi = st.columns([1.2, 2], gap="large")
 
     with col_donut:
-        total_aging = aging_df["Débit (€)"].sum()
+        total_aging = aging_df["debit"].sum()
         fig_donut = go.Figure(
             go.Pie(
-                labels=aging_summary["Tranche"],
+                labels=aging_summary["tranche"],
                 values=aging_summary["sum"],
                 hole=0.55,
                 marker_colors=aging_summary["color"].tolist(),
@@ -308,23 +246,38 @@ else:
         st.plotly_chart(fig_donut, width="stretch")
 
     with col_aging_kpi:
-        color_map = {"< 30 j": "#22c55e", "30-60 j": "#f59e0b", "60-90 j": "#f97316", "> 90 j": "#ef4444"}
+        color_map = {
+            "< 30 j": ":green[●]",
+            "30-60 j": ":orange[●]",
+            "60-90 j": ":orange[●]",
+            "> 90 j": ":red[●]",
+        }
         for _, row in aging_summary.iterrows():
-            color = color_map.get(str(row["Tranche"]), "#888")
+            bullet = color_map.get(str(row["tranche"]), "●")
             st.markdown(
-                f"<span style='color:{color}; font-size:1.1em'>●</span> "
-                f"**{row['Tranche']}** — "
+                f"{bullet} "
+                f"**{row['tranche']}** — "
                 f"{int(row['count'])} compte(s) — "
-                f"**{row['sum']:,.0f} €**".replace(",", " "),
-                unsafe_allow_html=True,
+                f"**{row['sum']:,.0f} €**".replace(",", " ")
             )
-        st.write("")
+        st.space("small")
         # Tableau des débiteurs > 90j
-        df_critique = aging_df[aging_df["Tranche"] == "> 90 j"]
+        df_critique = aging_df[aging_df["tranche"] == "> 90 j"]
         if not df_critique.empty:
             st.markdown(f"**⚠️ {len(df_critique)} compte(s) en anomalie persistante (> 90 jours) :**")
+            nom_crit = df_critique["nom"] if "nom" in df_critique.columns else df_critique.get("proprietaire", "")
+            num_apt_crit = df_critique["num_apt"] if "num_apt" in df_critique.columns else "—"
+            type_apt_crit = df_critique["type_apt"] if "type_apt" in df_critique.columns else "—"
+            jours_crit = df_critique["jours"] if "jours" in df_critique.columns else df_critique["jours_anciennete"]
+            df_critique_display = pd.DataFrame({
+                "Copropriétaire": nom_crit,
+                "Lot": num_apt_crit,
+                "Type": type_apt_crit,
+                "Débit (€)": df_critique["debit"],
+                "Ancienneté (j)": jours_crit,
+            })
             st.dataframe(
-                df_critique[["Copropriétaire", "Lot", "Type", "Débit (€)", "Ancienneté (j)"]],
+                df_critique_display,
                 width="stretch",
                 hide_index=True,
                 column_config={
@@ -335,8 +288,21 @@ else:
 
     st.write("")
     with st.expander("📋 Détail complet de la balance âgée", expanded=False):
+        nom_full = aging_df["nom"] if "nom" in aging_df.columns else aging_df.get("proprietaire", "")
+        num_apt_full = aging_df["num_apt"] if "num_apt" in aging_df.columns else "—"
+        type_apt_full = aging_df["type_apt"] if "type_apt" in aging_df.columns else "—"
+        jours_full = aging_df["jours"] if "jours" in aging_df.columns else aging_df["jours_anciennete"]
+        df_full_display = pd.DataFrame({
+            "Code": aging_df["code"],
+            "Copropriétaire": nom_full,
+            "Lot": num_apt_full,
+            "Type": type_apt_full,
+            "Débit (€)": aging_df["debit"],
+            "Ancienneté (j)": jours_full,
+            "Tranche": aging_df["tranche"],
+        })
         st.dataframe(
-            aging_df.drop(columns=["order", "color"], errors="ignore"),
+            df_full_display,
             width="stretch",
             hide_index=True,
             column_config={
@@ -443,55 +409,56 @@ st.divider()
 
 st.markdown("## 📥 Exporter ce rapport")
 
-col_exp1, col_exp2, _ = st.columns([1.5, 1.5, 3], gap="medium")
+with st.popover("📥 Télécharger / Exporter les données du rapport"):
+    col_exp1, col_exp2 = st.columns(2, gap="medium")
 
-# Export CSV balance âgée
-with col_exp1:
-    if not aging_df.empty:
-        csv_buf = io.StringIO()
-        aging_df.drop(columns=["order", "color"], errors="ignore").to_csv(
-            csv_buf, index=False, sep=";"
-        )
+    # Export CSV balance âgée
+    with col_exp1:
+        if not aging_df.empty:
+            csv_buf = io.StringIO()
+            aging_df.drop(columns=["order", "color"], errors="ignore").to_csv(
+                csv_buf, index=False, sep=";"
+            )
+            st.download_button(
+                "📥 Balance âgée (CSV)",
+                data=csv_buf.getvalue().encode("utf-8-sig"),
+                file_name=f"balance_agee_{annee}.csv",
+                mime="text/csv",
+                width="stretch",
+            )
+
+    # Export CSV rapport complet
+    with col_exp2:
+        lines = [
+            f"RAPPORT AG — EXERCICE {annee}",
+            f"Généré le {date.today().strftime('%d/%m/%Y')}",
+            "",
+            "=== RÉSUMÉ FINANCIER ===",
+            f"Créances fin d'exercice : {total_creances_fin:,.2f} EUR".replace(",", " "),
+            f"Variation vs début d'exercice : {signe}{variation:,.2f} EUR".replace(",", " "),
+            f"Copropriétaires débiteurs : {nb_debiteurs_fin} / {nb_total_snap}",
+            f"Taux de recouvrement : {taux_recouvrement:.1f} %",
+            "",
+            "=== RELANCES ===",
+            f"Relances enregistrées : {nb_relances_envoyees}",
+            f"Comptes relancés : {len(codes_relances)}",
+            f"Comptes régularisés : {len(codes_regularises)}",
+            "",
+            "=== BALANCE ÂGÉE ===",
+        ]
+        if not aging_df.empty:
+            for _, row in aging_summary.iterrows():
+                lines.append(
+                    f"{row['tranche']} : {int(row['count'])} compte(s) — {row['sum']:,.2f} EUR".replace(",", " ")
+                )
+        rapport_txt = "\n".join(lines)
         st.download_button(
-            "📥 Balance âgée (CSV)",
-            data=csv_buf.getvalue().encode("utf-8-sig"),
-            file_name=f"balance_agee_{annee}.csv",
-            mime="text/csv",
+            "📄 Résumé AG (TXT)",
+            data=rapport_txt.encode("utf-8"),
+            file_name=f"rapport_AG_{annee}.txt",
+            mime="text/plain",
             width="stretch",
         )
-
-# Export CSV rapport complet
-with col_exp2:
-    lines = [
-        f"RAPPORT AG — EXERCICE {annee}",
-        f"Généré le {date.today().strftime('%d/%m/%Y')}",
-        "",
-        "=== RÉSUMÉ FINANCIER ===",
-        f"Créances fin d'exercice : {total_creances_fin:,.2f} EUR".replace(",", " "),
-        f"Variation vs début d'exercice : {signe}{variation:,.2f} EUR".replace(",", " "),
-        f"Copropriétaires débiteurs : {nb_debiteurs_fin} / {nb_total_snap}",
-        f"Taux de recouvrement : {taux_recouvrement:.1f} %",
-        "",
-        "=== RELANCES ===",
-        f"Relances enregistrées : {nb_relances_envoyees}",
-        f"Comptes relancés : {len(codes_relances)}",
-        f"Comptes régularisés : {len(codes_regularises)}",
-        "",
-        "=== BALANCE ÂGÉE ===",
-    ]
-    if not aging_df.empty:
-        for _, row in aging_summary.iterrows():
-            lines.append(
-                f"{row['Tranche']} : {int(row['count'])} compte(s) — {row['sum']:,.2f} EUR".replace(",", " ")
-            )
-    rapport_txt = "\n".join(lines)
-    st.download_button(
-        "📄 Résumé AG (TXT)",
-        data=rapport_txt.encode("utf-8"),
-        file_name=f"rapport_AG_{annee}.txt",
-        mime="text/plain",
-        width="stretch",
-    )
 
 st.caption(
     "💡 **Astuce** : Pour obtenir un PDF, utilisez la fonction d'impression du navigateur "
