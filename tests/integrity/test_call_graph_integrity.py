@@ -143,6 +143,53 @@ def test_documented_functions_exist():
             ],
         ),
         (
+            "cptcopro.Database.Relance_Snippets",
+            [
+                "list_relance_snippets",
+                "get_relance_snippet",
+                "create_relance_snippet",
+                "update_relance_snippet",
+                "delete_relance_snippet",
+                "init_relance_snippets_if_missing",
+            ],
+        ),
+        (
+            "cptcopro.Database.Relance_Variables",
+            [
+                "list_relance_variables",
+                "get_relance_variable",
+                "create_relance_variable",
+                "update_relance_variable",
+                "delete_relance_variable",
+                "get_custom_variables_dict",
+            ],
+        ),
+        (
+            "cptcopro.utils.analytics",
+            [
+                "load_charges_dataset",
+                "compute_aging_balance",
+                "load_relance_status_map",
+                "load_system_health",
+            ],
+        ),
+        (
+            "cptcopro.utils.relance_views",
+            [
+                "render_drafts_management",
+                "render_tracking_dashboard",
+                "render_history_log",
+                "dialog_confirmer_suppression_brouillons",
+            ],
+        ),
+        (
+            "cptcopro.utils.browser_launcher",
+            [
+                "launch_browser",
+                "launch_browser_with_context",
+            ],
+        ),
+        (
             "cptcopro.utils.relance_mailer",
             [
                 "generate_relance_draft_with_llm",

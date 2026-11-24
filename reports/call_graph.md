@@ -48,6 +48,8 @@ flowchart TB
 
     subgraph LAYER4["Couche 4 : Présentation, IA & Actions"]
         L4_st["Affichage_Stream.py & 9 Pages Streamlit (5 Pôles thématiques)"]
+        L4_an["utils/analytics.py (Dataset unifié, balance âgée continue, santé BDD/OAuth2)"]
+        L4_views["utils/relance_views.py (Composants partagés : brouillons, suivi, historique)"]
         L4_ai["Mistral AI API REST (Rédaction contextuelle des relances)"]
         L4_imap["utils/relance_mailer.py (Dépôt IMAP Hotmail / Microsoft OAuth2 Device Flow)"]
     end
@@ -319,6 +321,9 @@ flowchart LR
         pool["_init_db_pool() (@st.cache_resource)"]
         nav["st.navigation(menus)"]
         css["inject_custom_css()"]
+        sync["dialog_sync_extranet() (Modale Sync Extranet)"]
+        priv_toggle["st.sidebar.toggle('🔒 Masquer données sensibles')"]
+        health["load_system_health() (Santé du Système)"]
     end
 
     subgraph SEC1["1. 📊 Vue d'ensemble"]
@@ -345,16 +350,16 @@ flowchart LR
         p_rcfg["Pages/Relance_Config.py"]
     end
 
-    subgraph LOADERS["Fonctions de chargement (@st.cache_data)"]
-        f_d1["chargement_somme_debit_global()"]
-        f_d2["suivi_nbre_alertes()"]
+    subgraph LOADERS["Services d'analytique & Cache (@st.cache_data)"]
+        f_an["utils/analytics.py (load_charges_dataset, compute_aging_balance, load_relance_status_map, load_system_health)"]
+        f_rv["utils/relance_views.py (render_drafts_management, render_tracking_dashboard, render_history_log)"]
+        f_dash["_load_alertes_count(), _load_relances_due_count(), _load_brouillons_en_attente()"]
         f_lc["load_charges() (Liste_Charge)"]
         f_rc["load_all_data(), load_coproprietaires() (Espace Copropriétaires)"]
         f_al1["recup_alertes(), recup_debits_proprietaires_alertes(), recup_suivi_alertes(), load_config()"]
-        f_sa1["load_charges(), load_alertes(), load_config_alertes(), load_coproprietaires()"]
+        f_sa1["load_alertes(), load_coproprietaires() (Statistiques Avancées)"]
         f_r1["_load_due_data(), _load_templates()"]
-        f_r2["_load_all_drafts(), _load_tracking_summary(), _load_config()"]
-        f_r4["_load_relance_config(), _load_templates()"]
+        f_rcfg["_load_relance_config(), _load_config_alertes(), _load_templates()"]
     end
 
     subgraph HELPERS["Helpers transversaux"]
@@ -364,14 +369,15 @@ flowchart LR
     end
 
     pool --> nav
-    nav --> p_dash --> f_d1 & f_d2
+    nav --> p_dash --> f_an & f_dash
     nav --> p_lc --> f_lc
+    nav --> p_bag --> f_an
     nav --> p_rech --> f_rc
     nav --> p_ale --> f_al1
-    nav --> p_sadv --> f_sa1
-    nav --> p_rel --> f_r1
-    nav --> p_drf --> f_r2
-    nav --> p_rcfg --> f_r4
+    nav --> p_sadv --> f_an & f_sa1
+    nav --> p_rel --> f_r1 & f_rv
+    nav --> p_drf --> f_rv
+    nav --> p_rcfg --> f_rcfg
 
     LOADERS -.-> h_norm
     SEC1 & SEC2 & SEC3 & SEC4 & SEC5 -.-> h_priv
@@ -567,15 +573,16 @@ sequenceDiagram
 
 Le module `src/cptcopro/utils/privacy.py` centralise l'anonymisation des informations personnelles (noms, codes propriétaires, numéros de lots) pour permettre des démonstrations ou captures d'écran sans divulgation de données privées.
 
-L'activation du mode confidentiel s'effectue dynamiquement depuis l'en-tête de n'importe quelle page de l'application via le composant standardisé `render_header()` (`src/cptcopro/utils/ui_components.py`).
+L'activation du mode confidentiel s'effectue dynamiquement soit depuis le toggle persistant en barre latérale (`Affichage_Stream.py : st.sidebar.toggle('🔒 Masquer données sensibles')`), soit depuis l'en-tête de page via le composant standardisé `render_header()` (`src/cptcopro/utils/ui_components.py`). Les deux commandes pilotent de façon synchronisée la même clé de session.
 
 ```mermaid
 flowchart LR
+    sidebar["Toggle barre latérale (Affichage_Stream.py)"] --> state["st.session_state['masquer_donnees_sensibles']"]
     header["render_header() (ui_components.py)"] --> btn["Bouton-badge d'en-tête (st_yled.button)"]
     btn --> toggle["_toggle_privacy()"]
-    toggle --> state["st.session_state['masquer_donnees_sensibles']"]
-    state --> check["is_privacy_enabled()"]
+    toggle --> state
 
+    state --> check["is_privacy_enabled()"]
     check --> df["appliquer_confidentialite(df)"]
     check --> graph["preparer_df_pour_graphe(df)"]
     check --> lst["masquer_liste(noms)"]
@@ -589,10 +596,10 @@ flowchart LR
 
 | Propriété | Implémentation technique |
 | --- | --- |
-| **Point de contrôle UI** | Bouton-badge cliquable pill design (`_header_privacy_btn`) affiché en haut à droite via `render_header(show_privacy_toggle=True)`. |
+| **Points de contrôle UI** | 1. Toggle switch permanent dans la barre latérale sous les boutons d'action (`st.sidebar.toggle`).<br>2. Bouton-badge cliquable pill design (`_header_privacy_btn`) affiché en haut à droite via `render_header(show_privacy_toggle=True)`. |
 | **Indicateur visuel** | Vert `🛡️ MODE PRIVÉ ACTIF` quand actif, Rouge `🔓 DONNÉES VISIBLES` quand inactif, avec infobulle explicative. |
 | **Clé de session** | `SESSION_KEY_PRIVACY = 'masquer_donnees_sensibles'`, persistée au cours de la session utilisateur Streamlit. |
-| **Portée d'application** | DataFrames de charges et lots, graphiques Plotly (barres, courbes temporelles), listes de sélection et filtres de recherche. |
+| **Portée d'application** | DataFrames de charges et lots, graphiques Plotly (barres, courbes temporelles), fiches individuelles 360°, listes de sélection et filtres de recherche. |
 
 ---
 
@@ -692,13 +699,15 @@ flowchart TB
 | `src/cptcopro/main.py` | Orchestration CLI de bout en bout | `main()`, `_scrape_and_parse()`, `_save_data_to_db()`, `_handle_pcloud_sync()`, `_launch_streamlit_service()` |
 | `src/cptcopro/utils/env_loader.py` | Chargement et validation stricte du `.env` | `validate_startup_env()`, `get_mariadb_config()`, `get_pcloud_credentials()`, `load_and_validate_env()` |
 | `src/cptcopro/utils/paths.py` | Résolution dynamique des chemins de fichiers | `get_project_root_dir()`, `get_backup_dir()`, `get_log_path()`, `init_env()` |
+| `src/cptcopro/utils/analytics.py` | Services transversaux d'analytique et cache | `load_charges_dataset()`, `compute_aging_balance()`, `load_relance_status_map()`, `load_system_health()` |
+| `src/cptcopro/utils/relance_views.py` | Composants UI modulaires partagés de relance | `render_drafts_management()`, `render_tracking_dashboard()`, `render_history_log()`, `dialog_confirmer_suppression_brouillons()` |
 | `src/cptcopro/utils/db_helpers.py` | Conversion et normalisation DataFrames pour MariaDB | `normalize_date_columns()`, `normalize_numeric_columns()`, `fetch_dataframe()` |
 | `src/cptcopro/utils/ui_components.py` | Composants UI Streamlit réutilisables & CSS | `inject_custom_css()`, `render_header()`, `apply_plotly_theme()` |
 | `src/cptcopro/utils/privacy.py` | Anonymisation transversale des données sensibles | `is_privacy_enabled()`, `appliquer_confidentialite()`, `preparer_df_pour_graphe()`, `anonymiser()` |
 | `src/cptcopro/utils/relance_mailer.py` | Moteur de relance email, IA Mistral & IMAP | `generate_relance_draft_with_llm()`, `render_relance_template()`, `generer_brouillons_relances()`, `save_draft_to_imap()`, `tester_connexion_mistral()`, `tester_connexion_imap()` |
 | `src/cptcopro/utils/hotmail_oauth.py` | Authentification Microsoft MSAL (Device Flow) | `verifier_statut_token_hotmail()`, `demarrer_device_flow_microsoft()`, `valider_device_flow_microsoft()`, `get_hotmail_access_token()` |
 | `src/cptcopro/utils/pcloud_oauth.py` | Automatisation de l'authentification OAuth2 pCloud avec Playwright | `obtenir_code_oauth_automatique()`, `recuperer_code_oauth_playwright()`, `extraire_code_depuis_url()` |
-| `src/cptcopro/utils/browser_launcher.py` | Initialisation et configuration Playwright | `creer_contexte_navigateur()`, gestion des arguments headless/sandbox |
+| `src/cptcopro/utils/browser_launcher.py` | Initialisation et configuration Playwright (Edge/Chrome/Firefox) | `launch_browser()`, `launch_browser_with_context()`, gestion des arguments headless/sandbox |
 | `src/cptcopro/utils/streamlit_launcher.py` | Pilotage du processus Streamlit (dév et PyInstaller) | `start_streamlit()`, `start_streamlit_inprocess()`, `stop_streamlit()` |
 | `src/cptcopro/Parsing/Commun.py` | Orchestration Playwright de la collecte HTML | `recup_all_html_parallel()`, `_recup_html_generic()`, `login_and_open_menu()` |
 | `src/cptcopro/Parsing/Charge_Copro.py` | Navigation vers la section des charges | `recup_charges_coproprietaires()` |
@@ -730,8 +739,8 @@ Cette matrice récapitule les opérations de lecture (**R**) et d'écriture (**W
 
 | Table / Vue MariaDB | Type de stockage | Modules d'écriture (W) | Modules de lecture (R) |
 | :--- | :--- | :--- | :--- |
-| `charge` | Table InnoDB *(System Versioning)* | `Charges_To_BDD.py` (batch UPSERT) | `Creation_BDD.py` (triggers), `Dashboard.py`, `Statistiques_Avancees.py`, `Backup_DB.py` |
-| `coproprietaires` | Table InnoDB | `Coproprietaires_To_BDD.py` (batch UPSERT) | `Rechercher_Copro.py`, `Statistiques_Avancees.py`, `Creation_BDD.py` (triggers), `Backup_DB.py` |
+| `charge` | Table InnoDB *(System Versioning)* | `Charges_To_BDD.py` (batch UPSERT) | `Creation_BDD.py` (triggers), `Dashboard.py`, `Statistiques_Avancees.py`, `Bilan_AG.py`, `analytics.py`, `Backup_DB.py` |
+| `coproprietaires` | Table InnoDB | `Coproprietaires_To_BDD.py` (batch UPSERT) | `Rechercher_Copro.py`, `Statistiques_Avancees.py`, `Bilan_AG.py`, `analytics.py`, `Creation_BDD.py` (triggers), `Backup_DB.py` |
 | `alertes_debit_eleve` | Table InnoDB | Triggers MariaDB (`charge` INSERT / DELETE) | `Alerte.py`, `Statistiques_Avancees.py`, `Alertes_Config.py`, `Relance_Config.py` |
 | `suivi_alertes` | Table InnoDB | `Alertes_Config.py` (`sauvegarder_nombre_alertes`) | `Dashboard.py`, `Alerte.py`, `Backup_DB.py` |
 | `config_alerte` | Table InnoDB | `Alerte.py`, `Creation_BDD.py` (init) | `Creation_BDD.py` (triggers), `Statistiques_Avancees.py`, `Rechercher_Copro.py`, `Backup_DB.py` |
@@ -740,8 +749,8 @@ Cette matrice récapitule les opérations de lecture (**R**) et d'écriture (**W
 | `relance_template` | Table InnoDB | `Relance_Config.py` (Page & DB) | `Relance.py`, `Relance_Config.py`, `Backup_DB.py` |
 | `relance_variable` | Table InnoDB | `Relance_Config.py` (Page & DB) | `Relance_Config.py`, `relance_mailer.py`, `Backup_DB.py` |
 | `relance_snippet` | Table InnoDB | `Relance_Snippets.py`, `Relance_Config.py` | `Relance.py`, `Relance_Snippets.py`, `Relance_Config.py`, `Backup_DB.py` |
-| `relance_draft` | Table InnoDB | `Relance.py`, `Relance_Drafts.py` | `Relance_Drafts.py`, `Relance_Config.py` (tracking summary), `Backup_DB.py` |
-| `vw_charge_coproprietaires` | Vue SQL *(ROW_NUMBER)* | `Creation_BDD.py` (`CREATE OR REPLACE VIEW`) | `Dashboard.py`, `Liste_Charge.py`, `Rechercher_Copro.py`, `Alerte.py` |
+| `relance_draft` | Table InnoDB | `Relance.py`, `Relance_Drafts.py`, `relance_views.py` | `Relance_Drafts.py`, `Relance_Config.py` (tracking summary), `Bilan_AG.py`, `relance_views.py`, `Backup_DB.py` |
+| `vw_charge_coproprietaires` | Vue SQL *(ROW_NUMBER)* | `Creation_BDD.py` (`CREATE OR REPLACE VIEW`) | `Dashboard.py`, `Liste_Charge.py`, `Rechercher_Copro.py`, `Alerte.py`, `analytics.py` |
 
 ---
 
@@ -801,6 +810,11 @@ La refonte v2.0 (passage de SQLite local à MariaDB client-serveur) a introduit 
 ## Notes d'architecture & Bonnes pratiques
 
 - **Pool de connexions MariaDB centralisé & Diagnostic fin** : Tout appel à la base transite par `src/cptcopro/Database/connection.py`. Il fournit un pool `DBUtils.PooledDB` avec `ping=1` (test automatique de vivacité évitant les déconnexions `MySQL server has gone away` après inactivité), des context managers sécurisés avec rollback sur exception, un mécanisme de réessai exponentiel automatique en cas de deadlock (erreur 1213), ainsi qu'une analyse diagnostique précise (`_diagnose_db_error`) levant l'exception explicite `DatabaseConnectionError` en cas d'inaccessibilité (erreur 2003, 1045, 1049 ou timeout).
+- **Centralisation analytique & Balance âgée continue (`analytics.py`)** : Le calcul des balances âgées est unifié dans `compute_aging_balance()` pour l'ensemble des pages Streamlit (`Dashboard`, `Statistiques_Avancees`, `Bilan_AG`, `Rechercher_Copro`). Il applique un découpage strict en 4 tranches temporelles continues (`< 30 j`, `30-60 j`, `60-90 j`, `> 90 j`), ordonnées avec code couleur normalisé. Le module centralise également le chargement mis en cache (`load_charges_dataset`), le statut consolidé des relances (`load_relance_status_map`) et l'état de santé du système (`load_system_health`).
+- **Composants d'interface modulaires partagés (`relance_views.py`)** : Découplage de la logique de présentation des relances entre la gestion des brouillons avec sélection en masse (`render_drafts_management`), le tableau de suivi chronologique du recouvrement (`render_tracking_dashboard`), l'historique complet des envois (`render_history_log`) et la modale de confirmation de suppression (`dialog_confirmer_suppression_brouillons`).
+- **Synchronisation Extranet intégrée 1-clic (`dialog_sync_extranet`)** : Déclenchement de la collecte Playwright (mode headless ou visible) directement depuis la barre latérale Streamlit avec streaming visuel en temps réel des 4 étapes (Lots, Charges, Contrôle d'intégrité, Sauvegarde BDD et dump pCloud) sans interrompre la session utilisateur.
+- **Immunité aux doublons de colonnes PyArrow** : Traitement préventif et systématique contre les collisions d'index de colonnes (`df.loc[:, ~df.columns.duplicated()]`) et normalisation stricte des types de données avant transmission aux composants Streamlit natifs (`st.dataframe`, `st.data_editor`), garantissant l'absence de plantage `ValueError: Duplicate column names found`.
+- **Confidentialité et conformité RGPD intégrée (`privacy.py`)** : Double niveau de contrôle de l'anonymisation dans l'interface (toggle persistant dans la barre latérale et badge cliquable d'en-tête), masquant instantanément les patronymes, montants sensibles et codes copropriétaires dans tous les tableaux et graphiques interactifs.
 - **Dualité d'ingestion (CLI interactive vs n8n headless)** : Le projet supporte deux modes d'ingestion complémentaires :
   - *Mode CLI (`main.py`)* : Orchestration locale complète avec parsing Selectolax, vérifications d'intégrité, sauvegarde pCloud immédiate et lancement optionnel de l'interface Streamlit.
   - *Mode Orchestration Continue (`n8n`)* : Workflow Docker autonome programmé sur un cron, parallélisant les flux Playwright sous Browserless avec auto-retry (3 tentatives, 1 minute d'intervalle) et escalade d'alerte Telegram.
